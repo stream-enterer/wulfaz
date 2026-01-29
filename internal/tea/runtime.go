@@ -7,8 +7,9 @@ type Runtime struct {
 func NewRuntime(seed int64) *Runtime {
 	return &Runtime{
 		model: Model{
-			Phase: PhaseMenu,
-			Seed:  seed,
+			Version: 1,
+			Phase:   PhaseMenu,
+			Seed:    seed,
 		},
 	}
 }
@@ -18,6 +19,14 @@ func (r *Runtime) Run() {
 }
 
 func (r *Runtime) Dispatch(msg Msg) {
+	// Unpack batched messages first
+	if batch, ok := msg.(BatchedMsgs); ok {
+		for _, m := range batch.Msgs {
+			r.Dispatch(m)
+		}
+		return
+	}
+
 	var cmd Cmd
 	r.model, cmd = r.model.Update(msg)
 	if cmd != nil {

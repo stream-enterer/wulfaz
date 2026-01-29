@@ -13,9 +13,10 @@ const (
 )
 
 type Model struct {
-	Phase  GamePhase
-	Combat model.CombatModel
-	Seed   int64
+	Version int
+	Phase   GamePhase
+	Combat  model.CombatModel
+	Seed    int64
 }
 
 func (m Model) Update(msg Msg) (Model, Cmd) {

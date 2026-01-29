@@ -34,3 +34,8 @@ func (PlayerResumed) isMsg() {}
 type PlayerQuit struct{}
 
 func (PlayerQuit) isMsg() {}
+
+// BatchedMsgs wraps multiple messages for batch command execution
+type BatchedMsgs struct{ Msgs []Msg }
+
+func (BatchedMsgs) isMsg() {}

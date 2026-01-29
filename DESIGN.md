@@ -239,6 +239,8 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 
 This enables: full replay, turn-level undo, time-travel debugging, deterministic tests.
 
+**Runtime dispatch:** Recursive (implicit policy) vs queue (explicit policy) — kept recursive for MVP simplicity.
+
 ---
 
 ## MVP Scope
