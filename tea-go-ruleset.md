@@ -227,6 +227,102 @@ func Every(d time.Duration, msgFn func(time.Time) Msg) Sub {
 
 ---
 
+### 1.5 Effect Chains (Task Pattern)
+
+When effects must execute sequentially (e.g., load file → parse → initialize), use intermediate Msgs to chain them. Each step is a Msg; the state machine is explicit in Update.
+
+**Pattern:**
+```go
+// Step 1: User initiates
+case LoadGameRequested:
+    m.Loading = true
+    return m, LoadSaveFile(msg.Path)
+
+// Step 2: File loaded, now parse
+case SaveFileLoaded:
+    return m, ParseSaveData(msg.Data)
+
+// Step 3: Parsed, now initialize game state
+case SaveDataParsed:
+    m.Loading = false
+    m.GameState = msg.GameState
+    return m, InitializeSystems(m.GameState)
+
+// Step 4: Ready
+case SystemsInitialized:
+    m.Ready = true
+    return m, nil
+
+// Error at any step
+case LoadFailed:
+    m.Loading = false
+    m.Error = msg.Err
+    return m, nil
+```
+
+**Rules:**
+- Each step returns a Cmd that produces the next Msg.
+- Each intermediate state is inspectable (debugging, save/load).
+- Errors are just another Msg type — handle explicitly.
+- No hidden continuations or callbacks.
+
+**Game example — Attack resolution:**
+```go
+// Player declares attack
+case AttackDeclared:
+    m.Phase = PhaseResolvingAttack
+    m.PendingAttack = msg
+    return m, RollToHit(msg.Attacker, msg.Target, msg.Weapon)
+
+// To-hit resolved
+case ToHitRolled:
+    if !msg.Hit {
+        m.Phase = PhaseAwaitingInput
+        m.Log = append(m.Log, "Attack missed")
+        return m, nil
+    }
+    return m, RollHitLocation(msg.Target)
+
+// Location determined
+case HitLocationRolled:
+    return m, ApplyDamage(msg.Target, msg.Location, m.PendingAttack.Weapon.Damage)
+
+// Damage applied, check criticals
+case DamageApplied:
+    m.Mechs = msg.UpdatedMechs
+    if msg.CriticalsPossible {
+        return m, RollCriticals(msg.Target, msg.Location)
+    }
+    m.Phase = PhaseAwaitingInput
+    return m, nil
+
+// And so on...
+```
+
+**Benefits:**
+- Full replay: save the Msg sequence, replay for debugging.
+- Time-travel: step backward/forward through attack resolution.
+- Testable: unit test each transition independently.
+- Interruptible: user can save mid-resolution if needed.
+
+**Violations:**
+```go
+// WRONG: Chaining via callbacks in Cmd
+func AttackCmd(attacker, target, weapon) Cmd {
+    return func() Msg {
+        hit := rollToHit(...)
+        if hit {
+            loc := rollLocation(...)  // Hidden state machine
+            dmg := applyDamage(...)   // No intermediate Msgs
+            ...
+        }
+        return AttackComplete{...}  // Loses all intermediate state
+    }
+}
+```
+
+---
+
 ## 2. Core Functions
 
 ### 2.1 Init
@@ -444,9 +540,127 @@ func Run(init func(Flags) (Model, Cmd), update func(Msg, Model) (Model, Cmd), vi
 
 ---
 
-## 4. Composition Rules
+## 4. Game Loop Integration
 
-### 4.1 The Anti-Component Rule
+TEA's runtime must integrate with a game loop. For turn-based games, use an event-driven approach. For real-time elements (animations, transitions), use a hybrid model.
+
+### 4.1 Event-Driven Loop (Turn-Based)
+
+For turn-based games like Battletech, the loop blocks until player input:
+
+```go
+func Run(model Model) {
+    for {
+        render(model.View())
+
+        msg := waitForInput()  // Blocks until player acts
+        var cmd Cmd
+        model, cmd = model.Update(msg)
+
+        // Execute command, feed resulting Msgs back
+        for cmd != nil {
+            resultMsg := cmd()
+            if resultMsg == nil {
+                break
+            }
+            model, cmd = model.Update(resultMsg)
+        }
+    }
+}
+```
+
+**Rules:**
+- Game logic advances ONLY on player input or Cmd completion.
+- No continuous ticking. No delta time.
+- Each Msg produces a new Model; chain until quiescent.
+
+### 4.2 Hybrid Loop (Animations + Turn-Based Logic)
+
+When you need smooth animations but discrete game logic:
+
+```go
+func Run(model Model) {
+    msgs := make(chan Msg, 256)
+
+    // Animation ticker (variable rate, cosmetic only)
+    go func() {
+        for range time.Tick(16 * time.Millisecond) {  // ~60fps
+            msgs <- AnimationTickMsg{}
+        }
+    }()
+
+    for {
+        render(model.View())
+
+        msg := <-msgs
+        var cmd Cmd
+        model, cmd = model.Update(msg)
+
+        if cmd != nil {
+            go func(c Cmd) {
+                if m := c(); m != nil {
+                    msgs <- m
+                }
+            }(cmd)
+        }
+    }
+}
+```
+
+**Rules:**
+- `AnimationTickMsg` updates cosmetic state (sprite positions, particles).
+- Core game logic still advances only on player actions.
+- Animation state lives in Model but doesn't affect game rules.
+
+### 4.3 Fixed Timestep (Real-Time Simulation)
+
+For games with physics or real-time simulation:
+
+```go
+const tickRate = 60
+const tickDuration = time.Second / tickRate
+
+func Run(model Model) {
+    msgs := make(chan Msg, 256)
+    var accumulator time.Duration
+    lastTime := time.Now()
+
+    // Fixed logic tick
+    go func() {
+        for range time.Tick(tickDuration) {
+            msgs <- TickMsg{}
+        }
+    }()
+
+    for {
+        // Interpolated render (alpha = accumulator / tickDuration)
+        render(model.View())
+
+        msg := <-msgs
+        model, _ = model.Update(msg)
+    }
+}
+```
+
+**Rules:**
+- `TickMsg` arrives at fixed rate (e.g., 60Hz).
+- View may interpolate between states for smooth rendering.
+- Deterministic: same Msg sequence → same result.
+
+### 4.4 Choosing Your Loop
+
+| Game Type | Loop Style | Tick Source |
+|-----------|------------|-------------|
+| Turn-based (Battletech, Chess) | Event-driven | Player input only |
+| Turn-based + animations | Hybrid | Input + animation ticker |
+| Real-time (platformer, RTS) | Fixed timestep | Fixed timer + input |
+| Physics-heavy | Fixed timestep | Fixed timer (120Hz+) |
+
+---
+
+## 5. Composition Rules
+
+### 5.1 The Anti-Component Rule
 
 **DO NOT create nested Model/Update/Msg triplets by default.**
 
@@ -465,7 +679,7 @@ func viewUserCard(user User) string {
 }
 ```
 
-### 4.2 When Nested TEA Is Acceptable
+### 5.2 When Nested TEA Is Acceptable
 
 Only when a widget has **internal view state that no other part of the app cares about**:
 - Date picker with open/closed state
@@ -499,7 +713,7 @@ func (m AppModel) Update(msg Msg) (AppModel, Cmd) {
 }
 ```
 
-### 4.3 Opaque State Pattern
+### 5.3 Opaque State Pattern
 
 For reusable widgets, expose opaque types:
 ```go
@@ -523,11 +737,18 @@ func (m Model) View() string { ... }
 
 ---
 
-## 5. Immutability Discipline
+## 6. Immutability Discipline
 
-Go does not enforce immutability. You must.
+Go does not enforce immutability. You must. Strict immutability is not optional — it enables the entire TEA value proposition.
 
-### 5.1 Value Receivers Only for Model Methods
+**What strict immutability gives you:**
+- **Time-travel debugging**: Step backward/forward through any game state.
+- **Undo/redo for free**: Previous Model is still valid; just swap it back.
+- **Replay**: Save a Msg sequence, replay to reproduce any bug.
+- **Save/load trivial**: `json.Marshal(model)` — done.
+- **Fearless refactoring**: No hidden mutation means no hidden bugs.
+
+### 6.1 Value Receivers Only for Model Methods
 
 ```go
 // CORRECT
@@ -540,7 +761,7 @@ func (m *Model) Update(msg Msg) (Model, Cmd) { ... }
 
 **Why:** Value receiver copies the Model. Modifications affect the copy, preserving the original. This makes Update naturally pure.
 
-### 5.2 Return Modified Copies
+### 6.2 Return Modified Copies
 
 ```go
 func (m Model) Update(msg Msg) (Model, Cmd) {
@@ -556,7 +777,7 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 }
 ```
 
-### 5.3 Deep Copy Reference Types
+### 6.3 Deep Copy Reference Types
 
 Slices, maps, and pointers in Model require explicit copying:
 ```go
@@ -575,27 +796,35 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 }
 ```
 
-### 5.4 No Pointers in Model (Usually)
+### 6.4 No Pointers in Model
 
 ```go
-// Prefer this
+// CORRECT: value types
 type Model struct {
-    User User  // value
+    User   User      // value
+    Mechs  []Mech    // slice of values
+    Map    HexMap    // value
 }
 
-// Avoid this
+// WRONG: pointers break immutability guarantees
 type Model struct {
-    User *User  // pointer — shared state risk
+    User  *User      // NO — shared state risk
+    World *ecs.World // NO — mutation hidden from TEA
 }
 ```
 
-**Exception:** Large structs where copying is expensive. In that case, treat the pointer as immutable — never modify what it points to, always replace with a new pointer.
+**No exceptions for turn-based games.** With entity counts in the dozens (not thousands), copying is trivially cheap. The debugging benefits far outweigh any micro-optimization.
+
+**If you think you need pointers**, you're either:
+1. Prematurely optimizing (profile first).
+2. Building a real-time simulation (different ruleset needed).
+3. Fighting the architecture (reconsider your data layout).
 
 ---
 
-## 6. Package Organization
+## 7. Package Organization
 
-### 6.1 Single Module for Small Apps
+### 7.1 Single Module for Small Apps
 
 ```
 myapp/
@@ -607,7 +836,7 @@ myapp/
 └── sub.go       // Sub constructors (subscriptions)
 ```
 
-### 6.2 Feature Modules for Large Apps
+### 7.2 Feature Modules for Large Apps
 
 ```
 myapp/
@@ -630,7 +859,7 @@ myapp/
     └── time.go
 ```
 
-### 6.3 Rules
+### 7.3 Rules
 
 - **DO NOT** create `models/`, `views/`, `updates/` packages.
 - **DO** organize by domain concept, not by TEA role.
@@ -639,9 +868,9 @@ myapp/
 
 ---
 
-## 7. Testing
+## 8. Testing
 
-### 7.1 Update is Trivially Testable
+### 8.1 Update is Trivially Testable
 
 ```go
 func TestUpdate_Increment(t *testing.T) {
@@ -659,7 +888,7 @@ func TestUpdate_Increment(t *testing.T) {
 }
 ```
 
-### 7.2 Test Cmd Factories Separately
+### 8.2 Test Cmd Factories Separately
 
 ```go
 func TestFetch_Success(t *testing.T) {
@@ -681,7 +910,7 @@ func TestFetch_Success(t *testing.T) {
 }
 ```
 
-### 7.3 Test Sequences
+### 8.3 Test Sequences
 
 ```go
 func TestCounterFlow(t *testing.T) {
@@ -698,7 +927,7 @@ func TestCounterFlow(t *testing.T) {
 }
 ```
 
-### 7.4 Property-Based Testing
+### 8.4 Property-Based Testing
 
 Because Update is pure, it's ideal for property testing:
 ```go
@@ -715,7 +944,9 @@ func TestUpdate_NeverPanics(t *testing.T) {
 
 ---
 
-## 8. Checklist
+## 9. Checklist
+
+### 9.1 Core TEA
 
 Before shipping, verify:
 
@@ -730,9 +961,31 @@ Before shipping, verify:
 - [ ] Msg types are named as past-tense events
 - [ ] Nested TEA used only for isolated view-state widgets
 
+### 9.2 Strict Immutability
+
+- [ ] No pointers in Model (no `*T` fields)
+- [ ] No ECS world or mutable subsystems in Model
+- [ ] `json.Marshal(model)` works without custom serializers
+- [ ] Undo/redo works by swapping Model values
+- [ ] Replay works by replaying Msg sequence from Init
+
+### 9.3 Game Loop
+
+- [ ] Game logic advances only on explicit Msgs (player input, Cmd result)
+- [ ] No continuous ticking unless required (animations, real-time)
+- [ ] Loop style matches game type (event-driven for turn-based)
+
+### 9.4 Effect Chains
+
+- [ ] Sequential effects use Task Pattern (intermediate Msgs)
+- [ ] No hidden state machines inside Cmds
+- [ ] Each effect step is a separate Msg type
+- [ ] Error cases are explicit Msg types (not panics)
+- [ ] Any multi-step sequence can be interrupted/resumed
+
 ---
 
-## 9. Quick Reference
+## 10. Quick Reference
 
 ```go
 // === TYPES ===
@@ -751,19 +1004,32 @@ func (m Model) Subscriptions() Sub
 func None() Cmd                    // No effect
 func Batch(cmds ...Cmd) Cmd        // Combine (unordered!)
 
-// === THE LOOP (runtime owns this) ===
-// model, cmd := Init(flags)
+// === EFFECT CHAINS (Task Pattern) ===
+// Step 1: User triggers action
+// case ActionRequested: return m, DoFirstThing()
+//
+// Step 2: First thing done, do second
+// case FirstThingDone: return m, DoSecondThing(msg.Result)
+//
+// Step 3: Complete
+// case SecondThingDone: m.Done = true; return m, nil
+
+// === TURN-BASED LOOP (runtime owns this) ===
+// model, _ := Init(flags)
 // for {
 //     render(model.View())
-//     msg := <- inputOrCmd
+//     msg := waitForInput()  // BLOCKS
 //     model, cmd = model.Update(msg)
-//     go execute(cmd)
+//     for cmd != nil {
+//         msg = cmd()
+//         model, cmd = model.Update(msg)
+//     }
 // }
 ```
 
 ---
 
-## 10. Bubbletea Compatibility
+## 11. Bubbletea Compatibility
 
 If using [Bubbletea](https://github.com/charmbracelet/bubbletea), the interface is:
 

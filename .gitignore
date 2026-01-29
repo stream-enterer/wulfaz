@@ -1,0 +1,36 @@
+# Dotfiles
+.bash_profile
+.bashrc
+.gitconfig
+.gitmodules
+.idea
+.mcp.json
+.profile
+.ripgreprc
+.vscode
+.zprofile
+.zshrc
+
+# Claude
+.claude/
+
+# Generated images
+*.png
+*.jpg
+!website/public/**/*.png
+!website/public/**/*.jpg
+!ascii-renderer/examples/*.png
+
+# Node
+node_modules/
+.next/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Lock files in subprojects
+website/package-lock.json
+ascii-renderer/uv.lock
