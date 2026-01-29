@@ -1524,3 +1524,177 @@ item:
 ### UI (deferred)
 7. UI layout and information density
 8. Pseudoterminal rendering details
+
+---
+
+## Implementation Scope
+
+### System Invariants: MVP vs Full
+
+| Invariant | MVP | Full | Notes |
+|-----------|-----|------|-------|
+| 1. ValueRef cycles | DEFER | ✓ | MVP uses static values mostly |
+| 2. Scope snapshot | DEFER | ✓ | MVP has simple 1-2 effect triggers |
+| 3. Null handling | SIMPLE | ✓ | Just skip + log |
+| 4. Sequential effects | DEFER | ✓ | MVP has simple triggers |
+| 5. Tie-breaker | DEFER | ✓ | Few items, won't collide |
+| 6. Model layers | SIMPLE | ✓ | Just Combat model, no Meta/Run split |
+| 7. Event cancellation | CUT | ✓ | No on_incoming_X needed |
+| 8. Dynamic abilities | CUT | ✓ | No runtime ability creation |
+| 9. Template immutability | TRIVIAL | ✓ | Just don't write the effect |
+| 10. Entity boundaries | TRIVIAL | ✓ | Just don't write transmutation |
+| 11. Limits | TRIVIAL | ✓ | Hardcode constants |
+| 12. Error handling | SIMPLE | ✓ | Log, skip corruption tracking |
+
+**MVP implements skeleton. Invariants added as complexity demands.**
+
+---
+
+## Directory Structure
+
+### MVP (~15 files)
+
+```
+wulfaz/
+├── cmd/
+│   └── wulfaz/
+│       └── main.go                 # Entry point
+│
+├── internal/
+│   ├── tea/                        # TEA runtime
+│   │   ├── runtime.go              # Main loop, Msg dispatch
+│   │   ├── model.go                # Top-level Model
+│   │   └── msg.go                  # Msg interface
+│   │
+│   ├── model/
+│   │   └── combat.go               # Combat state (only layer for MVP)
+│   │
+│   ├── entity/                     # Core entities
+│   │   ├── unit.go
+│   │   ├── part.go
+│   │   ├── mount.go
+│   │   ├── item.go
+│   │   └── pilot.go                # STUB: just name + id
+│   │
+│   ├── core/                       # Foundation types
+│   │   ├── tag.go
+│   │   ├── attribute.go            # Simple, no fancy modifiers
+│   │   ├── trigger.go
+│   │   ├── condition.go            # Leaf conditions only, no AND/OR
+│   │   └── limits.go               # const block
+│   │
+│   ├── eval/
+│   │   └── valueref.go             # Static values only for MVP
+│   │
+│   ├── event/
+│   │   └── dispatch.go             # Simple trigger firing
+│   │
+│   ├── effect/
+│   │   └── handler.go              # deal_damage, modify_attribute only
+│   │
+│   └── template/
+│       ├── loader.go               # YAML loading
+│       └── registry.go             # Template storage
+│
+├── data/
+│   └── templates/
+│       ├── units/
+│       │   ├── small_mech.yaml
+│       │   ├── medium_mech.yaml
+│       │   └── large_mech.yaml
+│       ├── items/
+│       │   ├── medium_laser.yaml
+│       │   ├── ac10.yaml
+│       │   └── lrm5.yaml
+│       └── pilots/
+│           └── stub_pilot.yaml
+│
+├── ui/
+│   └── renderer/
+│       └── stub.go                 # Minimal rendering
+│
+├── go.mod
+├── roguelike-design.md
+└── tea-go-ruleset.md
+```
+
+### Full Structure (post-MVP)
+
+```
+internal/
+├── tea/
+│   ├── runtime.go
+│   ├── model.go
+│   └── msg.go
+│
+├── model/
+│   ├── meta.go                     # POST-MVP: cross-run
+│   ├── run.go                      # POST-MVP: within-run
+│   └── combat.go
+│
+├── entity/
+│   ├── unit.go
+│   ├── part.go
+│   ├── mount.go
+│   ├── item.go
+│   ├── pilot.go
+│   └── trait.go                    # POST-MVP
+│
+├── core/
+│   ├── tag.go
+│   ├── attribute.go
+│   ├── modifier.go                 # POST-MVP: full stacking logic
+│   ├── trigger.go
+│   ├── condition.go                # POST-MVP: AND/OR/NOT trees
+│   ├── ability.go                  # POST-MVP
+│   ├── requirement.go              # POST-MVP
+│   ├── valueref.go                 # Move here from eval/
+│   └── limits.go
+│
+├── eval/
+│   ├── condition.go                # POST-MVP: bool tree evaluation
+│   ├── valueref.go                 # POST-MVP: cycle detection, expressions
+│   ├── modifier.go                 # POST-MVP: stack_group logic
+│   └── context.go                  # POST-MVP: snapshot semantics
+│
+├── event/
+│   ├── registry.go                 # POST-MVP
+│   ├── dispatch.go
+│   ├── cascade.go                  # POST-MVP: depth tracking
+│   └── intercept.go                # POST-MVP: on_incoming_X
+│
+├── effect/
+│   ├── registry.go                 # POST-MVP
+│   ├── handler.go
+│   ├── damage.go                   # POST-MVP: split out
+│   ├── attribute.go                # POST-MVP: split out
+│   ├── spawn.go                    # POST-MVP
+│   ├── transfer.go                 # POST-MVP
+│   ├── destroy.go                  # POST-MVP
+│   └── ability.go                  # POST-MVP: add_ability
+│
+├── combat/
+│   ├── tick.go                     # POST-MVP
+│   ├── targeting.go                # POST-MVP
+│   ├── ai.go                       # POST-MVP
+│   └── resolution.go               # POST-MVP
+│
+├── template/
+│   ├── loader.go
+│   ├── registry.go
+│   ├── instantiate.go              # POST-MVP
+│   └── validate.go                 # POST-MVP
+│
+├── save/
+│   ├── json.go                     # POST-MVP
+│   ├── snapshot.go                 # POST-MVP
+│   └── replay.go                   # POST-MVP
+│
+├── debug/
+│   ├── log.go                      # POST-MVP
+│   ├── corruption.go               # POST-MVP
+│   └── timewarp.go                 # POST-MVP
+│
+└── pkg/
+    └── rng/
+        └── seeded.go               # POST-MVP (use stdlib for MVP)
