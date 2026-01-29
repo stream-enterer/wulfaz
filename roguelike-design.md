@@ -484,9 +484,10 @@ MODIFIER
 
 TRIGGER
   - event: string (open, registry-validated)
-  - conditions: []Condition (optional, all must pass)
+  - conditions: []Condition (optional, must pass for trigger to fire)
   - effect: string (open, registry-validated)
   - params: map[string]any
+  - priority: int (optional, default 0, lower = earlier in cascade)
 
 CONDITION (supports boolean trees)
   - Leaf: { type: string, params: map }
@@ -502,6 +503,12 @@ PROVIDED_MODIFIER (modifiers an item/trait grants when active)
   - operation: string
   - value: int
   - stack_group: string | null
+  - conditions: []Condition (optional, modifier only active when conditions pass)
+
+REQUIREMENT (dependencies an item needs to function)
+  - scope: "unit" | "part" | "adjacent" | "mount"
+  - condition: Condition
+  - on_unmet: "disabled" | "cannot_mount" | "warning"
 ```
 
 ### Structural Hierarchy
@@ -541,7 +548,8 @@ ITEM
 ├── tags: []Tag
 ├── attributes: map[string]Attribute
 ├── triggers: []Trigger
-└── provides: []ProvidedModifier
+├── provides: []ProvidedModifier
+└── requires: []Requirement (optional, dependencies to function)
 
 PILOT
 ├── id, name
@@ -636,6 +644,91 @@ conditions:
 # Means: enemy AND (health >= 50 OR is_boss)
 ```
 
+### Target Context
+
+Standard context variables available in conditions and effects:
+
+| Variable | Description |
+|----------|-------------|
+| `self` | The entity owning the trigger/modifier (item, part, unit) |
+| `target` | The entity being affected by an effect |
+| `source` | The entity that caused the event (e.g., attacker) |
+| `unit` | The unit containing `self` |
+| `part` | The part containing `self` (if self is an item) |
+| `mount` | The mount containing `self` (if self is an item) |
+| `combat` | The current combat state (for cross-unit queries) |
+
+**Cross-unit targeting:**
+
+```yaml
+# Aura that buffs adjacent friendly units (not parts — units in combat row)
+provides:
+  - scope: adjacent_unit  # different from "adjacent" which means adjacent parts
+    scope_filter: [friendly]
+    attribute: evasion
+    operation: add
+    value: 1
+```
+
+### Condition Type Registry
+
+Core condition types (extensible):
+
+| Type | Params | Description |
+|------|--------|-------------|
+| `has_tag` | `target`, `tag` | Target has specified tag |
+| `attr_gte` | `target`, `attr`, `value` | Attribute >= value |
+| `attr_lte` | `target`, `attr`, `value` | Attribute <= value |
+| `attr_eq` | `target`, `attr`, `value` | Attribute == value |
+| `has_item_with_tag` | `scope`, `tag` | Scope contains item with tag |
+| `mount_has_item` | `mount_id` | Specific mount has item |
+| `is_adjacent_to` | `target`, `tag` | Target is adjacent to entity with tag |
+| `roll_under` | `target`, `attr` | Random roll < attribute value (for % chances) |
+| `in_combat` | — | Currently in combat phase |
+
+**Target parameter values:** `self`, `target`, `source`, `unit`, `part`
+
+### Item Dependencies
+
+Items can declare requirements to function:
+
+```yaml
+item:
+  id: ac10
+  tags: [weapon, ballistic, autocannon]
+  attributes:
+    size: { base: 7 }
+    damage: { base: 10 }
+  requires:
+    - scope: unit
+      condition: { type: has_item_with_tag, params: { scope: unit, tag: ac_ammo } }
+      on_unmet: disabled  # weapon can't fire without ammo
+```
+
+**on_unmet behaviors:**
+- `disabled` — Item exists but can't activate (weapon won't fire)
+- `cannot_mount` — Item can't be placed in mount until requirement met
+- `warning` — UI warning, but item still functions
+
+### Conditional Modifiers
+
+Modifiers can have activation conditions:
+
+```yaml
+# Bonus damage only when heat is low
+item:
+  id: cryo_cannon
+  provides:
+    - scope: self
+      attribute: damage
+      operation: add
+      value: 5
+      conditions:
+        - { type: attr_lte, params: { target: unit, attr: heat, value: 30 } }
+```
+
+When conditions aren't met, the modifier is inactive (not applied to attribute calculation).
+
 ### Event & Effect System
 
 **Events and effects are open strings, validated against extensible registry.**
@@ -649,6 +742,37 @@ Events:
 - (extensible)
 
 **Effects generate Msgs → maintains TEA purity.**
+
+### Event Cascade Order
+
+When an event triggers effects that cause more events, resolution order is:
+
+```
+1. Event occurs (e.g., part structure reaches 0)
+2. Collect all triggers listening for this event
+3. Evaluate trigger conditions, filter to active triggers
+4. Sort by priority (default 0, lower = earlier)
+5. Execute effects in order, each generating Msgs
+6. Process generated Msgs through Update
+7. If Msgs cause new events, repeat from step 1
+
+Cascade depth limit: 10 (prevents infinite loops)
+```
+
+**Priority field (optional):**
+
+```yaml
+triggers:
+  - event: on_destroyed
+    priority: -10  # runs before default triggers
+    effect: eject_pilot
+  - event: on_destroyed
+    priority: 0    # default
+    effect: cascade
+    params: { target: mount_contents, event: on_destroyed }
+```
+
+**Determinism:** Same event + same model state = same cascade order (sorted by priority, then by entity ID for ties).
 
 ### Example Definitions
 
@@ -688,7 +812,7 @@ part:
       capacity_attr: hands_required
 ```
 
-**Autocannon:**
+**Autocannon (with ammo dependency):**
 ```yaml
 item:
   id: ac10
@@ -697,6 +821,10 @@ item:
     size: { base: 7 }
     damage: { base: 10 }
     cooldown: { base: 3 }
+  requires:
+    - scope: unit
+      condition: { type: has_item_with_tag, params: { scope: unit, tag: ac_ammo } }
+      on_unmet: disabled
 ```
 
 **Ammo with explosion risk:**
@@ -730,6 +858,40 @@ item:
       stack_group: null
 ```
 
+**Targeting Computer (conditional modifier):**
+```yaml
+item:
+  id: targeting_computer
+  tags: [equipment, sensor, internal]
+  attributes:
+    size: { base: 2 }
+  provides:
+    - scope: unit
+      scope_filter: [weapon]  # only affects weapons
+      attribute: accuracy
+      operation: add
+      value: 2
+      conditions:
+        - { type: attr_lte, params: { target: unit, attr: heat, value: 50 } }
+      # Bonus only when heat is manageable
+```
+
+**Command Module (cross-unit aura):**
+```yaml
+item:
+  id: command_module
+  tags: [equipment, command, support]
+  attributes:
+    size: { base: 4 }
+  provides:
+    - scope: adjacent_unit
+      scope_filter: [friendly]
+      attribute: initiative
+      operation: add
+      value: 1
+      stack_group: command_aura  # only one command bonus per unit
+```
+
 ---
 
 ## Open Design Questions
@@ -739,6 +901,10 @@ item:
 - ~~Modifier stacking~~ → stack_group field
 - ~~Condition logic~~ → AND/OR/NOT boolean trees
 - ~~Multi-mount items~~ → mounts_required attribute
+- ~~Item dependencies~~ → requires field with conditions
+- ~~Conditional modifiers~~ → conditions field on ProvidedModifier
+- ~~Target context~~ → Standard context variables (self, target, source, unit, part, mount, combat)
+- ~~Event cascade order~~ → Priority-based, deterministic, depth-limited
 
 ### Content (deferred to implementation)
 1. Exact combat width numbers (how many total slots?)
