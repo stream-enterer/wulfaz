@@ -1,0 +1,14 @@
+item id="medium_laser" {
+    tags "weapon" "energy" "laser"
+    attributes {
+        attribute name="size" base=1
+        attribute name="damage" base=5
+        attribute name="heat" base=3
+        attribute name="cooldown" base=2
+    }
+    triggers {
+        trigger event="on_combat_tick" effect_name="deal_damage" {
+            params damage=5 target="enemy"
+        }
+    }
+}

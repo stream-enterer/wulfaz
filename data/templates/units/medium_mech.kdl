@@ -1,0 +1,17 @@
+unit id="medium_mech" {
+    tags "mech" "medium"
+    attributes {
+        attribute name="combat_width" base=2
+    }
+    parts {
+        part id="left_arm" template_id="mech_arm" {
+            tags "arm" "left"
+        }
+        part id="right_arm" template_id="mech_arm" {
+            tags "arm" "right"
+        }
+        part id="torso" template_id="mech_torso" {
+            tags "torso" "center"
+        }
+    }
+}
