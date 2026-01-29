@@ -364,6 +364,7 @@ Repeat until: cash out at objective OR death
 - **Architecture:** TEA (The Elm Architecture) in Go
 - **Reference:** See `tea-go-ruleset.md`
 - **Platform:** Desktop GUI
+- **Data Format:** KDL 1.0 for templates (via github.com/sblinch/kdl-go)
 - **Rendering:** Hybrid (2D engine + pseudoterminal layer)
   - Full 2D engine base for physics and effects
   - Pseudoterminal layered on top for ASCII aesthetic
@@ -611,13 +612,15 @@ TRAIT
 
 Items that require multiple mounts use an attribute, not a tag:
 
-```yaml
-item:
-  id: graviton_artillery
-  tags: [weapon, ballistic, massive]  # "massive" is descriptive only
-  attributes:
-    size: { base: 14 }
-    mounts_required: { base: 2 }  # system checks this
+```kdl
+item {
+  id "graviton_artillery"
+  tags "weapon" "ballistic" "massive"  // "massive" is descriptive only
+  attributes {
+    size base=14
+    mounts_required base=2  // system checks this
+  }
+}
 ```
 
 **Mounting logic:**
@@ -634,20 +637,16 @@ item:
 - Modifiers with same `stack_group` = only highest `value` applies
 - Modifiers with `stack_group: null` = always stack
 
-```yaml
-# Ammo bonus (doesn't stack with other ammo bonuses)
-provides:
-  - attribute: damage
-    operation: add
-    value: 1
-    stack_group: "ammo_damage"  # only one applies
+```kdl
+// Ammo bonus (doesn't stack with other ammo bonuses)
+provides {
+  modifier attribute="damage" operation="add" value=1 stack_group="ammo_damage"  // only one applies
+}
 
-# Heatsink (stacks with other heatsinks)
-provides:
-  - attribute: heat_dissipation
-    operation: add
-    value: 2
-    stack_group: null  # always stacks
+// Heatsink (stacks with other heatsinks)
+provides {
+  modifier attribute="heat_dissipation" operation="add" value=2  // always stacks (no stack_group)
+}
 ```
 
 **Operation order (deterministic):**
@@ -669,21 +668,25 @@ for each MAX: final = min(final, value)  // ceiling
 
 Full boolean expression trees:
 
-```yaml
-# Simple (implicit AND)
-conditions:
-  - { type: has_tag, params: { tag: enemy } }
-  - { type: attr_gte, params: { attr: health, value: 50 } }
+```kdl
+// Simple (implicit AND)
+conditions {
+  condition type="has_tag" { params tag="enemy" }
+  condition type="attr_gte" { params attr="health" value=50 }
+}
 
-# Complex (explicit AND/OR/NOT)
-conditions:
-  - AND:
-      - { type: has_tag, params: { tag: enemy } }
-      - OR:
-          - { type: attr_gte, params: { attr: health, value: 50 } }
-          - { type: has_tag, params: { tag: boss } }
+// Complex (explicit AND/OR/NOT)
+conditions {
+  AND {
+    condition type="has_tag" { params tag="enemy" }
+    OR {
+      condition type="attr_gte" { params attr="health" value=50 }
+      condition type="has_tag" { params tag="boss" }
+    }
+  }
+}
 
-# Means: enemy AND (health >= 50 OR is_boss)
+// Means: enemy AND (health >= 50 OR is_boss)
 ```
 
 ### Target Context
@@ -702,14 +705,14 @@ Standard context variables available in conditions and effects:
 
 **Cross-unit targeting:**
 
-```yaml
-# Aura that buffs adjacent friendly units (not parts — units in combat row)
-provides:
-  - scope: adjacent_unit  # different from "adjacent" which means adjacent parts
-    scope_filter: [friendly]
-    attribute: evasion
-    operation: add
-    value: 1
+```kdl
+// Aura that buffs adjacent friendly units (not parts — units in combat row)
+provides {
+  modifier scope="adjacent_unit" attribute="evasion" operation="add" value=1 {
+    // different from "adjacent" which means adjacent parts
+    scope_filter "friendly"
+  }
+}
 ```
 
 ### Condition Type Registry
@@ -734,17 +737,20 @@ Core condition types (extensible):
 
 Items can declare requirements to function:
 
-```yaml
-item:
-  id: ac10
-  tags: [weapon, ballistic, autocannon]
-  attributes:
-    size: { base: 7 }
-    damage: { base: 10 }
-  requires:
-    - scope: unit
-      condition: { type: has_item_with_tag, params: { scope: unit, tag: ac_ammo } }
-      on_unmet: disabled  # weapon can't fire without ammo
+```kdl
+item {
+  id "ac10"
+  tags "weapon" "ballistic" "autocannon"
+  attributes {
+    size base=7
+    damage base=10
+  }
+  requires {
+    requirement scope="unit" on_unmet="disabled" {  // weapon can't fire without ammo
+      condition type="has_item_with_tag" { params scope="unit" tag="ac_ammo" }
+    }
+  }
+}
 ```
 
 **on_unmet behaviors:**
@@ -756,17 +762,18 @@ item:
 
 Modifiers can have activation conditions:
 
-```yaml
-# Bonus damage only when heat is low
-item:
-  id: cryo_cannon
-  provides:
-    - scope: self
-      attribute: damage
-      operation: add
-      value: 5
-      conditions:
-        - { type: attr_lte, params: { target: unit, attr: heat, value: 30 } }
+```kdl
+// Bonus damage only when heat is low
+item {
+  id "cryo_cannon"
+  provides {
+    modifier scope="self" attribute="damage" operation="add" value=5 {
+      conditions {
+        condition type="attr_lte" { params target="unit" attr="heat" value=30 }
+      }
+    }
+  }
+}
 ```
 
 When conditions aren't met, the modifier is inactive (not applied to attribute calculation).
@@ -803,15 +810,13 @@ Cascade depth limit: 10 (prevents infinite loops)
 
 **Priority field (optional):**
 
-```yaml
-triggers:
-  - event: on_destroyed
-    priority: -10  # runs before default triggers
-    effect: eject_pilot
-  - event: on_destroyed
-    priority: 0    # default
-    effect: cascade
-    params: { target: mount_contents, event: on_destroyed }
+```kdl
+triggers {
+  trigger event="on_destroyed" priority=-10 effect="eject_pilot"  // runs before default triggers
+  trigger event="on_destroyed" priority=0 effect="cascade" {  // default
+    params target="mount_contents" event="on_destroyed"
+  }
+}
 ```
 
 **Determinism:** Same event + same model state = same cascade order (sorted by priority, then by entity ID for ties).
@@ -843,14 +848,19 @@ Evaluation of "self.power" where power refs self.damage which refs self.power:
 
 **Policy:** All scope references are **snapshot at trigger fire**, not at effect execution.
 
-```yaml
-triggers:
-  - event: on_combat_tick
-    effects:
-      - effect: transfer_item          # item moves to enemy
-        params: { item: self, to: random_enemy }
-      - effect: deal_damage
-        params: { target: unit, amount: 5 }  # hits ORIGINAL unit, not new one
+```kdl
+triggers {
+  trigger event="on_combat_tick" {
+    effects {
+      effect "transfer_item" {  // item moves to enemy
+        params item="self" to="random_enemy"
+      }
+      effect "deal_damage" {  // hits ORIGINAL unit, not new one
+        params target="unit" amount=5
+      }
+    }
+  }
+}
 ```
 
 **Context object is immutable once trigger fires:**
@@ -880,17 +890,18 @@ TriggerContext {
 | Invalid path | Log warning, treat as null |
 
 **Fallback syntax:**
-```yaml
-amount: { ref: "event.killed.pilot.skill", default: 0 }
+```kdl
+amount ref="event.killed.pilot.skill" default=0
 ```
 
 **Effect behavior on null target:**
-```yaml
-- effect: deal_damage
-  params:
-    target: { ref: "event.killed.pilot" }  # null
-    amount: 10
-# Effect is SKIPPED (no-op), not error. Logged as: "Skipped deal_damage: null target"
+```kdl
+effect "deal_damage" {
+  params amount=10 {
+    target ref="event.killed.pilot"  // null
+  }
+}
+// Effect is SKIPPED (no-op), not error. Logged as: "Skipped deal_damage: null target"
 ```
 
 #### 4. Effect Chain Semantics: Sequential Mutation
@@ -899,16 +910,21 @@ amount: { ref: "event.killed.pilot.skill", default: 0 }
 
 **Policy:** **Sequential mutation.** Each effect mutates state, next effect sees the mutation.
 
-```yaml
-effects:
-  - effect: set_attribute
-    params: { target: self, attribute: temp, value: 100 }
-  - effect: deal_damage
-    params: { amount: { ref: "self.temp" } }  # sees 100
-  - effect: set_attribute
-    params: { target: self, attribute: temp, value: 0 }
-  - effect: heal
-    params: { amount: { ref: "self.temp" } }  # sees 0
+```kdl
+effects {
+  effect "set_attribute" {
+    params target="self" attribute="temp" value=100
+  }
+  effect "deal_damage" {  // sees 100
+    params { amount ref="self.temp" }
+  }
+  effect "set_attribute" {
+    params target="self" attribute="temp" value=0
+  }
+  effect "heal" {  // sees 0
+    params { amount ref="self.temp" }
+  }
+}
 ```
 
 **Rationale:** Sequential is more intuitive for modders. "Do A, then B, then C."
@@ -973,15 +989,20 @@ COMBAT_MODEL (exists only during combat)
 - Use `run_flags` for cross-combat tracking
 
 **Example: Grudge Keeper**
-```yaml
-item:
-  id: grudge_keeper
-  triggers:
-    - event: on_kill
-      effects:
-        - effect: modify_attribute
-          params: { target: self, attribute: enemies_killed, operation: add, amount: 1 }
-        # enemies_killed persists because item is in RUN_MODEL
+```kdl
+item {
+  id "grudge_keeper"
+  triggers {
+    trigger event="on_kill" {
+      effects {
+        effect "modify_attribute" {
+          params target="self" attribute="enemies_killed" operation="add" amount=1
+        }
+        // enemies_killed persists because item is in RUN_MODEL
+      }
+    }
+  }
+}
 ```
 
 #### 7. Event Cancellation: Supported via Interception
@@ -998,17 +1019,21 @@ on_incoming_death → fires before on_destroyed
 ```
 
 **Cancellation effect:**
-```yaml
-item:
-  id: damage_immunity_field
-  triggers:
-    - event: on_incoming_damage
-      conditions:
-        - { type: attr_lte, params: { target: event.source, attr: damage, value: 10 } }
-      effects:
-        - effect: cancel_event
-        - effect: spawn_visual
-          params: { type: shield_absorb }
+```kdl
+item {
+  id "damage_immunity_field"
+  triggers {
+    trigger event="on_incoming_damage" {
+      conditions {
+        condition type="attr_lte" { params target="event.source" attr="damage" value=10 }
+      }
+      effects {
+        effect "cancel_event"
+        effect "spawn_visual" { params type="shield_absorb" }
+      }
+    }
+  }
+}
 ```
 
 **cancel_event behavior:**
@@ -1024,21 +1049,28 @@ item:
 
 **Policy:** Dynamically created abilities/triggers inherit scope from their creator.
 
-```yaml
-item:
-  id: ability_factory
-  abilities:
-    - id: create_power
-      effects:
-        - effect: add_ability
-          params:
-            target: unit
-            ability:
-              id: generated_blast
-              scope_parent: { ref: "self" }  # REQUIRED: defines what "self" means
-              effects:
-                - effect: deal_damage
-                  params: { amount: { ref: "scope_parent.power" } }  # factory's power
+```kdl
+item {
+  id "ability_factory"
+  abilities {
+    ability id="create_power" {
+      effects {
+        effect "add_ability" {
+          params target="unit" {
+            ability id="generated_blast" {
+              scope_parent ref="self"  // REQUIRED: defines what "self" means
+              effects {
+                effect "deal_damage" {
+                  params { amount ref="scope_parent.power" }  // factory's power
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
 ```
 
 **Rules:**
@@ -1053,14 +1085,16 @@ item:
 
 **Policy:** **Templates are immutable.** Effects can only modify instances.
 
-```yaml
-# This is FORBIDDEN and will error:
-- effect: modify_template  # NO SUCH EFFECT
-  params: { template: "ac10", attribute: damage, value: 999 }
+```kdl
+// This is FORBIDDEN and will error:
+effect "modify_template" {  // NO SUCH EFFECT
+  params template="ac10" attribute="damage" value=999
+}
 
-# This is allowed (modifies instance):
-- effect: modify_base_attribute
-  params: { target: self, attribute: damage, operation: add, amount: 1 }
+// This is allowed (modifies instance):
+effect "modify_base_attribute" {
+  params target="self" attribute="damage" operation="add" amount=1
+}
 ```
 
 **Rationale:** Template mutation would cause chaos — all future spawns would be affected. If you want "upgrade all AC10s", iterate over instances.
@@ -1080,16 +1114,17 @@ item:
 | Part | Unit | ✗ (use spawn_unit instead) |
 
 **Workaround for "item becomes unit":**
-```yaml
-triggers:
-  - event: on_some_condition
-    effects:
-      - effect: spawn_unit
-        params:
-          template: item_transformed_form
-          copy_attributes_from: self  # copies relevant attributes
-      - effect: destroy_item
-        params: { target: self }
+```kdl
+triggers {
+  trigger event="on_some_condition" {
+    effects {
+      effect "spawn_unit" {
+        params template="item_transformed_form" copy_attributes_from="self"  // copies relevant attributes
+      }
+      effect "destroy_item" { params target="self" }
+    }
+  }
+}
 ```
 
 **Rationale:** Type transmutation breaks invariants. Spawn + destroy achieves same result safely.
@@ -1132,357 +1167,391 @@ triggers:
 ### Example Definitions
 
 **Mech Left Arm:**
-```yaml
-part:
-  id: atlas_left_arm
-  tags: [bodypart, arm, left, appendage]
-  attributes:
-    armor: { base: 20 }
-    structure: { base: 12 }
-  connections:
-    adjacent: [left_torso]
-  mounts:
-    - id: weapon_mount
-      accepts: { requires_any: [ballistic, energy, physical] }
-      capacity: 10
-      capacity_attr: size
-  triggers:
-    - event: on_attribute_zero
-      conditions: [{ type: attr_name_is, params: { name: structure } }]
-      effect: cascade
-      params: { target: mount_contents, event: on_destroyed }
+```kdl
+part {
+  id "atlas_left_arm"
+  tags "bodypart" "arm" "left" "appendage"
+  attributes {
+    armor base=20
+    structure base=12
+  }
+  connections {
+    adjacent "left_torso"
+  }
+  mounts {
+    mount id="weapon_mount" capacity=10 capacity_attr="size" {
+      accepts { requires_any "ballistic" "energy" "physical" }
+    }
+  }
+  triggers {
+    trigger event="on_attribute_zero" effect="cascade" {
+      conditions {
+        condition type="attr_name_is" { params name="structure" }
+      }
+      params target="mount_contents" event="on_destroyed"
+    }
+  }
+}
 ```
 
 **Mage Hand (different terminology, same system):**
-```yaml
-part:
-  id: mage_left_hand
-  tags: [bodypart, hand, left]
-  attributes:
-    health: { base: 5 }  # "health" not "structure"
-  mounts:
-    - id: grip
-      accepts: { requires_any: [held, staff, wand, orb] }
-      capacity: 2
-      capacity_attr: hands_required
+```kdl
+part {
+  id "mage_left_hand"
+  tags "bodypart" "hand" "left"
+  attributes {
+    health base=5  // "health" not "structure"
+  }
+  mounts {
+    mount id="grip" capacity=2 capacity_attr="hands_required" {
+      accepts { requires_any "held" "staff" "wand" "orb" }
+    }
+  }
+}
 ```
 
 **Autocannon (with ammo dependency):**
-```yaml
-item:
-  id: ac10
-  tags: [weapon, ballistic, autocannon, ranged]
-  attributes:
-    size: { base: 7 }
-    damage: { base: 10 }
-    cooldown: { base: 3 }
-  requires:
-    - scope: unit
-      condition: { type: has_item_with_tag, params: { scope: unit, tag: ac_ammo } }
-      on_unmet: disabled
+```kdl
+item {
+  id "ac10"
+  tags "weapon" "ballistic" "autocannon" "ranged"
+  attributes {
+    size base=7
+    damage base=10
+    cooldown base=3
+  }
+  requires {
+    requirement scope="unit" on_unmet="disabled" {
+      condition type="has_item_with_tag" { params scope="unit" tag="ac_ammo" }
+    }
+  }
+}
 ```
 
 **Ammo with explosion risk:**
-```yaml
-item:
-  id: ac10_ammo
-  tags: [ammo, ac_ammo, explosive]
-  attributes:
-    size: { base: 1 }
-    shots: { base: 10 }
-  triggers:
-    - event: on_crit
-      effect: deal_damage
-      params: { amount: 20, scope: part, splash: adjacent }
-    - event: on_crit
-      effect: destroy_item
+```kdl
+item {
+  id "ac10_ammo"
+  tags "ammo" "ac_ammo" "explosive"
+  attributes {
+    size base=1
+    shots base=10
+  }
+  triggers {
+    trigger event="on_crit" effect="deal_damage" {
+      params amount=20 scope="part" splash="adjacent"
+    }
+    trigger event="on_crit" effect="destroy_item"
+  }
+}
 ```
 
 **Heatsink (provides modifier):**
-```yaml
-item:
-  id: double_heatsink
-  tags: [equipment, heatsink, internal]
-  attributes:
-    size: { base: 3 }
-  provides:
-    - scope: unit
-      attribute: heat_dissipation
-      operation: add
-      value: 2
-      stack_group: null
+```kdl
+item {
+  id "double_heatsink"
+  tags "equipment" "heatsink" "internal"
+  attributes {
+    size base=3
+  }
+  provides {
+    modifier scope="unit" attribute="heat_dissipation" operation="add" value=2  // always stacks (no stack_group)
+  }
+}
 ```
 
 **Targeting Computer (conditional modifier):**
-```yaml
-item:
-  id: targeting_computer
-  tags: [equipment, sensor, internal]
-  attributes:
-    size: { base: 2 }
-  provides:
-    - scope: unit
-      scope_filter: [weapon]  # only affects weapons
-      attribute: accuracy
-      operation: add
-      value: 2
-      conditions:
-        - { type: attr_lte, params: { target: unit, attr: heat, value: 50 } }
-      # Bonus only when heat is manageable
+```kdl
+item {
+  id "targeting_computer"
+  tags "equipment" "sensor" "internal"
+  attributes {
+    size base=2
+  }
+  provides {
+    modifier scope="unit" attribute="accuracy" operation="add" value=2 {
+      scope_filter "weapon"  // only affects weapons
+      conditions {
+        condition type="attr_lte" { params target="unit" attr="heat" value=50 }
+      }
+      // Bonus only when heat is manageable
+    }
+  }
+}
 ```
 
 **Command Module (cross-unit aura):**
-```yaml
-item:
-  id: command_module
-  tags: [equipment, command, support]
-  attributes:
-    size: { base: 4 }
-  provides:
-    - scope: adjacent_unit
-      scope_filter: [friendly]
-      attribute: initiative
-      operation: add
-      value: 1
-      stack_group: command_aura  # only one command bonus per unit
+```kdl
+item {
+  id "command_module"
+  tags "equipment" "command" "support"
+  attributes {
+    size base=4
+  }
+  provides {
+    modifier scope="adjacent_unit" attribute="initiative" operation="add" value=1 stack_group="command_aura" {
+      scope_filter "friendly"
+      // only one command bonus per unit
+    }
+  }
+}
 ```
 
 ### Active Abilities (Modder-Grade Examples)
 
 **Damage-Storing Shield (absorb → release):**
-```yaml
-item:
-  id: capacitor_shield
-  tags: [equipment, shield, defensive]
-  attributes:
-    size: { base: 3 }
-    stored_damage: { base: 0, max: 100 }
-  triggers:
-    # Passive: absorb blocked damage
-    - event: on_damage_blocked
-      effects:
-        - effect: modify_attribute
-          params:
-            target: self
-            attribute: stored_damage
-            operation: add
-            amount: { ref: "event.damage_blocked" }
-  abilities:
-    # Active: discharge stored damage
-    - id: discharge
-      tags: [attack, special]
-      targeting:
-        type: enemy
-        range: 3
-        count: 1
-      costs:
-        - attribute: stored_damage
-          scope: self
-          amount: { ref: "self.stored_damage" }  # costs all stored
-      effects:
-        - effect: deal_damage
-          params:
-            target: { ref: "ability.target" }
-            amount: { ref: "self.stored_damage" }
-            damage_type: energy
-      cooldown: 0
-      charges: -1
+```kdl
+item {
+  id "capacitor_shield"
+  tags "equipment" "shield" "defensive"
+  attributes {
+    size base=3
+    stored_damage base=0 max=100
+  }
+  triggers {
+    // Passive: absorb blocked damage
+    trigger event="on_damage_blocked" {
+      effects {
+        effect "modify_attribute" {
+          params target="self" attribute="stored_damage" operation="add" {
+            amount ref="event.damage_blocked"
+          }
+        }
+      }
+    }
+  }
+  abilities {
+    // Active: discharge stored damage
+    ability id="discharge" cooldown=0 charges=-1 {
+      tags "attack" "special"
+      targeting type="enemy" range=3 count=1
+      costs {
+        cost attribute="stored_damage" scope="self" {
+          amount ref="self.stored_damage"  // costs all stored
+        }
+      }
+      effects {
+        effect "deal_damage" {
+          params damage_type="energy" {
+            target ref="ability.target"
+            amount ref="self.stored_damage"
+          }
+        }
+      }
+    }
+  }
+}
 ```
 
 **Regeneration Symbiote (spawn new part on death):**
-```yaml
-item:
-  id: regeneration_symbiote
-  tags: [symbiote, biological, internal]
-  attributes:
-    size: { base: 2 }
-    regen_charges: { base: 1 }
-  triggers:
-    - event: on_part_destroyed
-      conditions:
-        - { type: is_parent_part }
-        - { type: attr_gte, params: { target: self, attr: regen_charges, value: 1 } }
-      effects:
-        - effect: modify_attribute
-          params: { target: self, attribute: regen_charges, operation: add, amount: -1 }
-        - effect: spawn_part
-          delay: 3  # takes 3 ticks
-          params:
-            template: regenerated_arm
-            attach_to: unit
-            position: { ref: "event.destroyed_part.position" }
+```kdl
+item {
+  id "regeneration_symbiote"
+  tags "symbiote" "biological" "internal"
+  attributes {
+    size base=2
+    regen_charges base=1
+  }
+  triggers {
+    trigger event="on_part_destroyed" {
+      conditions {
+        condition type="is_parent_part"
+        condition type="attr_gte" { params target="self" attr="regen_charges" value=1 }
+      }
+      effects {
+        effect "modify_attribute" {
+          params target="self" attribute="regen_charges" operation="add" amount=-1
+        }
+        effect "spawn_part" delay=3 {  // takes 3 ticks
+          params template="regenerated_arm" attach_to="unit" {
+            position ref="event.destroyed_part.position"
+          }
+        }
+      }
+    }
+  }
+}
 ```
 
 **Soul-Drinking Weapon (permanent scaling):**
-```yaml
-item:
-  id: soul_drinker
-  tags: [weapon, melee, cursed]
-  attributes:
-    size: { base: 4 }
-    damage: { base: 8 }
-    souls_consumed: { base: 0 }
-  triggers:
-    - event: on_kill
-      conditions:
-        - { type: has_tag, params: { target: event.killed, tag: organic } }
-      effects:
-        - effect: modify_base_attribute  # permanent, not a modifier
-          params:
-            target: self
-            attribute: damage
-            operation: add
-            amount: 1
-        - effect: modify_attribute
-          params:
-            target: self
-            attribute: souls_consumed
-            operation: add
-            amount: 1
-        - effect: spawn_visual
-          params: { type: soul_absorb, at: { ref: "event.killed.position" } }
+```kdl
+item {
+  id "soul_drinker"
+  tags "weapon" "melee" "cursed"
+  attributes {
+    size base=4
+    damage base=8
+    souls_consumed base=0
+  }
+  triggers {
+    trigger event="on_kill" {
+      conditions {
+        condition type="has_tag" { params target="event.killed" tag="organic" }
+      }
+      effects {
+        effect "modify_base_attribute" {  // permanent, not a modifier
+          params target="self" attribute="damage" operation="add" amount=1
+        }
+        effect "modify_attribute" {
+          params target="self" attribute="souls_consumed" operation="add" amount=1
+        }
+        effect "spawn_visual" {
+          params type="soul_absorb" { at ref="event.killed.position" }
+        }
+      }
+    }
+  }
+}
 ```
 
 **Neural Parasite (jump to enemies):**
-```yaml
-item:
-  id: neural_parasite
-  tags: [equipment, parasite, biological]
-  attributes:
-    size: { base: 1 }
-  triggers:
-    # When mounted on enemy, debuff them
-    - event: on_item_mounted
-      conditions:
-        - { type: has_tag, params: { target: unit, tag: enemy } }
-      effects:
-        - effect: apply_modifier
-          params:
-            target: unit
-            attribute: accuracy
-            operation: add
-            amount: -3
-            source: self
-  abilities:
-    # Active: jump to adjacent enemy
-    - id: infest
-      targeting:
-        type: enemy
-        range: 1  # adjacent only
-        filter: [has_open_mount]  # must have valid mount
-      conditions:
-        - { type: in_combat }
-      effects:
-        - effect: transfer_item
-          params:
-            item: self
-            from: { ref: "self.mount" }
-            to: { ref: "ability.target" }
-            mount_filter: [internal]
-      cooldown: 10
-      charges: -1
+```kdl
+item {
+  id "neural_parasite"
+  tags "equipment" "parasite" "biological"
+  attributes {
+    size base=1
+  }
+  triggers {
+    // When mounted on enemy, debuff them
+    trigger event="on_item_mounted" {
+      conditions {
+        condition type="has_tag" { params target="unit" tag="enemy" }
+      }
+      effects {
+        effect "apply_modifier" {
+          params target="unit" attribute="accuracy" operation="add" amount=-3 source="self"
+        }
+      }
+    }
+  }
+  abilities {
+    // Active: jump to adjacent enemy
+    ability id="infest" cooldown=10 charges=-1 {
+      targeting type="enemy" range=1 {  // adjacent only
+        filter "has_open_mount"  // must have valid mount
+      }
+      conditions {
+        condition type="in_combat"
+      }
+      effects {
+        effect "transfer_item" {
+          params item="self" mount_filter="internal" {
+            from ref="self.mount"
+            to ref="ability.target"
+          }
+        }
+      }
+    }
+  }
+}
 ```
 
 **Ejection System (emergency pilot save):**
-```yaml
-item:
-  id: ejection_system
-  tags: [equipment, cockpit, safety]
-  attributes:
-    size: { base: 2 }
-  triggers:
-    # Auto-eject when critical
-    - event: on_attribute_threshold
-      conditions:
-        - { type: attr_lte, params: { target: unit, attr: structure_percent, value: 15 } }
-      effects:
-        - effect: spawn_unit
-          params:
-            template: escape_pod
-            position: adjacent_friendly
-            transfer_pilot: true
-            transfer_from: { ref: "unit" }
-        - effect: add_tag
-          params:
-            target: unit
-            tag: pilot_ejected
-      priority: -100  # runs before death triggers
+```kdl
+item {
+  id "ejection_system"
+  tags "equipment" "cockpit" "safety"
+  attributes {
+    size base=2
+  }
+  triggers {
+    // Auto-eject when critical
+    trigger event="on_attribute_threshold" priority=-100 {  // runs before death triggers
+      conditions {
+        condition type="attr_lte" { params target="unit" attr="structure_percent" value=15 }
+      }
+      effects {
+        effect "spawn_unit" {
+          params template="escape_pod" position="adjacent_friendly" transfer_pilot=true {
+            transfer_from ref="unit"
+          }
+        }
+        effect "add_tag" { params target="unit" tag="pilot_ejected" }
+      }
+    }
+  }
+}
 ```
 
 **Berserker Core (damage self for power):**
-```yaml
-item:
-  id: berserker_core
-  tags: [equipment, engine, cursed]
-  attributes:
-    size: { base: 5 }
-    rage_stacks: { base: 0, max: 10 }
-  provides:
-    # Damage scales with rage
-    - scope: unit
-      scope_filter: [weapon]
-      attribute: damage
-      operation: add
-      value: { ref: "self.rage_stacks" }  # +1 damage per stack
-  abilities:
-    - id: blood_rage
-      costs:
-        - attribute: structure
-          scope: unit
-          amount: 5  # costs 5 structure
-      effects:
-        - effect: modify_attribute
-          params:
-            target: self
-            attribute: rage_stacks
-            operation: add
-            amount: 1
-      cooldown: 0
-      charges: -1
-      conditions:
-        - { type: attr_gte, params: { target: unit, attr: structure, value: 10 } }
+```kdl
+item {
+  id "berserker_core"
+  tags "equipment" "engine" "cursed"
+  attributes {
+    size base=5
+    rage_stacks base=0 max=10
+  }
+  provides {
+    // Damage scales with rage
+    modifier scope="unit" attribute="damage" operation="add" {
+      scope_filter "weapon"
+      value ref="self.rage_stacks"  // +1 damage per stack
+    }
+  }
+  abilities {
+    ability id="blood_rage" cooldown=0 charges=-1 {
+      costs {
+        cost attribute="structure" scope="unit" amount=5  // costs 5 structure
+      }
+      effects {
+        effect "modify_attribute" {
+          params target="self" attribute="rage_stacks" operation="add" amount=1
+        }
+      }
+      conditions {
+        condition type="attr_gte" { params target="unit" attr="structure" value=10 }
+      }
+    }
+  }
+}
 ```
 
 **Quantum Entangler (link two units):**
-```yaml
-item:
-  id: quantum_entangler
-  tags: [equipment, experimental, support]
-  attributes:
-    size: { base: 3 }
-    entangled_with: { base: null }  # stores unit ID
-  abilities:
-    - id: entangle
-      targeting:
-        type: ally
-        range: 5
-        count: 1
-      effects:
-        - effect: set_attribute
-          params:
-            target: self
-            attribute: entangled_with
-            value: { ref: "ability.target.id" }
-        - effect: create_link
-          params:
-            type: quantum_link
-            from: { ref: "unit" }
-            to: { ref: "ability.target" }
-      cooldown: 0
-      charges: 1
-      charge_restore: on_combat_end
-  triggers:
-    # Share damage with linked unit
-    - event: on_damaged
-      conditions:
-        - { type: attr_not_null, params: { target: self, attr: entangled_with } }
-      effects:
-        - effect: deal_damage
-          params:
-            target: { ref: "self.entangled_with" }
-            amount: { expr: "event.damage_amount * 0.5" }
-            damage_type: quantum
-            bypass_armor: true
+```kdl
+item {
+  id "quantum_entangler"
+  tags "equipment" "experimental" "support"
+  attributes {
+    size base=3
+    entangled_with base=null  // stores unit ID
+  }
+  abilities {
+    ability id="entangle" cooldown=0 charges=1 charge_restore="on_combat_end" {
+      targeting type="ally" range=5 count=1
+      effects {
+        effect "set_attribute" {
+          params target="self" attribute="entangled_with" {
+            value ref="ability.target.id"
+          }
+        }
+        effect "create_link" {
+          params type="quantum_link" {
+            from ref="unit"
+            to ref="ability.target"
+          }
+        }
+      }
+    }
+  }
+  triggers {
+    // Share damage with linked unit
+    trigger event="on_damaged" {
+      conditions {
+        condition type="attr_not_null" { params target="self" attr="entangled_with" }
+      }
+      effects {
+        effect "deal_damage" {
+          params damage_type="quantum" bypass_armor=true {
+            target ref="self.entangled_with"
+            amount expr="event.damage_amount * 0.5"
+          }
+        }
+      }
+    }
+  }
+}
 ```
 
 ---
@@ -1593,21 +1662,21 @@ wulfaz/
 │   │   └── handler.go              # deal_damage, modify_attribute only
 │   │
 │   └── template/
-│       ├── loader.go               # YAML loading
+│       ├── loader.go               # KDL loading
 │       └── registry.go             # Template storage
 │
 ├── data/
 │   └── templates/
 │       ├── units/
-│       │   ├── small_mech.yaml
-│       │   ├── medium_mech.yaml
-│       │   └── large_mech.yaml
+│       │   ├── small_mech.kdl
+│       │   ├── medium_mech.kdl
+│       │   └── large_mech.kdl
 │       ├── items/
-│       │   ├── medium_laser.yaml
-│       │   ├── ac10.yaml
-│       │   └── lrm5.yaml
+│       │   ├── medium_laser.kdl
+│       │   ├── ac10.kdl
+│       │   └── lrm5.kdl
 │       └── pilots/
-│           └── stub_pilot.yaml
+│           └── stub_pilot.kdl
 │
 ├── ui/
 │   └── renderer/
