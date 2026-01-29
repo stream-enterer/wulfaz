@@ -816,6 +816,319 @@ triggers:
 
 **Determinism:** Same event + same model state = same cascade order (sorted by priority, then by entity ID for ties).
 
+### System Invariants & Edge Cases
+
+**This section defines behavior for every edge case. No undefined behavior allowed.**
+
+#### 1. ValueRef Cycle Detection
+
+**Problem:** `power: { ref: "self.power" }` creates infinite recursion.
+
+**Policy:**
+- Max evaluation depth: 16 references
+- Cycle detection: Track visited refs, error on revisit
+- On cycle/depth exceeded: Return 0, log warning, mark entity as "corrupted"
+
+```
+Evaluation of "self.power" where power refs self.damage which refs self.power:
+  → self.power
+  → self.damage (depth 1)
+  → self.power (depth 2, CYCLE DETECTED)
+  → Return 0, log: "Cycle in ValueRef: self.power → self.damage → self.power"
+```
+
+#### 2. Scope Binding: Snapshot at Trigger Fire
+
+**Problem:** Item transfers mid-effect-chain. Does `unit` mean old or new unit?
+
+**Policy:** All scope references are **snapshot at trigger fire**, not at effect execution.
+
+```yaml
+triggers:
+  - event: on_combat_tick
+    effects:
+      - effect: transfer_item          # item moves to enemy
+        params: { item: self, to: random_enemy }
+      - effect: deal_damage
+        params: { target: unit, amount: 5 }  # hits ORIGINAL unit, not new one
+```
+
+**Context object is immutable once trigger fires:**
+```
+TriggerContext {
+  self: [snapshot of item at fire time]
+  unit: [snapshot of unit at fire time]
+  part: [snapshot of part at fire time]
+  mount: [snapshot of mount at fire time]
+  event: [event data]
+  // These never change during effect chain execution
+}
+```
+
+**Exception:** `ability.target` is set when ability is activated, not when trigger fires.
+
+#### 3. Null Reference Handling
+
+**Problem:** `{ ref: "event.killed.pilot" }` when killed unit had no pilot.
+
+**Policy:** Null propagation with explicit fallbacks.
+
+| Reference Result | Behavior |
+|------------------|----------|
+| Valid value | Use it |
+| Null/missing | Use `default` if specified, else 0 for numbers, null for entities |
+| Invalid path | Log warning, treat as null |
+
+**Fallback syntax:**
+```yaml
+amount: { ref: "event.killed.pilot.skill", default: 0 }
+```
+
+**Effect behavior on null target:**
+```yaml
+- effect: deal_damage
+  params:
+    target: { ref: "event.killed.pilot" }  # null
+    amount: 10
+# Effect is SKIPPED (no-op), not error. Logged as: "Skipped deal_damage: null target"
+```
+
+#### 4. Effect Chain Semantics: Sequential Mutation
+
+**Problem:** Do effects in a chain see intermediate state or snapshot?
+
+**Policy:** **Sequential mutation.** Each effect mutates state, next effect sees the mutation.
+
+```yaml
+effects:
+  - effect: set_attribute
+    params: { target: self, attribute: temp, value: 100 }
+  - effect: deal_damage
+    params: { amount: { ref: "self.temp" } }  # sees 100
+  - effect: set_attribute
+    params: { target: self, attribute: temp, value: 0 }
+  - effect: heal
+    params: { amount: { ref: "self.temp" } }  # sees 0
+```
+
+**Rationale:** Sequential is more intuitive for modders. "Do A, then B, then C."
+
+**However:** Scope context (unit, part, etc.) is still snapshotted. Only attributes mutate.
+
+#### 5. Simultaneous Modification: Entity ID Tie-Breaker
+
+**Problem:** Two items both SET heat to different values at same priority.
+
+**Policy:** When same-priority effects conflict, resolve by **entity ID (alphabetical/numeric order)**.
+
+```
+item_a (id: "aaa") sets heat = 50
+item_b (id: "bbb") sets heat = 0
+Both at priority 0, same event.
+
+Resolution order: aaa, then bbb.
+Final heat = 0 (bbb wins because it runs second)
+```
+
+**Explicit in cascade order:**
+```
+4. Sort by priority (lower = earlier)
+5. Within same priority, sort by entity ID (lexicographic)
+6. Execute in order (last write wins for SET operations)
+```
+
+**Modder escape hatch:** Use different priorities to control order explicitly.
+
+#### 6. Model Layers: Combat vs Run vs Meta
+
+**Problem:** Where does between-combat state live?
+
+**Policy:** Three distinct Model layers:
+
+```
+META_MODEL (persists across runs)
+├── unlocked_starting_options: []string
+├── achievements: []Achievement
+└── settings: Settings
+
+RUN_MODEL (persists within a run, reset on permadeath)
+├── credits: int
+├── inventory: []Item (items not on units)
+├── units: []Unit (your lance)
+├── pilots: []Pilot (not assigned)
+├── run_flags: map[string]any (quest progress, etc.)
+└── events_seen: []string
+
+COMBAT_MODEL (exists only during combat)
+├── player_units: []Unit (deployed)
+├── enemy_units: []Unit
+├── combat_tick: int
+├── combat_log: []Event
+└── combat_flags: map[string]any
+```
+
+**Attribute persistence:**
+- Item/Unit attributes in `RUN_MODEL.units` persist between combats
+- `combat_flags` reset each combat
+- Use `run_flags` for cross-combat tracking
+
+**Example: Grudge Keeper**
+```yaml
+item:
+  id: grudge_keeper
+  triggers:
+    - event: on_kill
+      effects:
+        - effect: modify_attribute
+          params: { target: self, attribute: enemies_killed, operation: add, amount: 1 }
+        # enemies_killed persists because item is in RUN_MODEL
+```
+
+#### 7. Event Cancellation: Supported via Interception
+
+**Problem:** Can effects prevent events from happening?
+
+**Policy:** **Yes, via intercept events.** Some events have `on_incoming_X` variants that fire BEFORE the event resolves and can cancel it.
+
+**Interceptable events:**
+```
+on_incoming_damage → fires before on_damaged
+on_incoming_transfer → fires before on_item_transferred
+on_incoming_death → fires before on_destroyed
+```
+
+**Cancellation effect:**
+```yaml
+item:
+  id: damage_immunity_field
+  triggers:
+    - event: on_incoming_damage
+      conditions:
+        - { type: attr_lte, params: { target: event.source, attr: damage, value: 10 } }
+      effects:
+        - effect: cancel_event
+        - effect: spawn_visual
+          params: { type: shield_absorb }
+```
+
+**cancel_event behavior:**
+- Stops the incoming event from resolving
+- Stops all subsequent effects in this trigger (after cancel_event)
+- Does NOT stop other triggers listening to same event (they see `event.cancelled = true`)
+
+**Non-interceptable events:** `on_combat_start`, `on_turn_start`, `on_turn_end` (these are phase markers, not actions)
+
+#### 8. Dynamic Ability/Trigger Creation: Scoped to Creator
+
+**Problem:** Dynamically created abilities — whose `self` are they?
+
+**Policy:** Dynamically created abilities/triggers inherit scope from their creator.
+
+```yaml
+item:
+  id: ability_factory
+  abilities:
+    - id: create_power
+      effects:
+        - effect: add_ability
+          params:
+            target: unit
+            ability:
+              id: generated_blast
+              scope_parent: { ref: "self" }  # REQUIRED: defines what "self" means
+              effects:
+                - effect: deal_damage
+                  params: { amount: { ref: "scope_parent.power" } }  # factory's power
+```
+
+**Rules:**
+- `scope_parent` is REQUIRED for dynamically created abilities
+- `self` in dynamic ability = the entity it's attached to
+- `scope_parent` = the entity that created it
+- Dynamic abilities are removed when `scope_parent` is destroyed
+
+#### 9. Template Immutability
+
+**Problem:** Can effects modify templates?
+
+**Policy:** **Templates are immutable.** Effects can only modify instances.
+
+```yaml
+# This is FORBIDDEN and will error:
+- effect: modify_template  # NO SUCH EFFECT
+  params: { template: "ac10", attribute: damage, value: 999 }
+
+# This is allowed (modifies instance):
+- effect: modify_base_attribute
+  params: { target: self, attribute: damage, operation: add, amount: 1 }
+```
+
+**Rationale:** Template mutation would cause chaos — all future spawns would be affected. If you want "upgrade all AC10s", iterate over instances.
+
+#### 10. Entity Type Boundaries
+
+**Problem:** Can a Pilot become an Item? Can an Item become a Unit?
+
+**Policy:** **Entity types are fixed.** No transmutation.
+
+| From | To | Allowed? |
+|------|----|----------|
+| Item | Item | ✓ (transfer) |
+| Item | Unit | ✗ |
+| Unit | Item | ✗ |
+| Pilot | Item | ✗ |
+| Part | Unit | ✗ (use spawn_unit instead) |
+
+**Workaround for "item becomes unit":**
+```yaml
+triggers:
+  - event: on_some_condition
+    effects:
+      - effect: spawn_unit
+        params:
+          template: item_transformed_form
+          copy_attributes_from: self  # copies relevant attributes
+      - effect: destroy_item
+        params: { target: self }
+```
+
+**Rationale:** Type transmutation breaks invariants. Spawn + destroy achieves same result safely.
+
+#### 11. Maximum Limits (Anti-Abuse)
+
+**Hard limits to prevent combinatorial explosion:**
+
+| Limit | Value | On Exceed |
+|-------|-------|-----------|
+| Cascade depth | 10 | Stop cascade, log warning |
+| ValueRef depth | 16 | Return 0, log warning |
+| Effects per trigger | 32 | Error at load time |
+| Triggers per entity | 64 | Error at load time |
+| Abilities per entity | 16 | Error at load time |
+| Modifiers per attribute | 128 | Oldest dropped, log warning |
+| Units in combat | 32 per side | Cannot spawn more |
+| Items per unit | 256 | Cannot mount more |
+
+#### 12. Error Handling Philosophy
+
+**Fail gracefully, log loudly, never crash.**
+
+| Error Type | Behavior |
+|------------|----------|
+| Invalid ref path | Treat as null, log warning |
+| Cycle detected | Return 0, log warning, mark corrupted |
+| Effect on null target | Skip effect, log info |
+| Missing required param | Skip effect, log error |
+| Limit exceeded | Apply limit, log warning |
+| Unknown effect type | Skip effect, log error |
+| Unknown event type | Ignore trigger, log error |
+
+**Corrupted entities:**
+- Entities marked "corrupted" get a visual indicator in UI
+- Corrupted entities still function (with fallback values)
+- Player can see corruption in debug mode
+- Corruption is saved (modders can see their mistakes in save files)
+
 ### Example Definitions
 
 **Mech Left Arm:**
@@ -1187,6 +1500,18 @@ item:
 - ~~Event cascade order~~ → Priority-based, deterministic, depth-limited
 - ~~Active abilities~~ → First-class Ability type with costs, targeting, effects, charges
 - ~~Dynamic values~~ → ValueRef system (static, reference, expression, random)
+- ~~ValueRef cycles~~ → Max depth 16, cycle detection, return 0 on failure
+- ~~Scope binding~~ → Snapshot at trigger fire (immutable context)
+- ~~Null references~~ → Null propagation with fallbacks, skip effect on null target
+- ~~Effect ordering~~ → Sequential mutation within chain
+- ~~Simultaneous mods~~ → Entity ID tie-breaker (lexicographic)
+- ~~Model layers~~ → Meta (cross-run) / Run (cross-combat) / Combat (per-fight)
+- ~~Event cancellation~~ → on_incoming_X events + cancel_event effect
+- ~~Dynamic abilities~~ → scope_parent required, inherits creator's scope
+- ~~Template mutation~~ → Forbidden (templates immutable)
+- ~~Entity transmutation~~ → Forbidden (spawn+destroy instead)
+- ~~System limits~~ → Hard caps on cascade, refs, triggers, etc.
+- ~~Error handling~~ → Fail gracefully, log loudly, never crash
 
 ### Content (deferred to implementation)
 1. Exact combat width numbers (how many total slots?)
