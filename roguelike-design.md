@@ -509,6 +509,43 @@ REQUIREMENT (dependencies an item needs to function)
   - scope: "unit" | "part" | "adjacent" | "mount"
   - condition: Condition
   - on_unmet: "disabled" | "cannot_mount" | "warning"
+
+ABILITY (player-activated powers, as opposed to passive triggers)
+  - id: string
+  - tags: []Tag
+  - conditions: []Condition (must pass to activate)
+  - costs: []Cost (resources consumed on use)
+  - targeting: Targeting (what can be targeted)
+  - effects: []Effect (what happens when used)
+  - cooldown: int (ticks until usable again, 0 = no cooldown)
+  - charges: int (uses before depleted, -1 = unlimited)
+  - charge_restore: string (event that restores charges, e.g., "on_turn_start")
+
+COST (resource consumed by ability)
+  - attribute: string (heat, energy, ammo, health, etc.)
+  - scope: "self" | "unit" | "part"
+  - amount: ValueRef (can be static or dynamic)
+
+TARGETING (what an ability can target)
+  - type: "none" | "self" | "ally" | "enemy" | "any_unit" | "part" | "item" | "position"
+  - range: int (for positional targeting)
+  - count: int (how many targets, default 1)
+  - filter: []Tag (targets must have these tags)
+
+EFFECT (single effect in a chain)
+  - effect: string (effect type from registry)
+  - params: map[string]ValueRef
+  - delay: int (ticks before effect resolves, 0 = immediate)
+  - conditions: []Condition (optional, effect skipped if conditions fail)
+
+VALUE_REF (dynamic value references — the secret sauce for modder insanity)
+  - Static: just a number (5, 10, -3)
+  - Reference: "self.damage", "target.health", "unit.heat"
+  - Event data: "event.damage_amount", "event.source_id"
+  - Computed: "self.stored_damage * 2", "target.max_health - target.health"
+  - Random: "random(1, 6)", "random_from(self.damage, self.damage * 2)"
+
+  Format: { value: 5 } or { ref: "self.damage" } or { expr: "target.health * 0.5" }
 ```
 
 ### Structural Hierarchy
@@ -520,6 +557,7 @@ UNIT
 ├── attributes: map[string]Attribute
 ├── parts: map[string]Part
 ├── triggers: []Trigger
+├── abilities: []Ability
 └── pilot: *Pilot (optional)
 
 PART
@@ -528,7 +566,8 @@ PART
 ├── attributes: map[string]Attribute
 ├── mounts: []Mount
 ├── connections: map[string][]string  // relationship_type → part_ids
-└── triggers: []Trigger
+├── triggers: []Trigger
+└── abilities: []Ability
 
 MOUNT
 ├── id
@@ -548,6 +587,7 @@ ITEM
 ├── tags: []Tag
 ├── attributes: map[string]Attribute
 ├── triggers: []Trigger
+├── abilities: []Ability
 ├── provides: []ProvidedModifier
 └── requires: []Requirement (optional, dependencies to function)
 
@@ -556,12 +596,14 @@ PILOT
 ├── tags: []Tag
 ├── attributes: map[string]Attribute
 ├── traits: []Trait
-└── triggers: []Trigger
+├── triggers: []Trigger
+└── abilities: []Ability
 
 TRAIT
 ├── id
 ├── tags: []Tag
 ├── triggers: []Trigger
+├── abilities: []Ability
 └── provides: []ProvidedModifier
 ```
 
@@ -892,6 +934,244 @@ item:
       stack_group: command_aura  # only one command bonus per unit
 ```
 
+### Active Abilities (Modder-Grade Examples)
+
+**Damage-Storing Shield (absorb → release):**
+```yaml
+item:
+  id: capacitor_shield
+  tags: [equipment, shield, defensive]
+  attributes:
+    size: { base: 3 }
+    stored_damage: { base: 0, max: 100 }
+  triggers:
+    # Passive: absorb blocked damage
+    - event: on_damage_blocked
+      effects:
+        - effect: modify_attribute
+          params:
+            target: self
+            attribute: stored_damage
+            operation: add
+            amount: { ref: "event.damage_blocked" }
+  abilities:
+    # Active: discharge stored damage
+    - id: discharge
+      tags: [attack, special]
+      targeting:
+        type: enemy
+        range: 3
+        count: 1
+      costs:
+        - attribute: stored_damage
+          scope: self
+          amount: { ref: "self.stored_damage" }  # costs all stored
+      effects:
+        - effect: deal_damage
+          params:
+            target: { ref: "ability.target" }
+            amount: { ref: "self.stored_damage" }
+            damage_type: energy
+      cooldown: 0
+      charges: -1
+```
+
+**Regeneration Symbiote (spawn new part on death):**
+```yaml
+item:
+  id: regeneration_symbiote
+  tags: [symbiote, biological, internal]
+  attributes:
+    size: { base: 2 }
+    regen_charges: { base: 1 }
+  triggers:
+    - event: on_part_destroyed
+      conditions:
+        - { type: is_parent_part }
+        - { type: attr_gte, params: { target: self, attr: regen_charges, value: 1 } }
+      effects:
+        - effect: modify_attribute
+          params: { target: self, attribute: regen_charges, operation: add, amount: -1 }
+        - effect: spawn_part
+          delay: 3  # takes 3 ticks
+          params:
+            template: regenerated_arm
+            attach_to: unit
+            position: { ref: "event.destroyed_part.position" }
+```
+
+**Soul-Drinking Weapon (permanent scaling):**
+```yaml
+item:
+  id: soul_drinker
+  tags: [weapon, melee, cursed]
+  attributes:
+    size: { base: 4 }
+    damage: { base: 8 }
+    souls_consumed: { base: 0 }
+  triggers:
+    - event: on_kill
+      conditions:
+        - { type: has_tag, params: { target: event.killed, tag: organic } }
+      effects:
+        - effect: modify_base_attribute  # permanent, not a modifier
+          params:
+            target: self
+            attribute: damage
+            operation: add
+            amount: 1
+        - effect: modify_attribute
+          params:
+            target: self
+            attribute: souls_consumed
+            operation: add
+            amount: 1
+        - effect: spawn_visual
+          params: { type: soul_absorb, at: { ref: "event.killed.position" } }
+```
+
+**Neural Parasite (jump to enemies):**
+```yaml
+item:
+  id: neural_parasite
+  tags: [equipment, parasite, biological]
+  attributes:
+    size: { base: 1 }
+  triggers:
+    # When mounted on enemy, debuff them
+    - event: on_item_mounted
+      conditions:
+        - { type: has_tag, params: { target: unit, tag: enemy } }
+      effects:
+        - effect: apply_modifier
+          params:
+            target: unit
+            attribute: accuracy
+            operation: add
+            amount: -3
+            source: self
+  abilities:
+    # Active: jump to adjacent enemy
+    - id: infest
+      targeting:
+        type: enemy
+        range: 1  # adjacent only
+        filter: [has_open_mount]  # must have valid mount
+      conditions:
+        - { type: in_combat }
+      effects:
+        - effect: transfer_item
+          params:
+            item: self
+            from: { ref: "self.mount" }
+            to: { ref: "ability.target" }
+            mount_filter: [internal]
+      cooldown: 10
+      charges: -1
+```
+
+**Ejection System (emergency pilot save):**
+```yaml
+item:
+  id: ejection_system
+  tags: [equipment, cockpit, safety]
+  attributes:
+    size: { base: 2 }
+  triggers:
+    # Auto-eject when critical
+    - event: on_attribute_threshold
+      conditions:
+        - { type: attr_lte, params: { target: unit, attr: structure_percent, value: 15 } }
+      effects:
+        - effect: spawn_unit
+          params:
+            template: escape_pod
+            position: adjacent_friendly
+            transfer_pilot: true
+            transfer_from: { ref: "unit" }
+        - effect: add_tag
+          params:
+            target: unit
+            tag: pilot_ejected
+      priority: -100  # runs before death triggers
+```
+
+**Berserker Core (damage self for power):**
+```yaml
+item:
+  id: berserker_core
+  tags: [equipment, engine, cursed]
+  attributes:
+    size: { base: 5 }
+    rage_stacks: { base: 0, max: 10 }
+  provides:
+    # Damage scales with rage
+    - scope: unit
+      scope_filter: [weapon]
+      attribute: damage
+      operation: add
+      value: { ref: "self.rage_stacks" }  # +1 damage per stack
+  abilities:
+    - id: blood_rage
+      costs:
+        - attribute: structure
+          scope: unit
+          amount: 5  # costs 5 structure
+      effects:
+        - effect: modify_attribute
+          params:
+            target: self
+            attribute: rage_stacks
+            operation: add
+            amount: 1
+      cooldown: 0
+      charges: -1
+      conditions:
+        - { type: attr_gte, params: { target: unit, attr: structure, value: 10 } }
+```
+
+**Quantum Entangler (link two units):**
+```yaml
+item:
+  id: quantum_entangler
+  tags: [equipment, experimental, support]
+  attributes:
+    size: { base: 3 }
+    entangled_with: { base: null }  # stores unit ID
+  abilities:
+    - id: entangle
+      targeting:
+        type: ally
+        range: 5
+        count: 1
+      effects:
+        - effect: set_attribute
+          params:
+            target: self
+            attribute: entangled_with
+            value: { ref: "ability.target.id" }
+        - effect: create_link
+          params:
+            type: quantum_link
+            from: { ref: "unit" }
+            to: { ref: "ability.target" }
+      cooldown: 0
+      charges: 1
+      charge_restore: on_combat_end
+  triggers:
+    # Share damage with linked unit
+    - event: on_damaged
+      conditions:
+        - { type: attr_not_null, params: { target: self, attr: entangled_with } }
+      effects:
+        - effect: deal_damage
+          params:
+            target: { ref: "self.entangled_with" }
+            amount: { expr: "event.damage_amount * 0.5" }
+            damage_type: quantum
+            bypass_armor: true
+```
+
 ---
 
 ## Open Design Questions
@@ -905,6 +1185,8 @@ item:
 - ~~Conditional modifiers~~ → conditions field on ProvidedModifier
 - ~~Target context~~ → Standard context variables (self, target, source, unit, part, mount, combat)
 - ~~Event cascade order~~ → Priority-based, deterministic, depth-limited
+- ~~Active abilities~~ → First-class Ability type with costs, targeting, effects, charges
+- ~~Dynamic values~~ → ValueRef system (static, reference, expression, random)
 
 ### Content (deferred to implementation)
 1. Exact combat width numbers (how many total slots?)
