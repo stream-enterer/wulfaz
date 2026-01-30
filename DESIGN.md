@@ -1,6 +1,6 @@
 # Mech Autobattler Roguelike — Design Document
 
-**Status:** MVP scaffold complete, KDL template loading implemented
+**Status:** Event dispatch and effect handling implemented
 
 ---
 
@@ -299,9 +299,16 @@ wulfaz/
 │   │   ├── msg.go               # Msg interface + concrete messages
 │   │   ├── cmd.go               # Cmd type + None, Batch
 │   │   ├── model.go             # GamePhase, Model, Update, View
+│   │   ├── model_test.go        # TEA integration tests
 │   │   └── runtime.go           # Runtime with Dispatch loop
-│   ├── event/dispatch.go        # Trigger dispatch (stub)
-│   ├── effect/handler.go        # Effect handler (stub)
+│   ├── event/                   # Event dispatch [IMPLEMENTED]
+│   │   ├── context.go           # TriggerContext, TriggerOwner, CollectedTrigger
+│   │   ├── dispatch.go          # Entity traversal, condition evaluation
+│   │   └── dispatch_test.go     # 11 dispatch tests
+│   ├── effect/                  # Effect handling [IMPLEMENTED]
+│   │   ├── result.go            # EffectResult, FollowUpEvent
+│   │   ├── handler.go           # EffectContext, 3 effect handlers
+│   │   └── handler_test.go      # 13 effect tests
 │   └── template/                # Template loading [IMPLEMENTED]
 │       ├── registry.go          # Registry for units/items
 │       ├── loader.go            # LoadUnitsFromDir, LoadItemsFromDir
@@ -351,6 +358,14 @@ wulfaz/
 | `Mount` | entity/mount.go | Accepts + Capacity + Contents |
 | `Part` | entity/part.go | Mounts + Connections |
 | `Unit` | entity/unit.go | Parts + Pilot + HasPilot flag |
+| `TriggerOwner` | event/context.go | UnitID/PartID/MountID/ItemID path |
+| `TriggerContext` | event/context.go | Event + SourceUnit + AllUnits + Tick |
+| `CollectedTrigger` | event/context.go | Trigger + Owner pair |
+| `EffectContext` | effect/handler.go | Owner + SourceUnit + AllUnits + Rolls |
+| `EffectResult` | effect/result.go | ModifiedUnits + FollowUpEvents + LogEntries |
+| `FollowUpEvent` | effect/result.go | Cascading event (Event + SourceID + TargetID) |
+| `TriggersCollected` | tea/msg.go | Msg after dispatch (triggers + depth) |
+| `EffectsResolved` | tea/msg.go | Msg after effects (modifications + follow-ups) |
 
 ### TEA Compliance
 
@@ -362,6 +377,27 @@ wulfaz/
 - [x] Cmd executed only by runtime
 - [x] Seeded RNG via Msg payloads
 - [x] Templates immutable, instances mutable
+- [x] Task Pattern for sequential effects (TriggersCollected → EffectsResolved)
+- [x] Immutable slice copies before modification
+
+### Implemented Conditions
+
+| Type | Params | Behavior |
+|------|--------|----------|
+| `has_tag` | `tag: string` | Unit has tag |
+| `attr_gte` | `attr: string, value: int` | Attribute >= value |
+| `attr_lte` | `attr: string, value: int` | Attribute <= value |
+| `attr_eq` | `attr: string, value: int` | Attribute == value |
+
+### Implemented Effects
+
+| Effect | Params | Behavior |
+|--------|--------|----------|
+| `deal_damage` | `damage: int, target: string` | Reduce health, emit on_damaged/on_destroyed |
+| `consume_ammo` | `amount: int` | Reduce owning item's ammo attribute |
+| `deal_splash_damage` | `damage: int, target: string` | MVP: same as deal_damage |
+
+**Target resolution:** `"self"` → source, `"enemy"` → first enemy (alphabetical), `"ally"` → self (MVP), or unit ID
 
 ---
 
@@ -419,17 +455,31 @@ ITEM
 3. Apply in order: SET → ADD → MULT → MIN → MAX
 ```
 
-### Event Cascade Order
+### Event Cascade Order (Task Pattern)
+
+Uses TEA Task Pattern for sequential effects via intermediate Msgs:
 
 ```
-1. Event occurs
-2. Collect all triggers listening for this event
-3. Evaluate trigger conditions, filter to active
-4. Sort by Priority (lower = earlier), then by entity ID
-5. Execute effects in order, each generating Msgs
-6. Process Msgs through Update
-7. If Msgs cause new events, repeat (max depth: 10)
+CombatTicked{Rolls}
+    ↓
+Update: dispatch on_combat_tick to all units
+    ↓
+TriggersCollected{Triggers, Depth: 0}
+    ↓
+Update: Handle() each effect, merge results
+    ↓
+EffectsResolved{ModifiedUnits, FollowUpEvents}
+    ↓
+Update: apply changes, dispatch follow-ups
+    ↓
+TriggersCollected{Depth: 1}  (if follow-ups exist)
+    ↓
+... repeat until no follow-ups or depth >= 10
 ```
+
+**Dispatch traversal:** Unit triggers → Parts (sorted) → Mounts → Items
+
+**Determinism:** Parts sorted alphabetically, enemies sorted by ID
 
 ---
 
@@ -456,14 +506,20 @@ Full details in previous version. Key policies:
 
 ### Architecture (Post-MVP)
 
-- AND/OR/NOT boolean trees for Conditions
-- ValueRef expressions and references (`self.damage`, `target.health`)
-- Modifier stacking with stack_group logic
-- Event cancellation (on_incoming_X)
-- Dynamic ability creation
-- Model layer split (Meta/Run/Combat)
-- Scope snapshot semantics
-- Full error handling with corruption tracking
+| Feature | MVP Behavior | Post-MVP |
+|---------|--------------|----------|
+| Condition logic | Leaf-only (has_tag, attr_*) | AND/OR/NOT boolean trees |
+| ValueRef | Static int | Expressions, references (`self.damage`) |
+| Modifier stacking | Not implemented | stack_group logic |
+| Event cancellation | Not implemented | on_incoming_X + cancel_event |
+| Splash damage | Same as deal_damage | Radius affects adjacent units |
+| Target resolution | First enemy (alphabetical) | AI/priority-based selection |
+| Damage model | Unit-level health | Per-part armor/structure (BTA) |
+| Attribute merging | Last write wins | Delta accumulation |
+| Destroyed units | Fire triggers same tick | `is_alive` condition or filter |
+| Ally targeting | Self | Proper ally selection |
+| Model layers | Combat only | Meta/Run/Combat split |
+| Error handling | Log + skip | Corruption tracking |
 
 ### Naming/Types (Post-MVP)
 
@@ -495,6 +551,7 @@ unit id="medium_mech" {
     tags "mech" "medium"
     attributes {
         attribute name="combat_width" base=2
+        attribute name="health" base=100 min=0
     }
     parts {
         part id="left_arm" template_id="mech_arm" {
@@ -567,7 +624,8 @@ item id="double_heatsink" {
 1. ~~Implement KDL loader (`template/loader.go`)~~ **DONE**
 2. ~~Add 3 chassis templates (small/medium/large)~~ **DONE**
 3. ~~Add weapon templates (laser, AC, LRM)~~ **DONE**
-4. Implement event dispatch (`event/dispatch.go`)
-5. Implement basic effects (`effect/handler.go`)
-6. Wire up combat tick loop
+4. ~~Implement event dispatch (`event/dispatch.go`)~~ **DONE**
+5. ~~Implement basic effects (`effect/handler.go`)~~ **DONE**
+6. ~~Wire up combat tick loop~~ **DONE**
 7. Minimal UI rendering
+8. Runtime integration (tick generation, Cmd execution)

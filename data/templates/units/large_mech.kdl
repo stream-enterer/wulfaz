@@ -2,6 +2,7 @@ unit id="large_mech" {
     tags "mech" "large" "heavy"
     attributes {
         attribute name="combat_width" base=3
+        attribute name="health" base=150 min=0
     }
     parts {
         part id="torso" template_id="heavy_torso" {

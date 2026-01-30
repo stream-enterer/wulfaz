@@ -2,6 +2,7 @@ unit id="medium_mech" {
     tags "mech" "medium"
     attributes {
         attribute name="combat_width" base=2
+        attribute name="health" base=100 min=0
     }
     parts {
         part id="left_arm" template_id="mech_arm" {

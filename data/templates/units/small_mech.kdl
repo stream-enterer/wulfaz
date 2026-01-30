@@ -2,6 +2,7 @@ unit id="small_mech" {
     tags "mech" "small" "light"
     attributes {
         attribute name="combat_width" base=1
+        attribute name="health" base=60 min=0
     }
     parts {
         part id="torso" template_id="light_torso" {

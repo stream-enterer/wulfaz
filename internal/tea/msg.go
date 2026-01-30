@@ -39,3 +39,62 @@ func (PlayerQuit) isMsg() {}
 type BatchedMsgs struct{ Msgs []Msg }
 
 func (BatchedMsgs) isMsg() {}
+
+// TriggersCollected is sent after dispatching an event and collecting matching triggers
+type TriggersCollected struct {
+	Event    string             // event type as string for serialization
+	Triggers []CollectedTrigger // collected triggers with owner info
+	Rolls    []int              // available rolls for effects
+	Depth    int                // cascade depth for loop prevention
+}
+
+func (TriggersCollected) isMsg() {}
+
+// CollectedTrigger pairs a trigger with its owner (mirrors event.CollectedTrigger for serialization)
+type CollectedTrigger struct {
+	EffectName string
+	Params     map[string]any
+	Priority   int
+	Owner      TriggerOwner
+}
+
+// TriggerOwner identifies which entity owns a trigger (mirrors event.TriggerOwner)
+type TriggerOwner struct {
+	UnitID  string
+	PartID  string
+	MountID string
+	ItemID  string
+}
+
+// EffectsResolved is sent after executing all effects from collected triggers
+type EffectsResolved struct {
+	ModifiedUnits  ModifiedUnitsMap // serializable unit modifications
+	FollowUpEvents []FollowUpEvent  // cascading events
+	LogEntries     []string         // combat log entries
+	Depth          int              // cascade depth
+}
+
+// ModifiedUnitsMap holds unit modifications in a serializable format
+// Key is unit ID, value contains the modified unit data
+type ModifiedUnitsMap map[string]ModifiedUnit
+
+// ModifiedUnit holds modified unit data in serializable format
+type ModifiedUnit struct {
+	Attributes map[string]AttributeValue
+}
+
+// AttributeValue is a serializable attribute value
+type AttributeValue struct {
+	Base int
+	Min  int
+	Max  int
+}
+
+func (EffectsResolved) isMsg() {}
+
+// FollowUpEvent represents a cascading event (mirrors effect.FollowUpEvent)
+type FollowUpEvent struct {
+	Event    string
+	SourceID string
+	TargetID string
+}
