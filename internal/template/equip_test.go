@@ -325,3 +325,91 @@ func TestEquipItem_Immutability(t *testing.T) {
 		t.Errorf("unit2 should have 2 items, got %d", len(unit2.Parts["right_arm"].Mounts[0].Contents))
 	}
 }
+
+func TestEquipItem_ItemDeepCopied(t *testing.T) {
+	unit := makeTestUnit()
+	weapon := makeTestWeapon()
+
+	newUnit, err := EquipItem(unit, "right_arm", 0, weapon)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Mutate the original weapon's tags
+	weapon.Tags[0] = "mutated"
+
+	// Verify equipped item was not affected
+	equipped := newUnit.Parts["right_arm"].Mounts[0].Contents[0]
+	if equipped.Tags[0] != "weapon" {
+		t.Errorf("equipped item was mutated by original: got %q, want %q", equipped.Tags[0], "weapon")
+	}
+}
+
+func TestEquipItem_CapacityAttribute(t *testing.T) {
+	// Create a unit with a mount that uses "weight" for capacity
+	unit := entity.Unit{
+		ID:   "test",
+		Tags: []core.Tag{"mech"},
+		Parts: map[string]entity.Part{
+			"cargo": {
+				ID: "cargo",
+				Mounts: []entity.Mount{
+					{
+						ID:                "hold",
+						Capacity:          10,
+						CapacityAttribute: "weight",
+						MaxItems:          -1,
+						Accepts:           entity.MountCriteria{},
+					},
+				},
+			},
+		},
+	}
+
+	// Item with weight=3 (not using default "size")
+	item1 := entity.Item{
+		ID:   "cargo1",
+		Tags: []core.Tag{},
+		Attributes: map[string]core.Attribute{
+			"weight": {Name: "weight", Base: 3},
+		},
+	}
+
+	// Equip first item (3 weight used)
+	unit, err := EquipItem(unit, "cargo", 0, item1)
+	if err != nil {
+		t.Fatalf("failed to equip item1: %v", err)
+	}
+
+	// Item with weight=8 (would exceed 10 capacity)
+	item2 := entity.Item{
+		ID:   "cargo2",
+		Tags: []core.Tag{},
+		Attributes: map[string]core.Attribute{
+			"weight": {Name: "weight", Base: 8},
+		},
+	}
+
+	_, err = EquipItem(unit, "cargo", 0, item2)
+	if err == nil {
+		t.Fatal("expected capacity error, got nil")
+	}
+
+	// Item with weight=7 (exactly fits: 3 + 7 = 10)
+	item3 := entity.Item{
+		ID:   "cargo3",
+		Tags: []core.Tag{},
+		Attributes: map[string]core.Attribute{
+			"weight": {Name: "weight", Base: 7},
+		},
+	}
+
+	unit, err = EquipItem(unit, "cargo", 0, item3)
+	if err != nil {
+		t.Fatalf("expected item3 to fit: %v", err)
+	}
+
+	if len(unit.Parts["cargo"].Mounts[0].Contents) != 2 {
+		t.Errorf("expected 2 items, got %d", len(unit.Parts["cargo"].Mounts[0].Contents))
+	}
+}

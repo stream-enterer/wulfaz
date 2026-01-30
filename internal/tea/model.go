@@ -116,8 +116,9 @@ func (m Model) handleTriggersCollected(msg TriggersCollected) (Model, Cmd) {
 		return m, nil
 	}
 
-	// Build unit map for effect context
+	// Build unit map and player IDs set for effect context
 	unitMap := buildUnitMap(m.Combat)
+	playerIDs := buildPlayerUnitIDs(m.Combat)
 
 	// Execute each trigger's effect
 	var result effect.EffectResult
@@ -132,10 +133,11 @@ func (m Model) handleTriggersCollected(msg TriggersCollected) (Model, Cmd) {
 
 		// Build effect context
 		ctx := effect.EffectContext{
-			Owner:      toEventTriggerOwner(trigger.Owner),
-			SourceUnit: sourceUnit,
-			AllUnits:   unitMap,
-			Rolls:      msg.Rolls,
+			Owner:         toEventTriggerOwner(trigger.Owner),
+			SourceUnit:    sourceUnit,
+			AllUnits:      unitMap,
+			PlayerUnitIDs: playerIDs,
+			Rolls:         msg.Rolls,
 		}
 
 		// Execute effect
@@ -273,6 +275,14 @@ func buildUnitMap(combat model.CombatModel) map[string]entity.Unit {
 		m[u.ID] = u
 	}
 	return m
+}
+
+func buildPlayerUnitIDs(combat model.CombatModel) map[string]bool {
+	ids := make(map[string]bool)
+	for _, u := range combat.PlayerUnits {
+		ids[u.ID] = true
+	}
+	return ids
 }
 
 func toMsgCollectedTrigger(ct event.CollectedTrigger) CollectedTrigger {

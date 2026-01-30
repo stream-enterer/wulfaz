@@ -201,12 +201,11 @@ func (a *App) dispatch(msg tea.Msg) {
 	var cmd tea.Cmd
 	a.model, cmd = a.model.Update(msg)
 
-	// Execute command chain
-	for cmd != nil {
+	// Execute command if present
+	if cmd != nil {
 		result := cmd()
-		if result == nil {
-			break
+		if result != nil {
+			a.dispatch(result)
 		}
-		a.dispatch(result)
 	}
 }

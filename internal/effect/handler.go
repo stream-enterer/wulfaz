@@ -11,10 +11,11 @@ import (
 
 // EffectContext provides state for effect execution
 type EffectContext struct {
-	Owner      event.TriggerOwner
-	SourceUnit entity.Unit
-	AllUnits   map[string]entity.Unit // keyed by unit ID
-	Rolls      []int
+	Owner         event.TriggerOwner
+	SourceUnit    entity.Unit
+	AllUnits      map[string]entity.Unit // keyed by unit ID
+	PlayerUnitIDs map[string]bool        // set of player-side unit IDs
+	Rolls         []int
 }
 
 // Handle executes an effect and returns the result
@@ -220,7 +221,7 @@ func resolveTarget(params map[string]any, ctx EffectContext) (entity.Unit, bool)
 	case "self":
 		return ctx.SourceUnit, true
 	case "enemy":
-		enemies := getEnemiesOf(ctx.SourceUnit, ctx.AllUnits)
+		enemies := getEnemiesOf(ctx.SourceUnit, ctx)
 		if len(enemies) == 0 {
 			return entity.Unit{}, false
 		}
@@ -239,17 +240,17 @@ func resolveTarget(params map[string]any, ctx EffectContext) (entity.Unit, bool)
 }
 
 // getEnemiesOf returns units not on the same side as source, sorted by ID for determinism.
-// MVP: assumes units have "player" or "enemy" tag to determine side.
-func getEnemiesOf(source entity.Unit, allUnits map[string]entity.Unit) []entity.Unit {
+// Uses PlayerUnitIDs from context to determine sides.
+func getEnemiesOf(source entity.Unit, ctx EffectContext) []entity.Unit {
 	var enemies []entity.Unit
-	sourceIsPlayer := hasTag(source.Tags, "player")
+	sourceIsPlayer := ctx.PlayerUnitIDs[source.ID]
 
 	// Collect enemies
-	for _, unit := range allUnits {
+	for _, unit := range ctx.AllUnits {
 		if unit.ID == source.ID {
 			continue
 		}
-		unitIsPlayer := hasTag(unit.Tags, "player")
+		unitIsPlayer := ctx.PlayerUnitIDs[unit.ID]
 		if sourceIsPlayer != unitIsPlayer {
 			enemies = append(enemies, unit)
 		}
@@ -261,16 +262,6 @@ func getEnemiesOf(source entity.Unit, allUnits map[string]entity.Unit) []entity.
 	})
 
 	return enemies
-}
-
-// hasTag checks if a tag slice contains a specific tag
-func hasTag(tags []core.Tag, target string) bool {
-	for _, t := range tags {
-		if string(t) == target {
-			return true
-		}
-	}
-	return false
 }
 
 // copyUnit creates a shallow copy of a unit with new attribute and part maps

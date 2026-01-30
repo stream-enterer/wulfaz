@@ -523,6 +523,7 @@ Full details in previous version. Key policies:
 | Ally targeting | Self | Proper ally selection |
 | Model layers | Combat only | Meta/Run/Combat split |
 | Error handling | Log + skip | Corruption tracking |
+| Nested modifications | Unit-level attributes only | Full unit serialization (Currently item attribute changes like ammo consumption are lost after the effect chain completes) |
 
 ### Naming/Types (Post-MVP)
 
@@ -550,6 +551,23 @@ Full details in previous version. Key policies:
 - Absolute template paths (currently relative, requires running from repo root)
 - Graceful template errors (currently `log.Fatalf` on missing templates)
 - Separate part templates (currently inline-only, `Part.TemplateID` is cosmetic)
+
+### Runtime/Platform Integration (Post-MVP)
+
+Currently `app/app.go` and `tea/runtime.go` are parallel implementations:
+- `Runtime.Dispatch()` is a test helper with correct dispatch logic
+- `App.dispatch()` is the Ebitengine driver that reimplemented dispatch
+
+This duplication led to a bug (infinite loop from `for` vs `if`). The layering is sound:
+- **Ebitengine**: platform layer (window, input, rendering, frame timing)
+- **TEA**: application layer (state, pure updates, effects)
+
+Post-MVP options:
+- **Composition**: `App` embeds/owns a `Runtime` and delegates dispatch
+- **Shared helper**: Extract dispatch loop into a function both use
+- **Unified Runtime**: Single `Runtime` with platform hooks, backends just provide I/O
+
+Currently acceptable for single-platform MVP; would matter if adding TUI/web backends.
 
 ---
 

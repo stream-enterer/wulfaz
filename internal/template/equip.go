@@ -32,8 +32,12 @@ func EquipItem(unit entity.Unit, partID string, mountIdx int, item entity.Item) 
 		return entity.Unit{}, fmt.Errorf("item %q does not meet mount %q criteria", item.ID, mount.ID)
 	}
 
-	itemSize := getItemSize(item)
-	used := usedCapacity(mount)
+	capacityAttr := mount.CapacityAttribute
+	if capacityAttr == "" {
+		capacityAttr = "size"
+	}
+	itemSize := getItemCapacity(item, capacityAttr)
+	used := usedCapacity(mount, capacityAttr)
 	if mount.Capacity > 0 && used+itemSize > mount.Capacity {
 		return entity.Unit{}, fmt.Errorf("mount %q capacity exceeded (%d used + %d item > %d capacity)", mount.ID, used, itemSize, mount.Capacity)
 	}
@@ -56,7 +60,7 @@ func EquipItem(unit entity.Unit, partID string, mountIdx int, item entity.Item) 
 	newMount := newMounts[mountIdx]
 	newContents := make([]entity.Item, len(newMount.Contents), len(newMount.Contents)+1)
 	copy(newContents, newMount.Contents)
-	newContents = append(newContents, item)
+	newContents = append(newContents, entity.CopyItem(item, item.ID))
 	newMount.Contents = newContents
 
 	// Write back
@@ -114,19 +118,19 @@ func matchesCriteria(itemTags []core.Tag, criteria entity.MountCriteria) bool {
 	return true
 }
 
-// getItemSize returns the item's size attribute, defaulting to 1 if not present.
-func getItemSize(item entity.Item) int {
-	if attr, ok := item.Attributes["size"]; ok {
+// getItemCapacity returns the item's capacity attribute value, defaulting to 1 if not present.
+func getItemCapacity(item entity.Item, attrName string) int {
+	if attr, ok := item.Attributes[attrName]; ok {
 		return attr.Base
 	}
 	return 1
 }
 
-// usedCapacity returns sum of size attributes of items in mount.
-func usedCapacity(mount entity.Mount) int {
+// usedCapacity returns sum of capacity attribute values of items in mount.
+func usedCapacity(mount entity.Mount, attrName string) int {
 	total := 0
 	for _, item := range mount.Contents {
-		total += getItemSize(item)
+		total += getItemCapacity(item, attrName)
 	}
 	return total
 }

@@ -28,6 +28,7 @@ func TestHandle_DealDamage(t *testing.T) {
 			"player1": source,
 			"enemy1":  target,
 		},
+		PlayerUnitIDs: map[string]bool{"player1": true},
 	}
 
 	params := map[string]any{
@@ -82,6 +83,7 @@ func TestHandle_DealDamage_Destroy(t *testing.T) {
 			"player1": source,
 			"enemy1":  target,
 		},
+		PlayerUnitIDs: map[string]bool{"player1": true},
 	}
 
 	params := map[string]any{
@@ -134,6 +136,7 @@ func TestHandle_DealDamage_NoHealthAttribute(t *testing.T) {
 			"player1": source,
 			"enemy1":  target,
 		},
+		PlayerUnitIDs: map[string]bool{"player1": true},
 	}
 
 	params := map[string]any{
@@ -165,6 +168,7 @@ func TestHandle_DealDamage_NoEnemies(t *testing.T) {
 		AllUnits: map[string]entity.Unit{
 			"player1": source,
 		},
+		PlayerUnitIDs: map[string]bool{"player1": true},
 	}
 
 	params := map[string]any{
@@ -379,6 +383,7 @@ func TestHandle_DealSplashDamage(t *testing.T) {
 			"player1": source,
 			"enemy1":  target,
 		},
+		PlayerUnitIDs: map[string]bool{"player1": true},
 	}
 
 	params := map[string]any{
@@ -462,6 +467,7 @@ func TestHandle_DealDamage_DeterministicEnemySelection(t *testing.T) {
 			"zebra":   enemy1,
 			"alpha":   enemy2,
 		},
+		PlayerUnitIDs: map[string]bool{"player1": true},
 	}
 
 	params := map[string]any{
