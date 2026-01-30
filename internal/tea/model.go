@@ -31,6 +31,24 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		m.Phase = PhaseGameOver
 		return m, nil
 
+	case PlayerPaused:
+		if m.Phase != PhaseCombat {
+			return m, nil
+		}
+		combat := m.Combat
+		combat.Phase = model.CombatPaused
+		m.Combat = combat
+		return m, nil
+
+	case PlayerResumed:
+		if m.Phase != PhaseCombat {
+			return m, nil
+		}
+		combat := m.Combat
+		combat.Phase = model.CombatActive
+		m.Combat = combat
+		return m, nil
+
 	case CombatTicked:
 		return m.handleCombatTicked(msg)
 
@@ -235,10 +253,6 @@ func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 
 	// Return command for cascade
 	return m, buildTriggersCollectedCmd("cascade", allTriggers, nil, msg.Depth+1)
-}
-
-func (m Model) View() string {
-	return "Wulfaz MVP - scaffold"
 }
 
 // Helper functions

@@ -1,6 +1,6 @@
 # Mech Autobattler Roguelike — Design Document
 
-**Status:** Event dispatch and effect handling implemented
+**Status:** Ebitengine rendering and runtime integration complete
 
 ---
 
@@ -218,9 +218,9 @@ Fight 1 → Shop/Event → Shop/Event → Fight 2 → Game Over/Reset
 
 - **Architecture:** TEA (The Elm Architecture) in Go
 - **Reference:** See `CLAUDE.md` for TEA principles and rules
-- **Platform:** Desktop GUI
+- **Platform:** Desktop GUI (Ebitengine)
 - **Data Format:** KDL 1.0 for templates (via github.com/sblinch/kdl-go)
-- **Rendering:** Hybrid (2D engine + pseudoterminal layer)
+- **Rendering:** Ebitengine 2D (github.com/hajimehoshi/ebiten/v2)
 
 ### Architectural Constraint: Seeded RNG
 
@@ -276,8 +276,9 @@ This enables: full replay, turn-level undo, time-travel debugging, deterministic
 
 ```
 wulfaz/
-├── cmd/wulfaz/main.go           # Entry point
+├── cmd/wulfaz/main.go           # Entry point (Ebitengine bootstrap)
 ├── internal/
+│   ├── app/app.go               # Ebitengine Game implementation
 │   ├── core/                    # Foundation types
 │   │   ├── tag.go               # Tag string type
 │   │   ├── valueref.go          # Static int (MVP), expandable
@@ -295,26 +296,28 @@ wulfaz/
 │   │   ├── part.go              # Part with Mounts, Connections
 │   │   └── unit.go              # Unit with Parts, Pilot (HasPilot flag)
 │   ├── model/combat.go          # CombatPhase, CombatModel
-│   ├── tea/                     # TEA runtime
+│   ├── tea/                     # TEA types and Update logic
 │   │   ├── msg.go               # Msg interface + concrete messages
 │   │   ├── cmd.go               # Cmd type + None, Batch
-│   │   ├── model.go             # GamePhase, Model, Update, View
+│   │   ├── model.go             # GamePhase, Model, Update
 │   │   ├── model_test.go        # TEA integration tests
-│   │   └── runtime.go           # Runtime with Dispatch loop
-│   ├── event/                   # Event dispatch [IMPLEMENTED]
+│   │   └── runtime.go           # Runtime with Dispatch loop (test helper)
+│   ├── event/                   # Event dispatch
 │   │   ├── context.go           # TriggerContext, TriggerOwner, CollectedTrigger
 │   │   ├── dispatch.go          # Entity traversal, condition evaluation
 │   │   └── dispatch_test.go     # 11 dispatch tests
-│   ├── effect/                  # Effect handling [IMPLEMENTED]
+│   ├── effect/                  # Effect handling
 │   │   ├── result.go            # EffectResult, FollowUpEvent
 │   │   ├── handler.go           # EffectContext, 3 effect handlers
 │   │   └── handler_test.go      # 13 effect tests
-│   └── template/                # Template loading [IMPLEMENTED]
+│   └── template/                # Template loading
 │       ├── registry.go          # Registry for units/items
 │       ├── loader.go            # LoadUnitsFromDir, LoadItemsFromDir
 │       ├── parse.go             # KDL parsing helpers, entity parsers
 │       └── loader_test.go       # 24 tests covering all parsers
-├── ui/renderer/stub.go          # Minimal rendering
+├── ui/renderer/
+│   ├── stub.go                  # Text-based rendering (testing)
+│   └── ebiten.go                # Ebitengine rendering
 ├── data/templates/
 │   ├── units/
 │   │   ├── small_mech.kdl       # Light chassis (combat_width=1)
@@ -535,10 +538,12 @@ Full details in previous version. Key policies:
 5. Event/encounter variety and writing
 6. Pilot trait list and effects
 
-### UI (Deferred)
+### UI (Post-MVP)
 
-7. UI layout and information density
-8. Pseudoterminal rendering details
+- Custom fonts and sprites (currently using debug text)
+- Health bars and damage numbers
+- Animation system for attacks
+- Menu and shop screens
 
 ---
 
@@ -627,5 +632,12 @@ item id="double_heatsink" {
 4. ~~Implement event dispatch (`event/dispatch.go`)~~ **DONE**
 5. ~~Implement basic effects (`effect/handler.go`)~~ **DONE**
 6. ~~Wire up combat tick loop~~ **DONE**
-7. Minimal UI rendering
-8. Runtime integration (tick generation, Cmd execution)
+7. ~~Minimal UI rendering (Ebitengine)~~ **DONE**
+8. ~~Runtime integration (tick generation, Cmd execution)~~ **DONE**
+
+### MVP Complete — Next Phase
+
+9. Load units from templates instead of hardcoded test data
+10. Implement shop/event phase between fights
+11. Add win/lose conditions (health reaches 0)
+12. Second fight encounter

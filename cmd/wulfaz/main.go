@@ -1,16 +1,21 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"time"
 
-	"wulfaz/internal/tea"
+	"github.com/hajimehoshi/ebiten/v2"
+
+	"wulfaz/internal/app"
 )
 
 func main() {
 	seed := time.Now().UnixNano()
-	runtime := tea.NewRuntime(seed)
-	fmt.Println("Wulfaz MVP scaffold")
-	fmt.Printf("Seed: %d\n", seed)
-	_ = runtime // TODO: runtime.Run()
+
+	ebiten.SetWindowSize(800, 600)
+	ebiten.SetWindowTitle("Wulfaz")
+
+	if err := ebiten.RunGame(app.New(seed)); err != nil {
+		log.Fatal(err)
+	}
 }
