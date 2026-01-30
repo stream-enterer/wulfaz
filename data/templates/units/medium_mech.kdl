@@ -7,12 +7,33 @@ unit id="medium_mech" {
     parts {
         part id="left_arm" template_id="mech_arm" {
             tags "arm" "left"
+            mounts {
+                mount id="hand" capacity=3 {
+                    accepts {
+                        requires_any "weapon"
+                    }
+                }
+            }
         }
         part id="right_arm" template_id="mech_arm" {
             tags "arm" "right"
+            mounts {
+                mount id="hand" capacity=3 {
+                    accepts {
+                        requires_any "weapon"
+                    }
+                }
+            }
         }
         part id="torso" template_id="mech_torso" {
             tags "torso" "center"
+            mounts {
+                mount id="core" capacity=4 {
+                    accepts {
+                        requires_any "equipment"
+                    }
+                }
+            }
         }
     }
 }

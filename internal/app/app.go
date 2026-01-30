@@ -1,16 +1,17 @@
 package app
 
 import (
+	"log"
 	"math/rand/v2"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
-	"wulfaz/internal/core"
 	"wulfaz/internal/entity"
 	"wulfaz/internal/model"
 	"wulfaz/internal/tea"
+	"wulfaz/internal/template"
 	"wulfaz/ui/renderer"
 )
 
@@ -23,43 +24,89 @@ const (
 // App implements ebiten.Game and drives the TEA runtime
 type App struct {
 	model    tea.Model
+	registry *template.Registry // Immutable after init; for shop/rewards later
 	rng      *rand.Rand
 	lastTick time.Time
 }
 
-// New creates a new App with test units in combat mode
+// New creates a new App with units loaded from templates
 func New(seed int64) *App {
 	rng := rand.New(rand.NewPCG(uint64(seed), uint64(seed>>32)))
 
-	// Create test units
-	playerUnits := []entity.Unit{
-		{
-			ID: "player1",
-			Attributes: map[string]core.Attribute{
-				"health": {Name: "health", Base: 100, Min: 0, Max: 200},
-			},
-		},
-		{
-			ID: "player2",
-			Attributes: map[string]core.Attribute{
-				"health": {Name: "health", Base: 80, Min: 0, Max: 150},
-			},
-		},
+	// Load templates
+	reg := template.NewRegistry()
+	if err := template.LoadUnitsFromDir("data/templates/units", reg); err != nil {
+		log.Fatalf("load unit templates: %v", err)
+	}
+	if err := template.LoadItemsFromDir("data/templates/items", reg); err != nil {
+		log.Fatalf("load item templates: %v", err)
 	}
 
-	enemyUnits := []entity.Unit{
-		{
-			ID: "enemy1",
-			Attributes: map[string]core.Attribute{
-				"health": {Name: "health", Base: 50, Min: 0, Max: 100},
-			},
-		},
-		{
-			ID: "enemy2",
-			Attributes: map[string]core.Attribute{
-				"health": {Name: "health", Base: 60, Min: 0, Max: 100},
-			},
-		},
+	// Instantiate player units
+	player1, err := template.InstantiateUnit(reg, "medium_mech", "player_1")
+	if err != nil {
+		log.Fatalf("instantiate player_1: %v", err)
+	}
+	player2, err := template.InstantiateUnit(reg, "small_mech", "player_2")
+	if err != nil {
+		log.Fatalf("instantiate player_2: %v", err)
+	}
+
+	// Instantiate enemy units
+	enemy1, err := template.InstantiateUnit(reg, "small_mech", "enemy_1")
+	if err != nil {
+		log.Fatalf("instantiate enemy_1: %v", err)
+	}
+	enemy2, err := template.InstantiateUnit(reg, "medium_mech", "enemy_2")
+	if err != nil {
+		log.Fatalf("instantiate enemy_2: %v", err)
+	}
+
+	// Equip player weapons (medium_laser fires on_combat_tick)
+	laser1, err := template.InstantiateItem(reg, "medium_laser", "p1_laser_r")
+	if err != nil {
+		log.Fatalf("instantiate p1_laser_r: %v", err)
+	}
+	player1, err = template.EquipItem(player1, "right_arm", 0, laser1)
+	if err != nil {
+		log.Fatalf("equip player_1 right_arm: %v", err)
+	}
+
+	laser2, err := template.InstantiateItem(reg, "medium_laser", "p1_laser_l")
+	if err != nil {
+		log.Fatalf("instantiate p1_laser_l: %v", err)
+	}
+	player1, err = template.EquipItem(player1, "left_arm", 0, laser2)
+	if err != nil {
+		log.Fatalf("equip player_1 left_arm: %v", err)
+	}
+
+	laser3, err := template.InstantiateItem(reg, "medium_laser", "p2_laser")
+	if err != nil {
+		log.Fatalf("instantiate p2_laser: %v", err)
+	}
+	player2, err = template.EquipItem(player2, "right_arm", 0, laser3)
+	if err != nil {
+		log.Fatalf("equip player_2 right_arm: %v", err)
+	}
+
+	// Equip enemy weapons
+	eLaser1, err := template.InstantiateItem(reg, "medium_laser", "e1_laser")
+	if err != nil {
+		log.Fatalf("instantiate e1_laser: %v", err)
+	}
+	enemy1, err = template.EquipItem(enemy1, "right_arm", 0, eLaser1)
+	if err != nil {
+		log.Fatalf("equip enemy_1: %v", err)
+	}
+
+	eLaser2, err := template.InstantiateItem(reg, "medium_laser", "e2_laser")
+	if err != nil {
+		log.Fatalf("instantiate e2_laser: %v", err)
+	}
+	enemy2, err = template.EquipItem(enemy2, "right_arm", 0, eLaser2)
+	if err != nil {
+		log.Fatalf("equip enemy_2: %v", err)
 	}
 
 	return &App{
@@ -69,12 +116,13 @@ func New(seed int64) *App {
 			Seed:    seed,
 			Combat: model.CombatModel{
 				Phase:       model.CombatActive,
-				PlayerUnits: playerUnits,
-				EnemyUnits:  enemyUnits,
+				PlayerUnits: []entity.Unit{player1, player2},
+				EnemyUnits:  []entity.Unit{enemy1, enemy2},
 				Tick:        0,
 				Log:         []string{"Combat started"},
 			},
 		},
+		registry: reg,
 		rng:      rng,
 		lastTick: time.Now(),
 	}

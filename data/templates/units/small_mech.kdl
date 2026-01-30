@@ -7,12 +7,33 @@ unit id="small_mech" {
     parts {
         part id="torso" template_id="light_torso" {
             tags "torso" "center"
+            mounts {
+                mount id="core" capacity=2 {
+                    accepts {
+                        requires_any "weapon" "equipment"
+                    }
+                }
+            }
         }
         part id="left_arm" template_id="light_arm" {
             tags "arm" "left"
+            mounts {
+                mount id="hand" capacity=2 {
+                    accepts {
+                        requires_any "weapon"
+                    }
+                }
+            }
         }
         part id="right_arm" template_id="light_arm" {
             tags "arm" "right"
+            mounts {
+                mount id="hand" capacity=2 {
+                    accepts {
+                        requires_any "weapon"
+                    }
+                }
+            }
         }
     }
 }

@@ -545,6 +545,12 @@ Full details in previous version. Key policies:
 - Animation system for attacks
 - Menu and shop screens
 
+### Template Loading (Post-MVP)
+
+- Absolute template paths (currently relative, requires running from repo root)
+- Graceful template errors (currently `log.Fatalf` on missing templates)
+- Separate part templates (currently inline-only, `Part.TemplateID` is cosmetic)
+
 ---
 
 ## KDL Template Examples
