@@ -12,7 +12,7 @@ core ← entity ← model ← tea
       template
 ```
 
-No import cycles. Templates in `data/templates/` as KDL 1.0.
+No import cycles. Templates in `data/templates/` as KDL 1.0 *NOT* 2.0.
 
 ---
 

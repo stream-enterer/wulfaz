@@ -1,0 +1,29 @@
+unit id="large_mech" {
+    tags "mech" "large" "heavy"
+    attributes {
+        attribute name="combat_width" base=3
+    }
+    parts {
+        part id="torso" template_id="heavy_torso" {
+            tags "torso" "center"
+        }
+        part id="left_torso" template_id="side_torso" {
+            tags "torso" "left"
+        }
+        part id="right_torso" template_id="side_torso" {
+            tags "torso" "right"
+        }
+        part id="left_arm" template_id="heavy_arm" {
+            tags "arm" "left"
+        }
+        part id="right_arm" template_id="heavy_arm" {
+            tags "arm" "right"
+        }
+        part id="left_leg" template_id="heavy_leg" {
+            tags "leg" "left"
+        }
+        part id="right_leg" template_id="heavy_leg" {
+            tags "leg" "right"
+        }
+    }
+}

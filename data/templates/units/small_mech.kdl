@@ -1,0 +1,17 @@
+unit id="small_mech" {
+    tags "mech" "small" "light"
+    attributes {
+        attribute name="combat_width" base=1
+    }
+    parts {
+        part id="torso" template_id="light_torso" {
+            tags "torso" "center"
+        }
+        part id="left_arm" template_id="light_arm" {
+            tags "arm" "left"
+        }
+        part id="right_arm" template_id="light_arm" {
+            tags "arm" "right"
+        }
+    }
+}

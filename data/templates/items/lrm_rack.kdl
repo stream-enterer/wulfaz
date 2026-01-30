@@ -1,0 +1,24 @@
+item id="lrm_rack" {
+    tags "weapon" "missile" "lrm" "indirect"
+    attributes {
+        attribute name="size" base=3
+        attribute name="damage" base=4
+        attribute name="splash" base=2
+        attribute name="ammo" base=12
+        attribute name="cooldown" base=4
+        attribute name="min_range" base=3
+    }
+    triggers {
+        trigger event="on_activate" effect_name="deal_splash_damage" {
+            params damage=4 splash_radius=2 target="enemy"
+        }
+        trigger event="on_activate" effect_name="consume_ammo" {
+            params amount=1
+        }
+    }
+    requirements {
+        requirement scope="unit" on_unmet="disabled" {
+            condition type="attr_gte" attribute="ammo" value=1
+        }
+    }
+}

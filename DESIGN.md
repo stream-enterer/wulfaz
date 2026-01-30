@@ -1,6 +1,6 @@
 # Mech Autobattler Roguelike — Design Document
 
-**Status:** MVP scaffold complete, ready for implementation
+**Status:** MVP scaffold complete, KDL template loading implemented
 
 ---
 
@@ -217,7 +217,7 @@ Fight 1 → Shop/Event → Shop/Event → Fight 2 → Game Over/Reset
 ## Tech Stack
 
 - **Architecture:** TEA (The Elm Architecture) in Go
-- **Reference:** See `RULES.md`
+- **Reference:** See `CLAUDE.md` for TEA principles and rules
 - **Platform:** Desktop GUI
 - **Data Format:** KDL 1.0 for templates (via github.com/sblinch/kdl-go)
 - **Rendering:** Hybrid (2D engine + pseudoterminal layer)
@@ -302,16 +302,25 @@ wulfaz/
 │   │   └── runtime.go           # Runtime with Dispatch loop
 │   ├── event/dispatch.go        # Trigger dispatch (stub)
 │   ├── effect/handler.go        # Effect handler (stub)
-│   └── template/                # Template loading
+│   └── template/                # Template loading [IMPLEMENTED]
 │       ├── registry.go          # Registry for units/items
-│       └── loader.go            # KDL loading (stub)
+│       ├── loader.go            # LoadUnitsFromDir, LoadItemsFromDir
+│       ├── parse.go             # KDL parsing helpers, entity parsers
+│       └── loader_test.go       # 24 tests covering all parsers
 ├── ui/renderer/stub.go          # Minimal rendering
 ├── data/templates/
-│   ├── units/medium_mech.kdl
-│   └── items/medium_laser.kdl
+│   ├── units/
+│   │   ├── small_mech.kdl       # Light chassis (combat_width=1)
+│   │   ├── medium_mech.kdl      # Medium chassis (combat_width=2)
+│   │   └── large_mech.kdl       # Heavy chassis (combat_width=3)
+│   └── items/
+│       ├── medium_laser.kdl     # Energy weapon
+│       ├── autocannon.kdl       # Ballistic weapon with ammo
+│       └── lrm_rack.kdl         # Missile weapon with splash
 ├── go.mod
-├── DESIGN.md
-└── RULES.md
+├── go.sum
+├── CLAUDE.md                    # TEA principles and coding rules
+└── DESIGN.md
 ```
 
 ### Key Type Names (as implemented)
@@ -343,7 +352,7 @@ wulfaz/
 | `Part` | entity/part.go | Mounts + Connections |
 | `Unit` | entity/unit.go | Parts + Pilot + HasPilot flag |
 
-### RULES.md Compliance
+### TEA Compliance
 
 - [x] Model is struct with no functions/channels/mutexes
 - [x] All Model methods use value receivers
@@ -555,10 +564,10 @@ item id="double_heatsink" {
 
 ## Next Steps
 
-1. Implement KDL loader (`template/loader.go`)
-2. Implement event dispatch (`event/dispatch.go`)
-3. Implement basic effects (`effect/handler.go`)
-4. Wire up combat tick loop
-5. Add 3 chassis templates (small/medium/large)
-6. Add weapon templates (laser, AC, LRM)
+1. ~~Implement KDL loader (`template/loader.go`)~~ **DONE**
+2. ~~Add 3 chassis templates (small/medium/large)~~ **DONE**
+3. ~~Add weapon templates (laser, AC, LRM)~~ **DONE**
+4. Implement event dispatch (`event/dispatch.go`)
+5. Implement basic effects (`effect/handler.go`)
+6. Wire up combat tick loop
 7. Minimal UI rendering
