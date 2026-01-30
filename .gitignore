@@ -1,3 +1,9 @@
+# Go
+wulfaz
+*.exe
+*.test
+coverage.out
+
 # Dotfiles
 .bash_profile
 .bashrc
