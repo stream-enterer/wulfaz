@@ -643,7 +643,7 @@ item id="double_heatsink" {
 
 ### MVP Complete — Next Phase
 
-9. Load units from templates instead of hardcoded test data
+9. ~~Load units from templates instead of hardcoded test data~~ **DONE**
 10. Implement shop/event phase between fights
 11. Add win/lose conditions (health reaches 0)
 12. Second fight encounter
