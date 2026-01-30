@@ -126,41 +126,43 @@ func handleConsumeAmmo(params map[string]any, ctx EffectContext) EffectResult {
 		}
 	}
 
-	var foundMount *entity.Mount
 	var mountIndex int
+	var mountFound bool
 	for i := range part.Mounts {
 		if part.Mounts[i].ID == ctx.Owner.MountID {
-			foundMount = &part.Mounts[i]
 			mountIndex = i
+			mountFound = true
 			break
 		}
 	}
-	if foundMount == nil {
+	if !mountFound {
 		return EffectResult{
 			LogEntries: []string{fmt.Sprintf("consume_ammo: mount %s not found", ctx.Owner.MountID)},
 		}
 	}
+	mount := part.Mounts[mountIndex]
 
-	var foundItem *entity.Item
 	var itemIndex int
-	for i := range foundMount.Contents {
-		if foundMount.Contents[i].ID == ctx.Owner.ItemID {
-			foundItem = &foundMount.Contents[i]
+	var itemFound bool
+	for i := range mount.Contents {
+		if mount.Contents[i].ID == ctx.Owner.ItemID {
 			itemIndex = i
+			itemFound = true
 			break
 		}
 	}
-	if foundItem == nil {
+	if !itemFound {
 		return EffectResult{
 			LogEntries: []string{fmt.Sprintf("consume_ammo: item %s not found", ctx.Owner.ItemID)},
 		}
 	}
+	item := mount.Contents[itemIndex]
 
 	// Check ammo attribute
-	ammoAttr, hasAmmo := foundItem.Attributes["ammo"]
+	ammoAttr, hasAmmo := item.Attributes["ammo"]
 	if !hasAmmo {
 		return EffectResult{
-			LogEntries: []string{fmt.Sprintf("consume_ammo: item %s has no ammo attribute", foundItem.ID)},
+			LogEntries: []string{fmt.Sprintf("consume_ammo: item %s has no ammo attribute", item.ID)},
 		}
 	}
 
@@ -203,7 +205,7 @@ func handleConsumeAmmo(params map[string]any, ctx EffectContext) EffectResult {
 			ctx.SourceUnit.ID: modifiedUnit,
 		},
 		LogEntries: []string{fmt.Sprintf("%s consumed %d ammo (ammo: %d -> %d)",
-			foundItem.ID, amount, ammoAttr.Base, newAmmo)},
+			item.ID, amount, ammoAttr.Base, newAmmo)},
 	}
 }
 
