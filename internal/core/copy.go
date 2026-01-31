@@ -42,14 +42,15 @@ func CopyConditions(cs []Condition) []Condition {
 	return result
 }
 
-// CopyTrigger copies a Trigger (has Conditions slice + Params map).
+// CopyTrigger copies a Trigger (has Conditions slice + TargetConditions slice + Params map).
 func CopyTrigger(t Trigger) Trigger {
 	return Trigger{
-		Event:      t.Event,
-		Conditions: CopyConditions(t.Conditions),
-		EffectName: t.EffectName,
-		Params:     copyMap(t.Params),
-		Priority:   t.Priority,
+		Event:            t.Event,
+		Conditions:       CopyConditions(t.Conditions),
+		TargetConditions: CopyConditions(t.TargetConditions),
+		EffectName:       t.EffectName,
+		Params:           copyMap(t.Params),
+		Priority:         t.Priority,
 	}
 }
 

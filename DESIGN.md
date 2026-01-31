@@ -1,6 +1,6 @@
 # Mech Autobattler Roguelike — Design Document
 
-**Status:** Ebitengine rendering and runtime integration complete
+**Status:** Combat system complete with source/target condition filtering
 
 ---
 
@@ -519,7 +519,7 @@ Full details in previous version. Key policies:
 | Target resolution | First enemy (alphabetical) | AI/priority-based selection |
 | Damage model | Unit-level health | Per-part armor/structure (BTA) |
 | Attribute merging | Last write wins | Delta accumulation |
-| Destroyed units | **DONE**: Source/target conditions filter health >= 1 | Extended with target_conditions |
+| Destroyed units | **DONE**: Source/target conditions filter dead units | Full implementation complete |
 | Ally targeting | Self | Proper ally selection |
 | Model layers | Combat only | Meta/Run/Combat split |
 | Error handling | Log + skip | Corruption tracking |

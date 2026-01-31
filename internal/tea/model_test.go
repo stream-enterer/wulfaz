@@ -311,6 +311,213 @@ func TestUpdate_PlayerQuit(t *testing.T) {
 	}
 }
 
+func TestUpdate_TriggersCollected_ReEvaluatesSourceConditions(t *testing.T) {
+	// Test that source conditions are re-evaluated at execution time
+	// A unit that dies mid-batch should not execute its trigger
+
+	playerUnit := entity.Unit{
+		ID:   "player1",
+		Tags: []core.Tag{"player"},
+		Attributes: map[string]core.Attribute{
+			"health": {Name: "health", Base: 100, Min: 0},
+		},
+	}
+
+	enemyUnit := entity.Unit{
+		ID:   "enemy1",
+		Tags: []core.Tag{"enemy"},
+		Attributes: map[string]core.Attribute{
+			"health": {Name: "health", Base: 50, Min: 0},
+		},
+	}
+
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			PlayerUnits: []entity.Unit{playerUnit},
+			EnemyUnits:  []entity.Unit{enemyUnit},
+			Phase:       model.CombatActive,
+		},
+	}
+
+	// Simulate batch where enemy1 attacks first, then tries to attack again
+	// with a source condition requiring health >= 1.
+	// The second trigger should NOT execute because enemy1's health will be 0.
+	triggersMsg := TriggersCollected{
+		Event: string(core.EventOnCombatTick),
+		Triggers: []CollectedTrigger{
+			{
+				// First: player kills enemy
+				EffectName: "deal_damage",
+				Params:     map[string]any{"damage": 100, "target": "enemy"},
+				Owner:      TriggerOwner{UnitID: "player1"},
+			},
+			{
+				// Second: enemy tries to attack, but should be dead
+				EffectName: "deal_damage",
+				Params:     map[string]any{"damage": 50, "target": "self"}, // target self to avoid "no target" issue
+				Owner:      TriggerOwner{UnitID: "enemy1"},
+				Conditions: []core.Condition{
+					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 1}},
+				},
+			},
+		},
+		Depth: 0,
+	}
+
+	_, cmd := m.Update(triggersMsg)
+	if cmd == nil {
+		t.Fatal("expected non-nil command")
+	}
+
+	msg := cmd()
+	effectsMsg, ok := msg.(EffectsResolved)
+	if !ok {
+		t.Fatalf("expected EffectsResolved, got %T", msg)
+	}
+
+	// enemy1 should be modified (killed by player1)
+	if _, ok := effectsMsg.ModifiedUnits["enemy1"]; !ok {
+		t.Error("expected enemy1 in modified units")
+	}
+
+	// enemy1's health should be 0
+	if effectsMsg.ModifiedUnits["enemy1"].Attributes["health"].Base != 0 {
+		t.Errorf("expected enemy1 health 0, got %d", effectsMsg.ModifiedUnits["enemy1"].Attributes["health"].Base)
+	}
+
+	// Should only have one log entry (player attacking enemy)
+	// The dead enemy's trigger should NOT have executed
+	if len(effectsMsg.LogEntries) != 1 {
+		t.Errorf("expected 1 log entry (dead unit shouldn't attack), got %d: %v",
+			len(effectsMsg.LogEntries), effectsMsg.LogEntries)
+	}
+}
+
+func TestCombat_TwoUnitsPerSide(t *testing.T) {
+	// Simulate 2v2 combat to verify damage is applied correctly after unit1s die
+
+	attackTrigger := func() core.Trigger {
+		return core.Trigger{
+			Event:      core.EventOnCombatTick,
+			EffectName: "deal_damage",
+			Params:     map[string]any{"damage": 30, "target": "enemy"},
+			Priority:   1,
+			Conditions: []core.Condition{
+				{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 1}},
+			},
+			TargetConditions: []core.Condition{
+				{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 1}},
+			},
+		}
+	}
+
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			PlayerUnits: []entity.Unit{
+				{
+					ID:         "player1",
+					Attributes: map[string]core.Attribute{"health": {Name: "health", Base: 50}},
+					Triggers:   []core.Trigger{attackTrigger()},
+				},
+				{
+					ID:         "player2",
+					Attributes: map[string]core.Attribute{"health": {Name: "health", Base: 50}},
+					Triggers:   []core.Trigger{attackTrigger()},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:         "enemy1",
+					Attributes: map[string]core.Attribute{"health": {Name: "health", Base: 50}},
+					Triggers:   []core.Trigger{attackTrigger()},
+				},
+				{
+					ID:         "enemy2",
+					Attributes: map[string]core.Attribute{"health": {Name: "health", Base: 50}},
+					Triggers:   []core.Trigger{attackTrigger()},
+				},
+			},
+			Phase: model.CombatActive,
+			Tick:  0,
+			Log:   []string{},
+		},
+	}
+
+	// Helper to run one full tick
+	runTick := func(m Model) Model {
+		var cmd Cmd
+		m, cmd = m.Update(CombatTicked{})
+		for cmd != nil {
+			msg := cmd()
+			m, cmd = m.Update(msg)
+		}
+		return m
+	}
+
+	// Helper to get health
+	getHealth := func(m Model, unitID string) int {
+		for _, u := range m.Combat.PlayerUnits {
+			if u.ID == unitID {
+				return u.Attributes["health"].Base
+			}
+		}
+		for _, u := range m.Combat.EnemyUnits {
+			if u.ID == unitID {
+				return u.Attributes["health"].Base
+			}
+		}
+		return -1
+	}
+
+	t.Logf("Initial state:")
+	t.Logf("  player1: %d, player2: %d, enemy1: %d, enemy2: %d",
+		getHealth(m, "player1"), getHealth(m, "player2"),
+		getHealth(m, "enemy1"), getHealth(m, "enemy2"))
+
+	// Tick 1: All units attack
+	m = runTick(m)
+	t.Logf("After tick 1:")
+	t.Logf("  player1: %d, player2: %d, enemy1: %d, enemy2: %d",
+		getHealth(m, "player1"), getHealth(m, "player2"),
+		getHealth(m, "enemy1"), getHealth(m, "enemy2"))
+	t.Logf("  Log: %v", m.Combat.Log)
+
+	// Tick 2: Surviving units should attack
+	m = runTick(m)
+	t.Logf("After tick 2:")
+	t.Logf("  player1: %d, player2: %d, enemy1: %d, enemy2: %d",
+		getHealth(m, "player1"), getHealth(m, "player2"),
+		getHealth(m, "enemy1"), getHealth(m, "enemy2"))
+	t.Logf("  Log: %v", m.Combat.Log)
+
+	// Tick 3: Continue if anyone alive
+	m = runTick(m)
+	t.Logf("After tick 3:")
+	t.Logf("  player1: %d, player2: %d, enemy1: %d, enemy2: %d",
+		getHealth(m, "player1"), getHealth(m, "player2"),
+		getHealth(m, "enemy1"), getHealth(m, "enemy2"))
+	t.Logf("  Log: %v", m.Combat.Log)
+
+	// Verify that unit2s took damage after unit1s died
+	// With 30 damage per attack and 50 health:
+	// - Tick 1: enemy1 and enemy2 both attack player1 (first alphabetically) -> player1 takes 60 damage (dead)
+	//           player1 and player2 both attack enemy1 (first alphabetically) -> enemy1 takes 60 damage (dead)
+	// - Tick 2: enemy2 attacks player2 (only living player) -> player2 takes 30 damage (20 left)
+	//           player2 attacks enemy2 (only living enemy) -> enemy2 takes 30 damage (20 left)
+	// - Tick 3: Same as tick 2 -> both should be at -10 (clamped to 0)
+
+	if getHealth(m, "player2") != 0 && getHealth(m, "enemy2") != 0 {
+		// At least one of them should have taken damage by now
+		if getHealth(m, "player2") == 50 && getHealth(m, "enemy2") == 50 {
+			t.Error("Neither unit2 took any damage - this is the bug!")
+		}
+	}
+}
+
 func TestFullCombatFlow(t *testing.T) {
 	// Test the full flow: CombatTicked -> TriggersCollected -> EffectsResolved
 

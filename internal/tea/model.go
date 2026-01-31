@@ -131,6 +131,14 @@ func (m Model) handleTriggersCollected(msg TriggersCollected) (Model, Cmd) {
 			continue
 		}
 
+		// Re-evaluate source conditions with current unit state
+		// (unit may have died since trigger was collected)
+		if len(trigger.Conditions) > 0 {
+			if !core.EvaluateConditions(trigger.Conditions, sourceUnit.Tags, sourceUnit.Attributes) {
+				continue
+			}
+		}
+
 		// Build effect context
 		ctx := effect.EffectContext{
 			Owner:            toEventTriggerOwner(trigger.Owner),
@@ -297,6 +305,7 @@ func toMsgCollectedTrigger(ct event.CollectedTrigger) CollectedTrigger {
 			MountID: ct.Owner.MountID,
 			ItemID:  ct.Owner.ItemID,
 		},
+		Conditions:       ct.Trigger.Conditions,
 		TargetConditions: ct.Trigger.TargetConditions,
 	}
 }

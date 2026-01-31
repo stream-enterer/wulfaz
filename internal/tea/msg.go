@@ -58,6 +58,7 @@ type CollectedTrigger struct {
 	Params           map[string]any
 	Priority         int
 	Owner            TriggerOwner
+	Conditions       []core.Condition // source conditions, re-evaluated at execution time
 	TargetConditions []core.Condition
 }
 
