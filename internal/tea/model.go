@@ -133,11 +133,12 @@ func (m Model) handleTriggersCollected(msg TriggersCollected) (Model, Cmd) {
 
 		// Build effect context
 		ctx := effect.EffectContext{
-			Owner:         toEventTriggerOwner(trigger.Owner),
-			SourceUnit:    sourceUnit,
-			AllUnits:      unitMap,
-			PlayerUnitIDs: playerIDs,
-			Rolls:         msg.Rolls,
+			Owner:            toEventTriggerOwner(trigger.Owner),
+			SourceUnit:       sourceUnit,
+			AllUnits:         unitMap,
+			PlayerUnitIDs:    playerIDs,
+			Rolls:            msg.Rolls,
+			TargetConditions: trigger.TargetConditions,
 		}
 
 		// Execute effect
@@ -296,6 +297,7 @@ func toMsgCollectedTrigger(ct event.CollectedTrigger) CollectedTrigger {
 			MountID: ct.Owner.MountID,
 			ItemID:  ct.Owner.ItemID,
 		},
+		TargetConditions: ct.Trigger.TargetConditions,
 	}
 }
 

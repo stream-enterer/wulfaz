@@ -119,6 +119,66 @@ func TestParseTrigger(t *testing.T) {
 	}
 }
 
+func TestParseTrigger_WithTargetConditions(t *testing.T) {
+	kdlStr := `trigger event="on_combat_tick" effect_name="deal_damage" {
+		params damage=5 target="enemy"
+		target_conditions {
+			condition type="attr_gte" attribute="health" value=1
+		}
+	}`
+	doc, err := kdl.Parse(strings.NewReader(kdlStr))
+	if err != nil {
+		t.Fatalf("parse KDL: %v", err)
+	}
+
+	trigger, err := parseTrigger(doc.Nodes[0], "test.kdl")
+	if err != nil {
+		t.Fatalf("parseTrigger: %v", err)
+	}
+
+	if len(trigger.TargetConditions) != 1 {
+		t.Fatalf("expected 1 target condition, got %d", len(trigger.TargetConditions))
+	}
+	if trigger.TargetConditions[0].Type != core.ConditionAttrGTE {
+		t.Errorf("expected attr_gte, got %v", trigger.TargetConditions[0].Type)
+	}
+	if trigger.TargetConditions[0].Params["attribute"] != "health" {
+		t.Errorf("expected attribute=health, got %v", trigger.TargetConditions[0].Params["attribute"])
+	}
+	if trigger.TargetConditions[0].Params["value"] != 1 {
+		t.Errorf("expected value=1, got %v", trigger.TargetConditions[0].Params["value"])
+	}
+}
+
+func TestParseTrigger_BothConditionTypes(t *testing.T) {
+	kdlStr := `trigger event="on_combat_tick" effect_name="deal_damage" {
+		params damage=5 target="enemy"
+		conditions {
+			condition type="attr_gte" attribute="health" value=1
+		}
+		target_conditions {
+			condition type="attr_gte" attribute="health" value=1
+			condition type="has_tag" tag="mech"
+		}
+	}`
+	doc, err := kdl.Parse(strings.NewReader(kdlStr))
+	if err != nil {
+		t.Fatalf("parse KDL: %v", err)
+	}
+
+	trigger, err := parseTrigger(doc.Nodes[0], "test.kdl")
+	if err != nil {
+		t.Fatalf("parseTrigger: %v", err)
+	}
+
+	if len(trigger.Conditions) != 1 {
+		t.Errorf("expected 1 source condition, got %d", len(trigger.Conditions))
+	}
+	if len(trigger.TargetConditions) != 2 {
+		t.Errorf("expected 2 target conditions, got %d", len(trigger.TargetConditions))
+	}
+}
+
 func TestParseRequirement(t *testing.T) {
 	kdlStr := `requirement scope="unit" on_unmet="disabled" {
 		condition type="attr_gte" attribute="ammo" value=1

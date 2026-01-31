@@ -12,9 +12,10 @@ const (
 )
 
 type Trigger struct {
-	Event      EventType
-	Conditions []Condition
-	EffectName string // effect name to invoke
-	Params     map[string]any
-	Priority   int // lower = earlier
+	Event            EventType
+	Conditions       []Condition // evaluated against SOURCE unit
+	TargetConditions []Condition // evaluated against TARGET units
+	EffectName       string      // effect name to invoke
+	Params           map[string]any
+	Priority         int // lower = earlier
 }

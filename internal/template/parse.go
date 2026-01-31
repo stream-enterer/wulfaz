@@ -350,12 +350,25 @@ func parseTrigger(node *document.Node, filename string) (core.Trigger, error) {
 		}
 	}
 
+	// Parse target_conditions (same pattern as conditions)
+	var targetConditions []core.Condition
+	if targetCondNode := findChild(node, "target_conditions"); targetCondNode != nil {
+		for _, condNode := range findChildren(targetCondNode, "condition") {
+			cond, err := parseCondition(condNode, filename)
+			if err != nil {
+				return core.Trigger{}, err
+			}
+			targetConditions = append(targetConditions, cond)
+		}
+	}
+
 	return core.Trigger{
-		Event:      event,
-		EffectName: effectName,
-		Params:     params,
-		Priority:   priority,
-		Conditions: conditions,
+		Event:            event,
+		EffectName:       effectName,
+		Params:           params,
+		Priority:         priority,
+		Conditions:       conditions,
+		TargetConditions: targetConditions,
 	}, nil
 }
 

@@ -11,11 +11,12 @@ import (
 
 // EffectContext provides state for effect execution
 type EffectContext struct {
-	Owner         event.TriggerOwner
-	SourceUnit    entity.Unit
-	AllUnits      map[string]entity.Unit // keyed by unit ID
-	PlayerUnitIDs map[string]bool        // set of player-side unit IDs
-	Rolls         []int
+	Owner            event.TriggerOwner
+	SourceUnit       entity.Unit
+	AllUnits         map[string]entity.Unit // keyed by unit ID
+	PlayerUnitIDs    map[string]bool        // set of player-side unit IDs
+	Rolls            []int
+	TargetConditions []core.Condition // conditions to filter target units
 }
 
 // Handle executes an effect and returns the result
@@ -241,6 +242,7 @@ func resolveTarget(params map[string]any, ctx EffectContext) (entity.Unit, bool)
 
 // getEnemiesOf returns units not on the same side as source, sorted by ID for determinism.
 // Uses PlayerUnitIDs from context to determine sides.
+// Filters by TargetConditions if present.
 func getEnemiesOf(source entity.Unit, ctx EffectContext) []entity.Unit {
 	var enemies []entity.Unit
 	sourceIsPlayer := ctx.PlayerUnitIDs[source.ID]
@@ -252,6 +254,12 @@ func getEnemiesOf(source entity.Unit, ctx EffectContext) []entity.Unit {
 		}
 		unitIsPlayer := ctx.PlayerUnitIDs[unit.ID]
 		if sourceIsPlayer != unitIsPlayer {
+			// Filter by target conditions
+			if len(ctx.TargetConditions) > 0 {
+				if !core.EvaluateConditions(ctx.TargetConditions, unit.Tags, unit.Attributes) {
+					continue
+				}
+			}
 			enemies = append(enemies, unit)
 		}
 	}

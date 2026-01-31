@@ -1,5 +1,7 @@
 package tea
 
+import "wulfaz/internal/core"
+
 type Msg interface {
 	isMsg() // sealed
 }
@@ -52,10 +54,11 @@ func (TriggersCollected) isMsg() {}
 
 // CollectedTrigger pairs a trigger with its owner (mirrors event.CollectedTrigger for serialization)
 type CollectedTrigger struct {
-	EffectName string
-	Params     map[string]any
-	Priority   int
-	Owner      TriggerOwner
+	EffectName       string
+	Params           map[string]any
+	Priority         int
+	Owner            TriggerOwner
+	TargetConditions []core.Condition
 }
 
 // TriggerOwner identifies which entity owns a trigger (mirrors event.TriggerOwner)

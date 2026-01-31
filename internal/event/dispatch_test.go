@@ -75,7 +75,7 @@ func TestDispatch_FailingCondition(t *testing.T) {
 				Event:      core.EventOnCombatTick,
 				EffectName: "deal_damage",
 				Conditions: []core.Condition{
-					{Type: core.ConditionAttrGTE, Params: map[string]any{"attr": "health", "value": 100}},
+					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 100}},
 				},
 			},
 		},
@@ -104,7 +104,7 @@ func TestDispatch_PassingCondition(t *testing.T) {
 				Event:      core.EventOnCombatTick,
 				EffectName: "deal_damage",
 				Conditions: []core.Condition{
-					{Type: core.ConditionAttrGTE, Params: map[string]any{"attr": "health", "value": 50}},
+					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 50}},
 				},
 			},
 		},
@@ -273,42 +273,42 @@ func TestDispatch_AttrConditions(t *testing.T) {
 				Event:      core.EventOnCombatTick,
 				EffectName: "gte_pass",
 				Conditions: []core.Condition{
-					{Type: core.ConditionAttrGTE, Params: map[string]any{"attr": "health", "value": 50}},
+					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 50}},
 				},
 			},
 			{
 				Event:      core.EventOnCombatTick,
 				EffectName: "gte_fail",
 				Conditions: []core.Condition{
-					{Type: core.ConditionAttrGTE, Params: map[string]any{"attr": "health", "value": 51}},
+					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 51}},
 				},
 			},
 			{
 				Event:      core.EventOnCombatTick,
 				EffectName: "lte_pass",
 				Conditions: []core.Condition{
-					{Type: core.ConditionAttrLTE, Params: map[string]any{"attr": "health", "value": 50}},
+					{Type: core.ConditionAttrLTE, Params: map[string]any{"attribute": "health", "value": 50}},
 				},
 			},
 			{
 				Event:      core.EventOnCombatTick,
 				EffectName: "lte_fail",
 				Conditions: []core.Condition{
-					{Type: core.ConditionAttrLTE, Params: map[string]any{"attr": "health", "value": 49}},
+					{Type: core.ConditionAttrLTE, Params: map[string]any{"attribute": "health", "value": 49}},
 				},
 			},
 			{
 				Event:      core.EventOnCombatTick,
 				EffectName: "eq_pass",
 				Conditions: []core.Condition{
-					{Type: core.ConditionAttrEQ, Params: map[string]any{"attr": "health", "value": 50}},
+					{Type: core.ConditionAttrEQ, Params: map[string]any{"attribute": "health", "value": 50}},
 				},
 			},
 			{
 				Event:      core.EventOnCombatTick,
 				EffectName: "eq_fail",
 				Conditions: []core.Condition{
-					{Type: core.ConditionAttrEQ, Params: map[string]any{"attr": "health", "value": 51}},
+					{Type: core.ConditionAttrEQ, Params: map[string]any{"attribute": "health", "value": 51}},
 				},
 			},
 		},
@@ -355,7 +355,7 @@ func TestDispatch_MissingAttribute(t *testing.T) {
 				Event:      core.EventOnCombatTick,
 				EffectName: "effect1",
 				Conditions: []core.Condition{
-					{Type: core.ConditionAttrGTE, Params: map[string]any{"attr": "nonexistent", "value": 50}},
+					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "nonexistent", "value": 50}},
 				},
 			},
 		},

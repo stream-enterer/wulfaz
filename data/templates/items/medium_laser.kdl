@@ -9,6 +9,12 @@ item id="medium_laser" {
     triggers {
         trigger event="on_combat_tick" effect_name="deal_damage" {
             params damage=5 target="enemy"
+            conditions {
+                condition type="attr_gte" attribute="health" value=1
+            }
+            target_conditions {
+                condition type="attr_gte" attribute="health" value=1
+            }
         }
     }
 }
