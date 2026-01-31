@@ -81,6 +81,9 @@ func (m Model) handleCombatTicked(msg CombatTicked) (Model, Cmd) {
 	var allTriggers []CollectedTrigger
 
 	for _, unit := range allUnits {
+		if !unit.IsAlive() {
+			continue
+		}
 		ctx := event.TriggerContext{
 			Event:      core.EventOnCombatTick,
 			SourceUnit: unit,
@@ -224,7 +227,7 @@ func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 
 	// Check for follow-up events
 	if len(msg.FollowUpEvents) == 0 {
-		return m, nil
+		return m.applyCombatEnd(), nil
 	}
 
 	// Dispatch follow-up events
@@ -259,11 +262,64 @@ func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 	}
 
 	if len(allTriggers) == 0 {
-		return m, nil
+		return m.applyCombatEnd(), nil
 	}
 
 	// Return command for cascade
 	return m, buildTriggersCollectedCmd(string(core.EventOnCascade), allTriggers, nil, msg.Depth+1)
+}
+
+// checkCombatEnd returns the victor if combat has ended, or "" if ongoing.
+func (m Model) checkCombatEnd() string {
+	playerAlive := false
+	for _, u := range m.Combat.PlayerUnits {
+		if u.IsAlive() {
+			playerAlive = true
+			break
+		}
+	}
+	enemyAlive := false
+	for _, u := range m.Combat.EnemyUnits {
+		if u.IsAlive() {
+			enemyAlive = true
+			break
+		}
+	}
+
+	switch {
+	case !playerAlive && !enemyAlive:
+		return "draw"
+	case !enemyAlive:
+		return "player"
+	case !playerAlive:
+		return "enemy"
+	default:
+		return ""
+	}
+}
+
+// applyCombatEnd checks for combat end and updates model if combat is over.
+// Returns the updated model.
+func (m Model) applyCombatEnd() Model {
+	if m.Combat.Phase != model.CombatActive {
+		return m
+	}
+	victor := m.checkCombatEnd()
+	if victor == "" {
+		return m
+	}
+	combat := m.Combat
+	combat.Phase = model.CombatResolved
+	combat.Victor = victor
+	newLog := make([]string, len(combat.Log), len(combat.Log)+1)
+	copy(newLog, combat.Log)
+	if victor == "draw" {
+		combat.Log = append(newLog, "combat ended: draw")
+	} else {
+		combat.Log = append(newLog, "combat ended: "+victor+" wins")
+	}
+	m.Combat = combat
+	return m
 }
 
 // Helper functions

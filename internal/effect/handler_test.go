@@ -183,9 +183,9 @@ func TestHandle_DealDamage_NoEnemies(t *testing.T) {
 		t.Errorf("expected no modifications with empty enemy list, got %d", len(result.ModifiedUnits))
 	}
 
-	// Should have log entry about target resolution
-	if len(result.LogEntries) != 1 {
-		t.Fatalf("expected 1 log entry, got %d", len(result.LogEntries))
+	// Silent no-op when no valid target
+	if len(result.LogEntries) != 0 {
+		t.Errorf("expected no log entries (silent no-op), got %d", len(result.LogEntries))
 	}
 }
 
@@ -613,26 +613,26 @@ func TestDealDamage_SkipsDeadTargets(t *testing.T) {
 		t.Errorf("expected no modifications when targeting dead units, got %d", len(result.ModifiedUnits))
 	}
 
-	// Should have log entry about no target
-	if len(result.LogEntries) != 1 {
-		t.Fatalf("expected 1 log entry about no target, got %d", len(result.LogEntries))
+	// Silent no-op when no valid target
+	if len(result.LogEntries) != 0 {
+		t.Errorf("expected no log entries (silent no-op), got %d", len(result.LogEntries))
 	}
 }
 
 func TestGetEnemiesOf_NoTargetConditions(t *testing.T) {
-	// Without target conditions, all enemies should be returned
+	// Without target conditions, only alive enemies should be returned
 	player := entity.Unit{
 		ID:   "player1",
 		Tags: []core.Tag{"player"},
 	}
-	enemy1 := entity.Unit{
+	deadEnemy := entity.Unit{
 		ID:   "enemy1",
 		Tags: []core.Tag{"mech"},
 		Attributes: map[string]core.Attribute{
 			"health": {Name: "health", Base: 0},
 		},
 	}
-	enemy2 := entity.Unit{
+	aliveEnemy := entity.Unit{
 		ID:   "enemy2",
 		Tags: []core.Tag{"mech"},
 		Attributes: map[string]core.Attribute{
@@ -644,8 +644,8 @@ func TestGetEnemiesOf_NoTargetConditions(t *testing.T) {
 		SourceUnit: player,
 		AllUnits: map[string]entity.Unit{
 			"player1": player,
-			"enemy1":  enemy1,
-			"enemy2":  enemy2,
+			"enemy1":  deadEnemy,
+			"enemy2":  aliveEnemy,
 		},
 		PlayerUnitIDs:    map[string]bool{"player1": true},
 		TargetConditions: nil, // No conditions
@@ -653,8 +653,12 @@ func TestGetEnemiesOf_NoTargetConditions(t *testing.T) {
 
 	enemies := getEnemiesOf(player, ctx)
 
-	if len(enemies) != 2 {
-		t.Errorf("expected 2 enemies without conditions, got %d", len(enemies))
+	// Dead enemies are filtered out even without explicit target conditions
+	if len(enemies) != 1 {
+		t.Errorf("expected 1 alive enemy, got %d", len(enemies))
+	}
+	if len(enemies) > 0 && enemies[0].ID != "enemy2" {
+		t.Errorf("expected enemy2 (alive), got %s", enemies[0].ID)
 	}
 }
 

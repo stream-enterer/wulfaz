@@ -47,9 +47,7 @@ func handleDealDamage(params map[string]any, ctx EffectContext) EffectResult {
 
 	target, ok := resolveTarget(params, ctx)
 	if !ok {
-		return EffectResult{
-			LogEntries: []string{"deal_damage: could not resolve target"},
-		}
+		return EffectResult{} // No valid target, silent no-op
 	}
 
 	// Check target has health attribute
@@ -240,9 +238,9 @@ func resolveTarget(params map[string]any, ctx EffectContext) (entity.Unit, bool)
 	}
 }
 
-// getEnemiesOf returns units not on the same side as source, sorted by ID for determinism.
+// getEnemiesOf returns living units not on the same side as source, sorted by ID for determinism.
 // Uses PlayerUnitIDs from context to determine sides.
-// Filters by TargetConditions if present.
+// Filters out dead units (IsAlive check) and by TargetConditions if present.
 func getEnemiesOf(source entity.Unit, ctx EffectContext) []entity.Unit {
 	var enemies []entity.Unit
 	sourceIsPlayer := ctx.PlayerUnitIDs[source.ID]
@@ -250,6 +248,9 @@ func getEnemiesOf(source entity.Unit, ctx EffectContext) []entity.Unit {
 	// Collect enemies
 	for _, unit := range ctx.AllUnits {
 		if unit.ID == source.ID {
+			continue
+		}
+		if !unit.IsAlive() {
 			continue
 		}
 		unitIsPlayer := ctx.PlayerUnitIDs[unit.ID]

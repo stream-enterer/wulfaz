@@ -17,4 +17,5 @@ type CombatModel struct {
 	Tick        int
 	Phase       CombatPhase
 	Log         []string
+	Victor      string // "player", "enemy", "draw", or "" (ongoing)
 }

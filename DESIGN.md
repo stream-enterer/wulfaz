@@ -521,6 +521,7 @@ Full details in previous version. Key policies:
 | Attribute merging | Last write wins | Delta accumulation |
 | Destroyed units | **DONE**: Source/target conditions filter dead units | Full implementation complete |
 | Ally targeting | Self | Proper ally selection |
+| No-target feedback | Silent no-op (correct for error handling) | Player-facing log: "laser fired but target destroyed" |
 | Model layers | Combat only | Meta/Run/Combat split |
 | Error handling | Log + skip | Corruption tracking |
 | Nested modifications | Unit-level attributes only | Full unit serialization (Currently item attribute changes like ammo consumption are lost after the effect chain completes) |
@@ -663,5 +664,5 @@ item id="double_heatsink" {
 
 9. ~~Load units from templates instead of hardcoded test data~~ **DONE**
 10. Implement shop/event phase between fights
-11. Add win/lose conditions (health reaches 0)
+11. ~~Add win/lose conditions (health reaches 0)~~ **DONE**
 12. Second fight encounter
