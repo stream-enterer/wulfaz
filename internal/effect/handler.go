@@ -38,7 +38,7 @@ func Handle(effectName string, params map[string]any, ctx EffectContext) EffectR
 
 // handleDealDamage reduces target's health and emits follow-up events
 func handleDealDamage(params map[string]any, ctx EffectContext) EffectResult {
-	damage, ok := getParamInt(params, "damage")
+	damage, ok := core.GetParamInt(params, "damage")
 	if !ok {
 		return EffectResult{
 			LogEntries: []string{"deal_damage: missing damage param"},
@@ -108,7 +108,7 @@ func handleDealDamage(params map[string]any, ctx EffectContext) EffectResult {
 
 // handleConsumeAmmo reduces owning item's ammo attribute
 func handleConsumeAmmo(params map[string]any, ctx EffectContext) EffectResult {
-	amount, ok := getParamInt(params, "amount")
+	amount, ok := core.GetParamInt(params, "amount")
 	if !ok {
 		amount = 1 // default to consuming 1 ammo
 	}
@@ -306,19 +306,3 @@ func copyUnit(u entity.Unit) entity.Unit {
 	}
 }
 
-// getParamInt extracts an int from params, handling both int and float64 (JSON)
-func getParamInt(params map[string]any, key string) (int, bool) {
-	v, ok := params[key]
-	if !ok {
-		return 0, false
-	}
-
-	switch val := v.(type) {
-	case int:
-		return val, true
-	case float64:
-		return int(val), true
-	default:
-		return 0, false
-	}
-}

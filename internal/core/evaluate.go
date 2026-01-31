@@ -1,3 +1,5 @@
+// Package core provides fundamental types and pure evaluation functions for the game engine.
+// All functions in this package are pure: same input → same output, no side effects.
 package core
 
 // EvaluateConditions returns true if all conditions pass against the given tags/attributes.
@@ -13,6 +15,10 @@ func EvaluateConditions(conditions []Condition, tags []Tag, attributes map[strin
 
 // EvaluateCondition evaluates a single condition.
 func EvaluateCondition(cond Condition, tags []Tag, attributes map[string]Attribute) bool {
+	if cond.Params == nil {
+		return false
+	}
+
 	switch cond.Type {
 	case ConditionHasTag:
 		tag, ok := cond.Params["tag"].(string)
@@ -48,7 +54,7 @@ func evalAttrComparison(params map[string]any, attributes map[string]Attribute, 
 		return false
 	}
 
-	value, ok := getParamInt(params, "value")
+	value, ok := GetParamInt(params, "value")
 	if !ok {
 		return false
 	}
@@ -61,7 +67,9 @@ func evalAttrComparison(params map[string]any, attributes map[string]Attribute, 
 	return compare(attr.Base, value)
 }
 
-func getParamInt(params map[string]any, key string) (int, bool) {
+// GetParamInt extracts an int from params, handling both int and float64 (JSON).
+// Exported for reuse in effect package.
+func GetParamInt(params map[string]any, key string) (int, bool) {
 	v, ok := params[key]
 	if !ok {
 		return 0, false

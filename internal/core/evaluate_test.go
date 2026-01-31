@@ -180,6 +180,32 @@ func TestEvaluateCondition_FloatValue(t *testing.T) {
 	}
 }
 
+func TestEvaluateCondition_NilParams(t *testing.T) {
+	// Condition with nil Params should return false, not panic
+	cond := Condition{
+		Type:   ConditionAttrGTE,
+		Params: nil,
+	}
+	attrs := map[string]Attribute{
+		"health": {Name: "health", Base: 100},
+	}
+
+	if EvaluateCondition(cond, nil, attrs) {
+		t.Error("expected nil params to return false")
+	}
+
+	// Same for has_tag
+	cond = Condition{
+		Type:   ConditionHasTag,
+		Params: nil,
+	}
+	tags := []Tag{"mech"}
+
+	if EvaluateCondition(cond, tags, nil) {
+		t.Error("expected nil params on has_tag to return false")
+	}
+}
+
 func TestHasTag(t *testing.T) {
 	tags := []Tag{"mech", "heavy", "assault"}
 

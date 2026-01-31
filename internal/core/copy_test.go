@@ -83,7 +83,7 @@ func TestCopyAbility_NestedSlices(t *testing.T) {
 	orig := Ability{
 		ID:         "test_ability",
 		Tags:       []Tag{"active", "weapon"},
-		Conditions: []Condition{{Type: ConditionAttrGTE, Params: map[string]any{"attr": "heat", "value": 10}}},
+		Conditions: []Condition{{Type: ConditionAttrGTE, Params: map[string]any{"attribute": "heat", "value": 10}}},
 		Costs:      []Cost{{Attribute: "energy", Amount: ValueRef{Value: 5}}},
 		Targeting:  Targeting{Type: TargetEnemy, Filter: []Tag{"mech"}},
 		Effects:    []EffectRef{{EffectName: "damage", Params: map[string]any{"amount": 10}}},
@@ -94,14 +94,14 @@ func TestCopyAbility_NestedSlices(t *testing.T) {
 
 	// Mutate copied values
 	copied.Tags[0] = "modified"
-	copied.Conditions[0].Params["attr"] = "modified"
+	copied.Conditions[0].Params["attribute"] = "modified"
 	copied.Targeting.Filter[0] = "modified"
 	copied.Effects[0].Params["amount"] = 999
 
 	if orig.Tags[0] != "active" {
 		t.Error("original Tags was mutated")
 	}
-	if orig.Conditions[0].Params["attr"] != "heat" {
+	if orig.Conditions[0].Params["attribute"] != "heat" {
 		t.Error("original Conditions was mutated")
 	}
 	if orig.Targeting.Filter[0] != "mech" {
