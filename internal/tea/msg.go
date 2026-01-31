@@ -1,15 +1,30 @@
 package tea
 
-import "wulfaz/internal/core"
+import (
+	"wulfaz/internal/core"
+	"wulfaz/internal/model"
+)
 
 type Msg interface {
 	isMsg() // sealed
 }
 
 // Combat messages
-type CombatStarted struct{ Seed int64 }
+
+// CombatEnded signals combat has concluded with a victor
+type CombatEnded struct{ Victor Victor }
+
+func (CombatEnded) isMsg() {}
+
+// CombatStarted signals a new combat should begin (carries the combat state)
+type CombatStarted struct{ Combat model.CombatModel }
 
 func (CombatStarted) isMsg() {}
+
+// ChoiceSelected signals the player selected a choice option
+type ChoiceSelected struct{ Index int }
+
+func (ChoiceSelected) isMsg() {}
 
 type CombatTicked struct{ Rolls []int }
 

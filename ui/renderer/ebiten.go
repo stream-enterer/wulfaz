@@ -40,6 +40,8 @@ func RenderEbiten(screen *ebiten.Image, m tea.Model) {
 		renderMenu(screen)
 	case tea.PhaseCombat:
 		renderCombat(screen, m.Combat)
+	case tea.PhaseChoice:
+		renderChoice(screen, m.ChoiceType, m.Choices)
 	case tea.PhaseGameOver:
 		renderGameOver(screen)
 	default:
@@ -148,4 +150,19 @@ func renderPausedOverlay(screen *ebiten.Image) {
 	// PAUSED text
 	ebitenutil.DebugPrintAt(screen, "=== PAUSED ===", w/2-50, h/2-10)
 	ebitenutil.DebugPrintAt(screen, "Press SPACE to resume", w/2-70, h/2+20)
+}
+
+func renderChoice(screen *ebiten.Image, ct tea.ChoiceType, choices []string) {
+	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+
+	header := "Choose a reward:"
+	if ct == tea.ChoiceFight {
+		header = "Choose next fight:"
+	}
+	ebitenutil.DebugPrintAt(screen, header, w/2-60, h/2-60)
+
+	for i, c := range choices {
+		line := fmt.Sprintf("[%d] %s", i+1, c)
+		ebitenutil.DebugPrintAt(screen, line, w/2-60, h/2-30+i*20)
+	}
 }

@@ -13,9 +13,24 @@ type GamePhase int
 const (
 	PhaseMenu GamePhase = iota
 	PhaseCombat
-	PhaseShop
-	PhaseEvent
+	PhaseChoice // reward or fight selection
 	PhaseGameOver
+)
+
+type ChoiceType int
+
+const (
+	ChoiceReward ChoiceType = iota
+	ChoiceFight
+)
+
+type Victor int
+
+const (
+	VictorNone Victor = iota
+	VictorPlayer
+	VictorEnemy
+	VictorDraw
 )
 
 type Model struct {
@@ -23,12 +38,47 @@ type Model struct {
 	Phase   GamePhase
 	Combat  model.CombatModel
 	Seed    int64
+	// Choice phase state
+	ChoiceType        ChoiceType
+	RewardChoicesLeft int
+	Choices           []string
+	// Run progression
+	FightNumber int
 }
 
 func (m Model) Update(msg Msg) (Model, Cmd) {
 	switch msg := msg.(type) {
 	case PlayerQuit:
 		m.Phase = PhaseGameOver
+		return m, nil
+
+	case CombatEnded:
+		if msg.Victor == VictorPlayer {
+			m.Phase = PhaseChoice
+			m.ChoiceType = ChoiceReward
+			m.RewardChoicesLeft = 2
+			m.Choices = []string{"Reward A", "Reward B", "Reward C"}
+		} else {
+			m.Phase = PhaseGameOver
+		}
+		return m, nil
+
+	case ChoiceSelected:
+		if m.ChoiceType == ChoiceReward {
+			m.RewardChoicesLeft--
+			if m.RewardChoicesLeft > 0 {
+				m.Choices = []string{"Reward D", "Reward E", "Reward F"}
+			} else {
+				m.ChoiceType = ChoiceFight
+				m.Choices = []string{"Fight: Easy", "Fight: Medium", "Fight: Hard"}
+			}
+		}
+		return m, nil
+
+	case CombatStarted:
+		m.Phase = PhaseCombat
+		m.FightNumber++
+		m.Combat = msg.Combat
 		return m, nil
 
 	case PlayerPaused:
@@ -227,7 +277,7 @@ func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 
 	// Check for follow-up events
 	if len(msg.FollowUpEvents) == 0 {
-		return m.applyCombatEnd(), nil
+		return m.applyCombatEnd()
 	}
 
 	// Dispatch follow-up events
@@ -262,7 +312,7 @@ func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 	}
 
 	if len(allTriggers) == 0 {
-		return m.applyCombatEnd(), nil
+		return m.applyCombatEnd()
 	}
 
 	// Return command for cascade
@@ -299,14 +349,14 @@ func (m Model) checkCombatEnd() string {
 }
 
 // applyCombatEnd checks for combat end and updates model if combat is over.
-// Returns the updated model.
-func (m Model) applyCombatEnd() Model {
+// Returns the updated model and a Cmd that emits CombatEnded if combat ended.
+func (m Model) applyCombatEnd() (Model, Cmd) {
 	if m.Combat.Phase != model.CombatActive {
-		return m
+		return m, nil
 	}
 	victor := m.checkCombatEnd()
 	if victor == "" {
-		return m
+		return m, nil
 	}
 	combat := m.Combat
 	combat.Phase = model.CombatResolved
@@ -319,7 +369,22 @@ func (m Model) applyCombatEnd() Model {
 		combat.Log = append(newLog, "combat ended: "+victor+" wins")
 	}
 	m.Combat = combat
-	return m
+	v := victorFromString(victor)
+	return m, func() Msg { return CombatEnded{Victor: v} }
+}
+
+// victorFromString converts the legacy string victor to the Victor enum.
+func victorFromString(s string) Victor {
+	switch s {
+	case "player":
+		return VictorPlayer
+	case "enemy":
+		return VictorEnemy
+	case "draw":
+		return VictorDraw
+	default:
+		return VictorNone
+	}
 }
 
 // Helper functions

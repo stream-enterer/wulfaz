@@ -518,6 +518,130 @@ func TestCombat_TwoUnitsPerSide(t *testing.T) {
 	}
 }
 
+func TestUpdate_CombatEnded_PlayerWins(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+	}
+
+	newModel, cmd := m.Update(CombatEnded{Victor: VictorPlayer})
+
+	if newModel.Phase != PhaseChoice {
+		t.Errorf("expected PhaseChoice, got %d", newModel.Phase)
+	}
+	if newModel.ChoiceType != ChoiceReward {
+		t.Errorf("expected ChoiceReward, got %d", newModel.ChoiceType)
+	}
+	if newModel.RewardChoicesLeft != 2 {
+		t.Errorf("expected 2 reward choices left, got %d", newModel.RewardChoicesLeft)
+	}
+	if len(newModel.Choices) != 3 {
+		t.Errorf("expected 3 choices, got %d", len(newModel.Choices))
+	}
+	if cmd != nil {
+		t.Error("expected nil command")
+	}
+}
+
+func TestUpdate_CombatEnded_PlayerLoses(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+	}
+
+	newModel, cmd := m.Update(CombatEnded{Victor: VictorEnemy})
+
+	if newModel.Phase != PhaseGameOver {
+		t.Errorf("expected PhaseGameOver, got %d", newModel.Phase)
+	}
+	if cmd != nil {
+		t.Error("expected nil command")
+	}
+}
+
+func TestUpdate_CombatEnded_Draw(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+	}
+
+	newModel, cmd := m.Update(CombatEnded{Victor: VictorDraw})
+
+	if newModel.Phase != PhaseGameOver {
+		t.Errorf("expected PhaseGameOver, got %d", newModel.Phase)
+	}
+	if cmd != nil {
+		t.Error("expected nil command")
+	}
+}
+
+func TestUpdate_ChoiceSelected_Reward(t *testing.T) {
+	m := Model{
+		Version:           1,
+		Phase:             PhaseChoice,
+		ChoiceType:        ChoiceReward,
+		RewardChoicesLeft: 2,
+		Choices:           []string{"A", "B", "C"},
+	}
+
+	// First reward selection
+	newModel, cmd := m.Update(ChoiceSelected{Index: 0})
+
+	if newModel.RewardChoicesLeft != 1 {
+		t.Errorf("expected 1 reward choice left, got %d", newModel.RewardChoicesLeft)
+	}
+	if newModel.ChoiceType != ChoiceReward {
+		t.Errorf("expected ChoiceReward, got %d", newModel.ChoiceType)
+	}
+	if cmd != nil {
+		t.Error("expected nil command")
+	}
+
+	// Second reward selection should switch to fight selection
+	newModel, cmd = newModel.Update(ChoiceSelected{Index: 1})
+
+	if newModel.RewardChoicesLeft != 0 {
+		t.Errorf("expected 0 reward choices left, got %d", newModel.RewardChoicesLeft)
+	}
+	if newModel.ChoiceType != ChoiceFight {
+		t.Errorf("expected ChoiceFight, got %d", newModel.ChoiceType)
+	}
+	if len(newModel.Choices) != 3 {
+		t.Errorf("expected 3 fight choices, got %d", len(newModel.Choices))
+	}
+	if cmd != nil {
+		t.Error("expected nil command")
+	}
+}
+
+func TestUpdate_CombatStarted(t *testing.T) {
+	m := Model{
+		Version:     1,
+		Phase:       PhaseChoice,
+		FightNumber: 1,
+	}
+
+	combat := model.CombatModel{
+		Phase: model.CombatActive,
+		Log:   []string{"Fight 2 started"},
+	}
+
+	newModel, cmd := m.Update(CombatStarted{Combat: combat})
+
+	if newModel.Phase != PhaseCombat {
+		t.Errorf("expected PhaseCombat, got %d", newModel.Phase)
+	}
+	if newModel.FightNumber != 2 {
+		t.Errorf("expected FightNumber 2, got %d", newModel.FightNumber)
+	}
+	if newModel.Combat.Phase != model.CombatActive {
+		t.Errorf("expected combat phase CombatActive")
+	}
+	if cmd != nil {
+		t.Error("expected nil command")
+	}
+}
+
 func TestFullCombatFlow(t *testing.T) {
 	// Test the full flow: CombatTicked -> TriggersCollected -> EffectsResolved
 

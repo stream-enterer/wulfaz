@@ -1,6 +1,6 @@
 # Mech Autobattler Roguelike — Design Document
 
-**Status:** Combat system complete with source/target condition filtering
+**Status:** MVP loop complete — Combat → Rewards → Fight Selection → Combat
 
 ---
 
@@ -663,6 +663,6 @@ item id="double_heatsink" {
 ### MVP Complete — Next Phase
 
 9. ~~Load units from templates instead of hardcoded test data~~ **DONE**
-10. Implement shop/event phase between fights
+10. ~~Implement shop/event phase between fights~~ **DONE** (PhaseChoice with reward/fight selection)
 11. ~~Add win/lose conditions (health reaches 0)~~ **DONE**
-12. Second fight encounter
+12. ~~Second fight encounter~~ **DONE** (MVP: 2 fights then game over)
