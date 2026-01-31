@@ -666,3 +666,342 @@ item id="double_heatsink" {
 10. ~~Implement shop/event phase between fights~~ **DONE** (PhaseChoice with reward/fight selection)
 11. ~~Add win/lose conditions (health reaches 0)~~ **DONE**
 12. ~~Second fight encounter~~ **DONE** (MVP: 2 fights then game over)
+
+---
+
+## Hybrid Combat System (Next Phase)
+
+Combines cooldown-based autobattler execution with Slice & Dice tactical dice rolling.
+
+### Design Goals
+
+| Source | What We Want |
+|--------|--------------|
+| **Cooldowns/Autobattler** | Rube Goldberg satisfaction—build a machine, watch it execute. Cascading effects, emergent combos (Peggle-like). Passive enjoyment during execution. |
+| **Slice & Dice** | Tactical dice decisions—evaluate rolls, lock/reroll, risk rare outcomes. Active decision moments. The hit comes from seeing what fate gave you and choosing what to keep. |
+
+### Two-Layer Architecture
+
+| Layer | Build Phase | Combat Phase |
+|-------|-------------|--------------|
+| **Battlefield Units** | Loadout (gear, weapons, stats) | Automatic execution, timeline-driven |
+| **Command Ship** | Rooms with dice, optional crew modifiers | Player rolls, locks, rerolls, activates |
+
+**Battlefield Units:** You build their loadouts. During combat, they fight automatically. A timeline sweeps left-to-right; units are only active while the timeline is within their bounds. You watch.
+
+**Command Ship:** You build your ship's rooms (each room has a die). Optionally staff rooms with crew for bonuses. Each round, you do the full S&D dance—roll, evaluate, lock, reroll, activate.
+
+### Battlefield Layout
+
+```
+        |.|           ← Enemy command ship (off-field, behind line)
+|...........|         ← Enemy units (combat width 10)
+|...........|         ← Player units (combat width 10)
+        |.|           ← Player command ship (off-field, behind line)
+```
+
+Command ships are visually present but not part of the combat width. They have rooms with HP but no position on the timeline.
+
+### Round Flow
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 1. ENEMY DECLARATION PHASE                              │
+│    Enemy rolls dice, locks, declares activations        │
+│    Shows planned targets (information advantage)        │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│ 2. PLAYER COMMAND PHASE                                 │
+│    See enemy's declared plan                            │
+│    Roll your ship dice                                  │
+│    Lock/unlock individual dice                          │
+│    Spend rerolls (rerolls all unlocked dice)            │
+│    Out of rerolls → auto-lock remaining                 │
+│    Activate dice one by one (choose order, targets)     │
+│    Effects fire immediately on activation               │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│ 3. ENEMY EXECUTION PHASE                                │
+│    Enemy activates their declared dice                  │
+│    Skips if target died or room was destroyed           │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│ 4. EXECUTION PHASE (automatic)                          │
+│    Timeline sweeps left → right                         │
+│    Units fire on cooldown while timeline touches them   │
+│    Player watches (Rube Goldberg satisfaction)          │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+                    (repeat from 1)
+```
+
+### Timeline Mechanics
+
+The execution phase uses the existing tick system internally.
+
+**Timeline gates activation:**
+- A vertical line sweeps left-to-right across the combat width
+- Units are only active while the timeline is within their bounds
+- Unit size directly determines action time:
+  - Small (1 width): active for 1 slot's worth of ticks
+  - Medium (2 width): active for 2 slots' worth of ticks
+  - Large (3 width): active for 3 slots' worth of ticks
+
+**One shared timeline:** Both sides use the same timeline. Position determines when units activate—position 0 acts first, position 9 acts last.
+
+**Dead units leave gaps:** If a unit dies mid-round, it leaves empty space. Timeline keeps sweeping. No repositioning mid-round.
+
+**Ticks per slot:** 8 ticks per slot (placeholder, tune later). Combat width 10 = 80 ticks per full sweep.
+- Small unit (1 width): 8 ticks of action
+- Medium unit (2 width): 16 ticks of action
+- Large unit (3 width): 24 ticks of action
+
+**Cooldown behavior:**
+- Cooldowns don't tick until timeline reaches the unit
+- When timeline reaches unit, all cooldowns start at their base values
+- Cooldowns reset each round (fresh start when timeline reaches unit again)
+- Countdown first: weapon fires when cooldown reaches 0, not immediately (cooldown 4 = fires on tick 4)
+- Future: some weapons can have "ready" tag to fire immediately
+
+**Multiple weapons:**
+- Each weapon has independent cooldowns (tick separately)
+- All weapons on a unit target the same enemy (nearest) for MVP
+- Heat system to limit simultaneous firing [NOT IN MVP]
+
+### Command Ship Structure
+
+```
+COMMAND SHIP
+├── Room 1
+│   ├── HP (room health)
+│   ├── Die (6 faces)
+│   ├── Shields (absorb damage, expire each round)
+│   └── Crew (optional modifier) [NOT IN MVP]
+├── Room 2
+│   ├── HP
+│   ├── Die
+│   ├── Shields
+│   └── Crew [NOT IN MVP]
+├── Room 3
+│   └── ...
+└── (Abilities from rooms/crew/progression) [NOT IN MVP]
+```
+
+**Rooms are the ship's HP.** Destroy all rooms = destroy the ship. No separate hull HP.
+
+**Targeted damage:** When attacking enemy ship, choose which room to damage. Strategic choice—knock out their healer die, their damage die, etc.
+
+**Room count:** Fixed per ship type (3 for MVP).
+
+### Ship Combat Rules
+
+**Ships can always attack each other** with dice. No need to clear enemy units first.
+
+**Units can only attack enemy ship** after all enemy units are dead.
+
+**Strategic axis:**
+- Support ground troops (heals, shields) → win unit battle → then finish ship
+- Nuke enemy ship directly → ignore units → race to kill ship
+- Balance both based on game state
+
+### Dice Mechanics
+
+**Dice types (MVP):** Damage, Shield, Heal (3 types, one per room)
+
+**Faces per die:** 6
+
+**Face distribution (all dice, MVP):** `[5, 5, 8, 12, 0, 0]`
+- Two 5s, one 8, one 12, two blanks (0 = do nothing)
+- Scaled to match ground unit values (weapons deal 5-8 damage)
+- Symmetric across all dice types for MVP
+
+**Rerolls:** Global pool per round (2 for MVP). Spend one to reroll all unlocked dice.
+
+**Lock/reroll loop:**
+1. All dice roll once
+2. Toggle lock on individual dice (locked dice keep their face)
+3. Spend reroll → all unlocked dice reroll
+4. Repeat until satisfied or out of rerolls
+5. Out of rerolls → remaining unlocked dice auto-lock
+
+**Activation:**
+- After locking, activate dice one by one
+- You choose activation order freely
+- When activating, choose target (if face requires one)
+- Effect fires immediately
+- You can skip activating a die (useful for blanks or negative faces)
+
+**Why skip activation:**
+- Blank face (0)—does nothing
+- No valid target (e.g., heal but no damaged allies)
+- Negative face (future: some dice have bad faces—lock to stop rerolls, don't activate)
+- Save mana (some powerful faces cost mana) [NOT IN MVP]
+
+**Negative faces (future):** Full design space includes self-damage, buff enemy, resource drain. MVP only has blanks.
+
+### Dice Effects
+
+**Damage:**
+- Target: any enemy unit OR any specific enemy room (explicit targeting, not "the ship")
+- Effect: deal damage to target
+
+**Shield:**
+- Target: any friendly unit OR any specific friendly room
+- Effect: grant shields that absorb damage
+- Shields stack additively
+- Shields absorb damage before HP (overflow hits HP)
+- Shields expire at end of round
+
+**Heal:**
+- Target: any friendly unit only (NOT rooms—room damage is permanent mid-combat)
+- Effect: restore HP
+- Capped at max HP (excess healing wasted)
+- Future: overflow healing converts to shields
+
+### Unit Behavior During Execution
+
+**Targeting:** Units target nearest enemy by position (MVP). All weapons on a unit hit the same target. Smarter/per-weapon targeting later.
+
+**When all enemies dead:** Units attack the enemy command ship directly. Ship is off-board—no positional relationship to units.
+
+**Unit damage to ship:** Hits a random surviving room (MVP).
+
+**When all your units die:** Execution continues. Timeline keeps sweeping. Enemy units pummel your exposed ship.
+
+**When no units on either side:** Skip execution phase entirely. Combat becomes pure dice duel until one ship dies.
+
+**Death timing:** Units die immediately when taking lethal damage. Removed from board, can't act, targeting updates.
+
+**Overkill damage:** Wasted. Unit dies, excess damage disappears.
+
+**Simultaneous damage:** If two units kill each other on the same tick, both die. True simultaneous resolution.
+
+**Shields and simultaneous damage:** Shields consumed sequentially within a tick. First attack eats shields, subsequent attacks hit HP.
+
+### Enemy AI
+
+**MVP:** Simple heuristics. Lock good faces, reroll bad faces, activate beneficial dice.
+
+**Later:** Per-commander personalities (aggressive, defensive, greedy).
+
+### Combat Start
+
+**Dice phases happen first.** At the start of combat, both sides roll and resolve dice before any execution phase. Units may enter battle already damaged, healed, or shielded.
+
+### End of Round
+
+**Round boundary:** After execution phase ends (timeline reaches position 10), brief visual pause before next round.
+
+**End-of-round effects (MVP):** Shields expire on all units and rooms.
+
+**Future:** Additional status effects tick at round boundary.
+
+### Win Condition
+
+**Destroy the enemy command ship** (all rooms destroyed).
+
+**Player wins ties:** If both ships are destroyed simultaneously, player wins. Player's ship survives with 1 HP in all rooms.
+
+**Units don't determine victory:** Losing all units doesn't end combat. Only ship destruction matters. Combat can become pure dice duel.
+
+Two parallel battles:
+- **Ship war:** Ships trade dice fire every round (always active)
+- **Ground war:** Units fight units; winner's units can also attack enemy ship
+
+### Two Build Layers
+
+Players construct two separate builds:
+
+**1. Squad Loadout (Units)**
+- Which units to field
+- What gear/weapons each unit carries
+- Positioning in combat width (affects timing via timeline)
+- Determines automatic combat behavior
+
+**2. Command Ship**
+- Ship type determines room count and base ability [base ability NOT IN MVP]
+- Each room has a die type
+- Optionally staff rooms with crew for bonuses [NOT IN MVP]
+
+### Between Fights
+
+**Damage carries forward:** Units and ship rooms keep their damage between fights. No automatic healing. Roguelike attrition.
+
+**Destroyed rooms:** Gone forever for MVP. High stakes—protect your ship. Repair option in future.
+
+**Destroyed units:** Gone forever for MVP.
+
+**Rewards:** Immediate rewards screen after combat, then back to run map/shop.
+
+**Future:** Repair phase between fights (costs resources).
+
+### Resource System [NOT IN MVP]
+
+**Mana** (future):
+- Generated by Mana dice faces
+- Spent on powerful face activations and commander abilities
+- Usable anytime during player command phase
+- Capped per turn (overflow lost)—"use it or lose it"
+
+**Abilities** (future):
+- Come from multiple sources: ship base ability, rooms, crew, progression
+- Spend mana to activate
+- Effects vary: direct damage, dice manipulation, buffs/debuffs
+
+### MVP Scope
+
+| Element | MVP Value |
+|---------|-----------|
+| Command ship types | 1 |
+| Rooms per ship | 3 |
+| Room HP | 50 each |
+| Dice types | 3 (Damage, Shield, Heal) |
+| Faces per die | 6 |
+| Face distribution | `[5, 5, 8, 12, 0, 0]` (all dice) |
+| Crew | None |
+| Abilities | None |
+| Mana | None |
+| Enemy ship | Mirror (same as player) |
+| Rerolls per round | 2 |
+| Unit targeting | Nearest enemy (all weapons same target) |
+| Unit-to-ship damage | Random room |
+| Ticks per slot | 8 (placeholder) |
+| Cooldown behavior | Reset each round, countdown before first fire |
+| Damage persistence | Carries forward between fights |
+| Destroyed rooms/units | Gone forever |
+| Overkill damage | Wasted |
+| Tie-breaker | Player wins, ship survives at 1 HP |
+
+### Key Properties
+
+- **Data-driven:** All dice types, face distributions, and effects defined in templates
+- **Extensible:** New dice types, face effects, crew, abilities can be added
+- **Information asymmetry:** Player sees enemy's declared plan before acting
+- **Preemptive counterplay:** Kill their target before their heal lands, destroy their room before it activates
+- **Risk/reward:** Reroll economy creates gambling moments
+- **Layered agency:** Passive satisfaction (watching units) + active decisions (dice)
+- **Position matters:** Unit position determines timing via timeline; larger units get more action time
+
+### Implementation Notes
+
+This extends the current system. The existing cooldown and trigger infrastructure powers the execution phase. The new dice system layers on top as the player decision mechanism.
+
+**Preserved from current system:**
+- Cooldown-based weapon firing
+- Trigger/effect cascade system
+- Unit loadout and positioning
+- TEA architecture (dice rolls come in via Msgs)
+
+**New additions:**
+- Command ship entity with rooms and dice
+- Timeline-gated unit activation (units only act while timeline touches them)
+- Cooldowns reset each round, only tick while unit is active
+- Dice rolling, locking, rerolling, activation mechanics
+- Round structure: enemy declare → player command → enemy execute → execution
+- Room-targeted damage and shields
+- Blank dice faces (lock but don't activate)
+- Damage persistence between fights
+- Skip execution phase when no units (pure dice duel)
