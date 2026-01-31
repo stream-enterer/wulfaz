@@ -4,7 +4,7 @@ item id="medium_laser" {
         attribute name="size" base=1
         attribute name="damage" base=5
         attribute name="heat" base=3
-        attribute name="cooldown" base=2
+        attribute name="cooldown" base=4
     }
     triggers {
         trigger event="on_combat_tick" effect_name="deal_damage" {

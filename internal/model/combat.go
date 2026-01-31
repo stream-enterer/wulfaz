@@ -12,10 +12,11 @@ const (
 )
 
 type CombatModel struct {
-	PlayerUnits []entity.Unit
-	EnemyUnits  []entity.Unit
-	Tick        int
-	Phase       CombatPhase
-	Log         []string
-	Victor      string // "player", "enemy", "draw", or "" (ongoing)
+	PlayerUnits   []entity.Unit
+	EnemyUnits    []entity.Unit
+	Tick          int
+	Phase         CombatPhase
+	Log           []string
+	Victor        string         // "player", "enemy", "draw", or "" (ongoing)
+	ItemCooldowns map[string]int // key: "unitID/partID/mountID/itemID", value: remaining ticks
 }

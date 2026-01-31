@@ -15,11 +15,12 @@ type TriggerOwner struct {
 
 // TriggerContext provides state for trigger evaluation
 type TriggerContext struct {
-	Event      core.EventType
-	SourceUnit entity.Unit
-	AllUnits   []entity.Unit
-	Tick       int
-	Rolls      []int
+	Event         core.EventType
+	SourceUnit    entity.Unit
+	AllUnits      []entity.Unit
+	Tick          int
+	Rolls         []int
+	ItemCooldowns map[string]int // for cooldown filtering in dispatch
 }
 
 // CollectedTrigger pairs trigger with its owner
