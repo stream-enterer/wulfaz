@@ -272,7 +272,7 @@ func getEnemiesOf(source entity.Unit, ctx EffectContext) []entity.Unit {
 	return enemies
 }
 
-// copyUnit creates a shallow copy of a unit with new attribute and part maps
+// copyUnit creates a copy of a unit with new maps and slices for modification safety
 func copyUnit(u entity.Unit) entity.Unit {
 	newAttrs := make(map[string]core.Attribute)
 	for k, v := range u.Attributes {

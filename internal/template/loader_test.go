@@ -497,7 +497,7 @@ func TestParseMount(t *testing.T) {
 	if mount.MaxItems != 2 {
 		t.Errorf("expected max_items=2, got %d", mount.MaxItems)
 	}
-	if mount.Locked != false {
+	if mount.Locked {
 		t.Errorf("expected locked=false, got %v", mount.Locked)
 	}
 	if len(mount.Tags) != 2 {

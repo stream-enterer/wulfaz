@@ -263,7 +263,7 @@ func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 	}
 
 	// Return command for cascade
-	return m, buildTriggersCollectedCmd("cascade", allTriggers, nil, msg.Depth+1)
+	return m, buildTriggersCollectedCmd(string(core.EventOnCascade), allTriggers, nil, msg.Depth+1)
 }
 
 // Helper functions

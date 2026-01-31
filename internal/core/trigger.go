@@ -9,6 +9,7 @@ const (
 	EventOnTurnStart  EventType = "on_turn_start"
 	EventOnTurnEnd    EventType = "on_turn_end"
 	EventOnActivate   EventType = "on_activate"
+	EventOnCascade    EventType = "cascade" // follow-up events from effects
 )
 
 type Trigger struct {

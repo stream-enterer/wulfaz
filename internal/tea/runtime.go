@@ -14,8 +14,9 @@ func NewRuntime(seed int64) *Runtime {
 	}
 }
 
-func (r *Runtime) Run() {
-	panic("not implemented")
+// Model returns the current model state (for testing)
+func (r *Runtime) Model() Model {
+	return r.model
 }
 
 func (r *Runtime) Dispatch(msg Msg) {
