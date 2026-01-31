@@ -1,10 +1,189 @@
 package entity
 
 import (
+	"reflect"
 	"testing"
 
 	"wulfaz/internal/core"
 )
+
+// Round-trip tests: verify all fields are copied by comparing original to copy.
+// If a new field is added to a struct but not to its Copy function, these fail.
+
+func TestCopyMountCriteria_RoundTrip(t *testing.T) {
+	orig := MountCriteria{
+		RequiresAll: []core.Tag{"weapon", "energy"},
+		RequiresAny: []core.Tag{"small", "medium"},
+		Forbids:     []core.Tag{"missile", "explosive"},
+	}
+	copied := CopyMountCriteria(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyMountCriteria round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyItem_RoundTrip(t *testing.T) {
+	orig := Item{
+		ID:         "original_id",
+		TemplateID: "laser_rifle_template",
+		Tags:       []core.Tag{"weapon", "energy", "rifle"},
+		Attributes: map[string]core.Attribute{
+			"damage": {Name: "damage", Base: 15, Min: 0, Max: 100},
+			"range":  {Name: "range", Base: 8, Min: 1, Max: 20},
+		},
+		Triggers: []core.Trigger{
+			{
+				Event:            core.EventOnCombatTick,
+				Conditions:       []core.Condition{{Type: core.ConditionHasTag, Params: map[string]any{"tag": "active"}}},
+				TargetConditions: []core.Condition{{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 1}}},
+				EffectName:       "fire_laser",
+				Params:           map[string]any{"damage": 15},
+				Priority:         1,
+			},
+		},
+		Abilities: []core.Ability{
+			{ID: "overcharge", Tags: []core.Tag{"active"}, Cooldown: 3},
+		},
+		ProvidedModifiers: []core.ProvidedModifier{
+			{Scope: core.ScopeUnit, Attribute: "accuracy", Operation: core.ModifierOpAdd, Value: 2},
+		},
+		Requirements: []core.Requirement{
+			{Scope: "mount", Condition: core.Condition{Type: core.ConditionHasTag, Params: map[string]any{"tag": "arm"}}},
+		},
+	}
+
+	newID := "copied_id"
+	copied := CopyItem(orig, newID)
+
+	// Verify ID was changed as expected
+	if copied.ID != newID {
+		t.Errorf("expected copied ID %q, got %q", newID, copied.ID)
+	}
+
+	// Compare all other fields by temporarily setting ID
+	copied.ID = orig.ID
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyItem round-trip failed (excluding ID)\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyMount_RoundTrip(t *testing.T) {
+	orig := Mount{
+		ID:   "arm_mount",
+		Tags: []core.Tag{"arm", "weapon_mount"},
+		Accepts: MountCriteria{
+			RequiresAll: []core.Tag{"weapon"},
+			RequiresAny: []core.Tag{"energy", "ballistic"},
+			Forbids:     []core.Tag{"heavy"},
+		},
+		Capacity:          10,
+		CapacityAttribute: "weight",
+		MaxItems:          2,
+		Locked:            true,
+		Contents: []Item{
+			{ID: "laser1", TemplateID: "laser", Tags: []core.Tag{"weapon", "energy"}},
+		},
+	}
+	copied := CopyMount(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyMount round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyPart_RoundTrip(t *testing.T) {
+	orig := Part{
+		ID:         "left_arm",
+		TemplateID: "standard_arm",
+		Tags:       []core.Tag{"arm", "left", "limb"},
+		Attributes: map[string]core.Attribute{
+			"armor":  {Name: "armor", Base: 20, Min: 0, Max: 50},
+			"health": {Name: "health", Base: 50, Min: 0, Max: 100},
+		},
+		Mounts: []Mount{
+			{ID: "hand", Capacity: 5, Tags: []core.Tag{"hand"}},
+		},
+		Connections: map[string][]string{
+			"torso": {"center_torso"},
+			"other": {"shoulder"},
+		},
+		Triggers: []core.Trigger{
+			{Event: core.EventOnDamaged, EffectName: "spark_effect", Priority: 2},
+		},
+		Abilities: []core.Ability{
+			{ID: "punch", Tags: []core.Tag{"melee"}, Cooldown: 1},
+		},
+	}
+	copied := CopyPart(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyPart round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyPilot_RoundTrip(t *testing.T) {
+	orig := Pilot{
+		ID:   "pilot_001",
+		Name: "Commander Rex",
+	}
+	copied := CopyPilot(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyPilot round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyUnit_RoundTrip(t *testing.T) {
+	orig := Unit{
+		ID:         "unit_original",
+		TemplateID: "assault_mech",
+		Tags:       []core.Tag{"mech", "assault", "heavy"},
+		Attributes: map[string]core.Attribute{
+			"health": {Name: "health", Base: 200, Min: 0, Max: 500},
+			"speed":  {Name: "speed", Base: 4, Min: 1, Max: 10},
+		},
+		Parts: map[string]Part{
+			"torso": {ID: "center_torso", Tags: []core.Tag{"torso", "center"}},
+			"arm":   {ID: "left_arm", Tags: []core.Tag{"arm", "left"}},
+		},
+		Triggers: []core.Trigger{
+			{Event: core.EventOnTurnStart, EffectName: "cooldown_vent", Priority: 0},
+		},
+		Abilities: []core.Ability{
+			{ID: "jump_jets", Tags: []core.Tag{"movement"}, Charges: 2},
+		},
+		Pilot:    Pilot{ID: "pilot_001", Name: "Commander Rex"},
+		HasPilot: true,
+	}
+
+	newID := "unit_copied"
+	copied := CopyUnit(orig, newID)
+
+	// Verify ID was changed as expected
+	if copied.ID != newID {
+		t.Errorf("expected copied ID %q, got %q", newID, copied.ID)
+	}
+
+	// Compare all other fields by temporarily setting ID
+	copied.ID = orig.ID
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyUnit round-trip failed (excluding ID)\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyConnections_RoundTrip(t *testing.T) {
+	orig := map[string][]string{
+		"left":   {"torso", "shoulder"},
+		"right":  {"torso"},
+		"center": {},
+	}
+	copied := CopyConnections(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyConnections round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
 
 func TestCopyMountCriteria_Independence(t *testing.T) {
 	orig := MountCriteria{

@@ -1,6 +1,130 @@
 package core
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+// Round-trip tests: verify all fields are copied by comparing original to copy.
+// If a new field is added to a struct but not to its Copy function, these fail.
+
+func TestCopyCondition_RoundTrip(t *testing.T) {
+	orig := Condition{
+		Type:   ConditionAttrGTE,
+		Params: map[string]any{"attribute": "health", "value": 50},
+	}
+	copied := CopyCondition(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyCondition round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyTrigger_RoundTrip(t *testing.T) {
+	orig := Trigger{
+		Event:            EventOnCombatTick,
+		Conditions:       []Condition{{Type: ConditionHasTag, Params: map[string]any{"tag": "active"}}},
+		TargetConditions: []Condition{{Type: ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 1}}},
+		EffectName:       "deal_damage",
+		Params:           map[string]any{"damage": 10, "type": "energy"},
+		Priority:         5,
+	}
+	copied := CopyTrigger(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyTrigger round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyEffectRef_RoundTrip(t *testing.T) {
+	orig := EffectRef{
+		EffectName: "apply_status",
+		Params:     map[string]any{"status": "burning", "duration": 3},
+		Delay:      2,
+		Conditions: []Condition{{Type: ConditionHasTag, Params: map[string]any{"tag": "flammable"}}},
+	}
+	copied := CopyEffectRef(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyEffectRef round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyTargeting_RoundTrip(t *testing.T) {
+	orig := Targeting{
+		Type:   TargetEnemy,
+		Range:  5,
+		Count:  2,
+		Filter: []Tag{"mech", "active"},
+	}
+	copied := CopyTargeting(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyTargeting round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyCost_RoundTrip(t *testing.T) {
+	orig := Cost{
+		Attribute: "energy",
+		Scope:     ScopeUnit,
+		Amount:    ValueRef{Value: 15},
+	}
+	copied := CopyCost(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyCost round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyAbility_RoundTrip(t *testing.T) {
+	orig := Ability{
+		ID:                 "laser_blast",
+		Tags:               []Tag{"active", "weapon", "energy"},
+		Conditions:         []Condition{{Type: ConditionAttrGTE, Params: map[string]any{"attribute": "heat", "value": 0}}},
+		Costs:              []Cost{{Attribute: "energy", Scope: ScopeUnit, Amount: ValueRef{Value: 10}}},
+		Targeting:          Targeting{Type: TargetEnemy, Range: 8, Count: 1, Filter: []Tag{"mech"}},
+		Effects:            []EffectRef{{EffectName: "damage", Params: map[string]any{"amount": 25}}},
+		Cooldown:           2,
+		Charges:            3,
+		ChargeRestoreEvent: EventOnTurnStart,
+	}
+	copied := CopyAbility(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyAbility round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyProvidedModifier_RoundTrip(t *testing.T) {
+	orig := ProvidedModifier{
+		Scope:       ScopeAdjacent,
+		ScopeFilter: []Tag{"ally", "mech"},
+		Attribute:   "armor",
+		Operation:   ModifierOpAdd,
+		Value:       5,
+		StackGroup:  "armor_aura",
+		Conditions:  []Condition{{Type: ConditionHasTag, Params: map[string]any{"tag": "active"}}},
+	}
+	copied := CopyProvidedModifier(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyProvidedModifier round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyRequirement_RoundTrip(t *testing.T) {
+	orig := Requirement{
+		Scope:     "part",
+		Condition: Condition{Type: ConditionAttrGTE, Params: map[string]any{"attribute": "slots", "value": 2}},
+		OnUnmet:   OnUnmetCannotMount,
+	}
+	copied := CopyRequirement(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyRequirement round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
 
 func TestCopyTags_Nil(t *testing.T) {
 	result := CopyTags(nil)
