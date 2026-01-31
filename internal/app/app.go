@@ -42,91 +42,19 @@ func New(seed int64) *App {
 		log.Fatalf("load item templates: %v", err)
 	}
 
-	// Instantiate player units
-	player1, err := template.InstantiateUnit(reg, "medium_mech", "player_1")
-	if err != nil {
-		log.Fatalf("instantiate player_1: %v", err)
-	}
-	player2, err := template.InstantiateUnit(reg, "small_mech", "player_2")
-	if err != nil {
-		log.Fatalf("instantiate player_2: %v", err)
-	}
-
-	// Instantiate enemy units
-	enemy1, err := template.InstantiateUnit(reg, "small_mech", "enemy_1")
-	if err != nil {
-		log.Fatalf("instantiate enemy_1: %v", err)
-	}
-	enemy2, err := template.InstantiateUnit(reg, "medium_mech", "enemy_2")
-	if err != nil {
-		log.Fatalf("instantiate enemy_2: %v", err)
-	}
-
-	// Equip player weapons (medium_laser fires on_combat_tick)
-	laser1, err := template.InstantiateItem(reg, "medium_laser", "p1_laser_r")
-	if err != nil {
-		log.Fatalf("instantiate p1_laser_r: %v", err)
-	}
-	player1, err = template.EquipItem(player1, "right_arm", 0, laser1)
-	if err != nil {
-		log.Fatalf("equip player_1 right_arm: %v", err)
-	}
-
-	laser2, err := template.InstantiateItem(reg, "medium_laser", "p1_laser_l")
-	if err != nil {
-		log.Fatalf("instantiate p1_laser_l: %v", err)
-	}
-	player1, err = template.EquipItem(player1, "left_arm", 0, laser2)
-	if err != nil {
-		log.Fatalf("equip player_1 left_arm: %v", err)
-	}
-
-	laser3, err := template.InstantiateItem(reg, "medium_laser", "p2_laser")
-	if err != nil {
-		log.Fatalf("instantiate p2_laser: %v", err)
-	}
-	player2, err = template.EquipItem(player2, "right_arm", 0, laser3)
-	if err != nil {
-		log.Fatalf("equip player_2 right_arm: %v", err)
-	}
-
-	// Equip enemy weapons
-	eLaser1, err := template.InstantiateItem(reg, "medium_laser", "e1_laser")
-	if err != nil {
-		log.Fatalf("instantiate e1_laser: %v", err)
-	}
-	enemy1, err = template.EquipItem(enemy1, "right_arm", 0, eLaser1)
-	if err != nil {
-		log.Fatalf("equip enemy_1: %v", err)
-	}
-
-	eLaser2, err := template.InstantiateItem(reg, "medium_laser", "e2_laser")
-	if err != nil {
-		log.Fatalf("instantiate e2_laser: %v", err)
-	}
-	enemy2, err = template.EquipItem(enemy2, "right_arm", 0, eLaser2)
-	if err != nil {
-		log.Fatalf("equip enemy_2: %v", err)
-	}
-
-	return &App{
+	a := &App{
 		model: tea.Model{
 			Version:     1,
 			Phase:       tea.PhaseCombat,
 			Seed:        seed,
 			FightNumber: 1,
-			Combat: model.CombatModel{
-				Phase:       model.CombatActive,
-				PlayerUnits: []entity.Unit{player1, player2},
-				EnemyUnits:  []entity.Unit{enemy1, enemy2},
-				Tick:        0,
-				Log:         []string{"Combat started"},
-			},
 		},
 		registry: reg,
 		rng:      rng,
 		lastTick: time.Now(),
 	}
+	a.model.Combat = a.buildCombat()
+	return a
 }
 
 // Update handles input and game logic (implements ebiten.Game)

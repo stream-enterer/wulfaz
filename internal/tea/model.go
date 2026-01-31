@@ -1,6 +1,8 @@
 package tea
 
 import (
+	"maps"
+
 	"wulfaz/internal/core"
 	"wulfaz/internal/effect"
 	"wulfaz/internal/entity"
@@ -32,6 +34,19 @@ const (
 	VictorEnemy
 	VictorDraw
 )
+
+func (v Victor) String() string {
+	switch v {
+	case VictorPlayer:
+		return "player"
+	case VictorEnemy:
+		return "enemy"
+	case VictorDraw:
+		return "draw"
+	default:
+		return ""
+	}
+}
 
 type Model struct {
 	Version int
@@ -209,9 +224,7 @@ func (m Model) handleTriggersCollected(msg TriggersCollected) (Model, Cmd) {
 		result.Merge(effectResult)
 
 		// Update unit map with modified units for subsequent effects
-		for id, unit := range effectResult.ModifiedUnits {
-			unitMap[id] = unit
-		}
+		maps.Copy(unitMap, effectResult.ModifiedUnits)
 	}
 
 	// Convert modified units to serializable format
@@ -319,8 +332,8 @@ func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 	return m, buildTriggersCollectedCmd(string(core.EventOnCascade), allTriggers, nil, msg.Depth+1)
 }
 
-// checkCombatEnd returns the victor if combat has ended, or "" if ongoing.
-func (m Model) checkCombatEnd() string {
+// checkCombatEnd returns the victor if combat has ended, or VictorNone if ongoing.
+func (m Model) checkCombatEnd() Victor {
 	playerAlive := false
 	for _, u := range m.Combat.PlayerUnits {
 		if u.IsAlive() {
@@ -338,13 +351,13 @@ func (m Model) checkCombatEnd() string {
 
 	switch {
 	case !playerAlive && !enemyAlive:
-		return "draw"
+		return VictorDraw
 	case !enemyAlive:
-		return "player"
+		return VictorPlayer
 	case !playerAlive:
-		return "enemy"
+		return VictorEnemy
 	default:
-		return ""
+		return VictorNone
 	}
 }
 
@@ -355,36 +368,21 @@ func (m Model) applyCombatEnd() (Model, Cmd) {
 		return m, nil
 	}
 	victor := m.checkCombatEnd()
-	if victor == "" {
+	if victor == VictorNone {
 		return m, nil
 	}
 	combat := m.Combat
 	combat.Phase = model.CombatResolved
-	combat.Victor = victor
+	combat.Victor = victor.String()
 	newLog := make([]string, len(combat.Log), len(combat.Log)+1)
 	copy(newLog, combat.Log)
-	if victor == "draw" {
+	if victor == VictorDraw {
 		combat.Log = append(newLog, "combat ended: draw")
 	} else {
-		combat.Log = append(newLog, "combat ended: "+victor+" wins")
+		combat.Log = append(newLog, "combat ended: "+victor.String()+" wins")
 	}
 	m.Combat = combat
-	v := victorFromString(victor)
-	return m, func() Msg { return CombatEnded{Victor: v} }
-}
-
-// victorFromString converts the legacy string victor to the Victor enum.
-func victorFromString(s string) Victor {
-	switch s {
-	case "player":
-		return VictorPlayer
-	case "enemy":
-		return VictorEnemy
-	case "draw":
-		return VictorDraw
-	default:
-		return VictorNone
-	}
+	return m, func() Msg { return CombatEnded{Victor: victor} }
 }
 
 // Helper functions
@@ -474,10 +472,7 @@ func copyUnitSlice(units []entity.Unit) []entity.Unit {
 // applyModifications applies serialized modifications to a unit
 func applyModifications(unit entity.Unit, mods ModifiedUnit) entity.Unit {
 	// Copy attributes map
-	newAttrs := make(map[string]core.Attribute)
-	for k, v := range unit.Attributes {
-		newAttrs[k] = v
-	}
+	newAttrs := maps.Clone(unit.Attributes)
 
 	// Apply attribute modifications
 	for name, attrVal := range mods.Attributes {
