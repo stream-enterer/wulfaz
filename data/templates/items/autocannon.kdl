@@ -4,7 +4,7 @@ item id="autocannon" {
         attribute name="size" base=2
         attribute name="damage" base=8
         attribute name="ammo" base=20
-        attribute name="cooldown" base=6
+        attribute name="cooldown" base=3
     }
     triggers {
         trigger event="on_activate" effect_name="deal_damage" {

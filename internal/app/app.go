@@ -234,32 +234,11 @@ func (a *App) buildCombat() model.CombatModel {
 		log.Fatalf("equip enemy_2: %v", err)
 	}
 
-	allUnits := []entity.Unit{player1, player2, enemy1, enemy2}
-
 	return model.CombatModel{
-		Phase:         model.CombatActive,
-		PlayerUnits:   []entity.Unit{player1, player2},
-		EnemyUnits:    []entity.Unit{enemy1, enemy2},
-		Tick:          0,
-		Log:           []string{"Combat started"},
-		ItemCooldowns: initItemCooldowns(allUnits),
+		Phase:       model.CombatActive,
+		PlayerUnits: []entity.Unit{player1, player2},
+		EnemyUnits:  []entity.Unit{enemy1, enemy2},
+		Tick:        0,
+		Log:         []string{"Combat started"},
 	}
-}
-
-// initItemCooldowns creates initial cooldown map for all equipped items with cooldown > 0
-func initItemCooldowns(units []entity.Unit) map[string]int {
-	cds := make(map[string]int)
-	for _, unit := range units {
-		for partID, part := range unit.Parts {
-			for _, mount := range part.Mounts {
-				for _, item := range mount.Contents {
-					if cd, ok := item.Attributes["cooldown"]; ok && cd.Base > 0 {
-						path := unit.ID + "/" + partID + "/" + mount.ID + "/" + item.ID
-						cds[path] = cd.Base
-					}
-				}
-			}
-		}
-	}
-	return cds
 }

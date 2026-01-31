@@ -2,7 +2,6 @@ package tea
 
 import (
 	"maps"
-	"strings"
 
 	"wulfaz/internal/core"
 	"wulfaz/internal/effect"
@@ -135,71 +134,39 @@ func (m Model) handleCombatTicked(msg CombatTicked) (Model, Cmd) {
 		return m, nil
 	}
 
-	// Copy combat model (TEA immutability)
+	// Increment tick
 	combat := m.Combat
 	combat.Tick++
-
-	// Decrement all cooldowns (copy map for TEA immutability)
-	newCDs := make(map[string]int, len(combat.ItemCooldowns))
-	for path, remaining := range combat.ItemCooldowns {
-		if remaining > 0 {
-			newCDs[path] = remaining - 1
-		} else {
-			newCDs[path] = 0
-		}
-	}
-	combat.ItemCooldowns = newCDs
 	m.Combat = combat
 
 	// Collect all units
 	allUnits := getAllUnits(m.Combat)
 
-	// Dispatch on_combat_tick to all units, track which items fire
+	// Dispatch on_combat_tick to all units
 	var allTriggers []CollectedTrigger
-	var firedPaths []string
 
 	for _, unit := range allUnits {
 		if !unit.IsAlive() {
 			continue
 		}
 		ctx := event.TriggerContext{
-			Event:         core.EventOnCombatTick,
-			SourceUnit:    unit,
-			AllUnits:      allUnits,
-			Tick:          m.Combat.Tick,
-			Rolls:         msg.Rolls,
-			ItemCooldowns: m.Combat.ItemCooldowns,
+			Event:      core.EventOnCombatTick,
+			SourceUnit: unit,
+			AllUnits:   allUnits,
+			Tick:       m.Combat.Tick,
+			Rolls:      msg.Rolls,
 		}
 		collected := event.Dispatch(ctx)
 		for _, ct := range collected {
 			allTriggers = append(allTriggers, toMsgCollectedTrigger(ct))
-			// Track item paths that fired (for cooldown reset)
-			if ct.Owner.ItemID != "" {
-				firedPaths = append(firedPaths, event.OwnerPath(ct.Owner))
-			}
 		}
-	}
-
-	// Reset cooldowns for items that fired
-	if len(firedPaths) > 0 {
-		combat = m.Combat
-		resetCDs := make(map[string]int, len(combat.ItemCooldowns))
-		for k, v := range combat.ItemCooldowns {
-			resetCDs[k] = v
-		}
-		for _, path := range firedPaths {
-			if cd := lookupItemCooldown(allUnits, path); cd > 0 {
-				resetCDs[path] = cd
-			}
-		}
-		combat.ItemCooldowns = resetCDs
-		m.Combat = combat
 	}
 
 	if len(allTriggers) == 0 {
 		return m, nil
 	}
 
+	// Return command that yields TriggersCollected
 	return m, buildTriggersCollectedCmd(string(core.EventOnCombatTick), allTriggers, msg.Rolls, 0)
 }
 
@@ -529,37 +496,4 @@ func applyModifications(unit entity.Unit, mods ModifiedUnit) entity.Unit {
 		Pilot:      unit.Pilot,
 		HasPilot:   unit.HasPilot,
 	}
-}
-
-// lookupItemCooldown finds an item's base cooldown attribute by path
-func lookupItemCooldown(units []entity.Unit, path string) int {
-	parts := strings.Split(path, "/")
-	if len(parts) != 4 {
-		return 0
-	}
-	unitID, partID, mountID, itemID := parts[0], parts[1], parts[2], parts[3]
-
-	for _, unit := range units {
-		if unit.ID != unitID {
-			continue
-		}
-		part, ok := unit.Parts[partID]
-		if !ok {
-			continue
-		}
-		for _, mount := range part.Mounts {
-			if mount.ID != mountID {
-				continue
-			}
-			for _, item := range mount.Contents {
-				if item.ID == itemID {
-					if cd, ok := item.Attributes["cooldown"]; ok {
-						return cd.Base
-					}
-					return 0
-				}
-			}
-		}
-	}
-	return 0
 }

@@ -3,7 +3,6 @@ package renderer
 import (
 	"fmt"
 	"image/color"
-	"sort"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -75,14 +74,14 @@ func drawBoardFrame(screen *ebiten.Image, x, y float32) {
 }
 
 // drawUnitsOnBoard renders units left-aligned within the board
-func drawUnitsOnBoard(screen *ebiten.Image, units []entity.Unit, boardX, boardY float32, c color.RGBA, cooldowns map[string]int) {
+func drawUnitsOnBoard(screen *ebiten.Image, units []entity.Unit, boardX, boardY float32, c color.RGBA) {
 	currentX := boardX + float32(BoardMargin)
 	unitY := boardY + float32(BoardMargin)
 
 	for _, unit := range units {
 		cw := getCombatWidth(unit)
 		w := calcUnitWidth(cw)
-		drawUnit(screen, unit, c, currentX, unitY, w, cooldowns)
+		drawUnit(screen, unit.ID, getAttr(unit, "health"), c, currentX, unitY, w)
 		currentX += w + UnitGap
 	}
 }
@@ -129,11 +128,11 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) {
 
 	// Enemy board (top)
 	drawBoardFrame(screen, boardX, enemyBoardY)
-	drawUnitsOnBoard(screen, combat.EnemyUnits, boardX, enemyBoardY, colorEnemy, combat.ItemCooldowns)
+	drawUnitsOnBoard(screen, combat.EnemyUnits, boardX, enemyBoardY, colorEnemy)
 
 	// Player board (bottom)
 	drawBoardFrame(screen, boardX, playerBoardY)
-	drawUnitsOnBoard(screen, combat.PlayerUnits, boardX, playerBoardY, colorPlayer, combat.ItemCooldowns)
+	drawUnitsOnBoard(screen, combat.PlayerUnits, boardX, playerBoardY, colorPlayer)
 
 	renderLog(screen, combat.Log)
 
@@ -143,44 +142,18 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) {
 	}
 }
 
-func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width float32, cooldowns map[string]int) {
+func drawUnit(screen *ebiten.Image, id string, health int, c color.RGBA, x, y, width float32) {
 	vector.FillRect(screen, x, y, width, SlotHeight, c, false)
 	vector.StrokeRect(screen, x, y, width, SlotHeight, FrameStroke, color.White, false)
 
-	// Unit ID (truncated for narrow units)
-	displayID := unit.ID
-	if width < 80 && len(unit.ID) > 6 {
-		displayID = unit.ID[:6]
+	// Truncate ID for narrow units
+	displayID := id
+	if width < 80 && len(id) > 6 {
+		displayID = id[:6]
 	}
+
 	ebitenutil.DebugPrintAt(screen, displayID, int(x)+4, int(y)+4)
-
-	// Item cooldowns (sorted for determinism)
-	partIDs := make([]string, 0, len(unit.Parts))
-	for partID := range unit.Parts {
-		partIDs = append(partIDs, partID)
-	}
-	sort.Strings(partIDs)
-
-	yOff := 20
-	for _, partID := range partIDs {
-		part := unit.Parts[partID]
-		for _, mount := range part.Mounts {
-			for _, item := range mount.Contents {
-				path := unit.ID + "/" + partID + "/" + mount.ID + "/" + item.ID
-				if remaining, ok := cooldowns[path]; ok {
-					name := item.ID
-					if len(name) > 6 {
-						name = name[:6]
-					}
-					ebitenutil.DebugPrintAt(screen, fmt.Sprintf("%s:%d", name, remaining), int(x)+4, int(y)+yOff)
-					yOff += 14
-				}
-			}
-		}
-	}
-
-	// Health at bottom
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("HP:%d", getAttr(unit, "health")), int(x)+4, int(y)+SlotHeight-16)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("HP:%d", health), int(x)+4, int(y)+SlotHeight-16)
 }
 
 func renderLog(screen *ebiten.Image, log []string) {

@@ -5,7 +5,7 @@ item id="lrm_rack" {
         attribute name="damage" base=4
         attribute name="splash" base=2
         attribute name="ammo" base=12
-        attribute name="cooldown" base=8
+        attribute name="cooldown" base=4
         attribute name="min_range" base=3
     }
     triggers {

@@ -47,19 +47,6 @@ func Dispatch(ctx TriggerContext) []CollectedTrigger {
 		for _, mount := range part.Mounts {
 			// Traverse items in mount
 			for _, item := range mount.Contents {
-				// Skip items on cooldown (only for on_combat_tick)
-				if ctx.Event == core.EventOnCombatTick && ctx.ItemCooldowns != nil {
-					path := OwnerPath(TriggerOwner{
-						UnitID:  ctx.SourceUnit.ID,
-						PartID:  partID,
-						MountID: mount.ID,
-						ItemID:  item.ID,
-					})
-					if remaining, ok := ctx.ItemCooldowns[path]; ok && remaining > 0 {
-						continue
-					}
-				}
-
 				for _, trigger := range item.Triggers {
 					if trigger.Event == ctx.Event && core.EvaluateConditions(trigger.Conditions, ctx.SourceUnit.Tags, ctx.SourceUnit.Attributes) {
 						collected = append(collected, CollectedTrigger{
@@ -83,14 +70,14 @@ func Dispatch(ctx TriggerContext) []CollectedTrigger {
 			return collected[i].Trigger.Priority < collected[j].Trigger.Priority
 		}
 		// Deterministic ordering by owner path
-		return OwnerPath(collected[i].Owner) < OwnerPath(collected[j].Owner)
+		return ownerPath(collected[i].Owner) < ownerPath(collected[j].Owner)
 	})
 
 	return collected
 }
 
-// OwnerPath creates a deterministic path string from owner components
-func OwnerPath(o TriggerOwner) string {
+// ownerPath creates a deterministic string for sorting
+func ownerPath(o TriggerOwner) string {
 	return o.UnitID + "/" + o.PartID + "/" + o.MountID + "/" + o.ItemID
 }
 
