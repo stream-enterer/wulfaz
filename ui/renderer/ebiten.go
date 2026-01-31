@@ -14,15 +14,25 @@ import (
 )
 
 const (
-	unitWidth   = 120
-	unitHeight  = 60
-	unitPadding = 20
+	// Board layout
+	BoardSlots  = 10
+	SlotWidth   = 64
+	SlotHeight  = 112
+	BoardMargin = 10
+	UnitGap     = BoardMargin
+	BoardWidth  = BoardSlots * SlotWidth
+	FrameStroke = 2
 
-	enemyRowY  = 80
-	playerRowY = 450
-	logX       = 550
-	logY       = 200
-	logMaxLen  = 10
+	// Y positions
+	enemyBoardY  = 80
+	playerBoardY = 480
+
+	// Combat log (top right, mirrors tick/pause text)
+	logY        = 10
+	logChars    = 35
+	logMaxLines = 20
+	charWidth   = 7  // approx width of debug font char
+	lineHeight  = 15
 )
 
 var (
@@ -30,6 +40,51 @@ var (
 	colorPlayer     = color.RGBA{60, 100, 200, 255}
 	colorEnemy      = color.RGBA{200, 60, 60, 255}
 )
+
+func getAttr(unit entity.Unit, name string) int {
+	if attr, ok := unit.Attributes[name]; ok {
+		return attr.Base
+	}
+	return 0
+}
+
+func getCombatWidth(unit entity.Unit) int {
+	if cw := getAttr(unit, "combat_width"); cw > 0 {
+		return cw
+	}
+	return 1
+}
+
+// calcUnitWidth returns pixel width for a given combat_width
+func calcUnitWidth(combatWidth int) float32 {
+	return float32(combatWidth*SlotWidth - UnitGap)
+}
+
+// calcBoardX returns the X position to center the board frame
+func calcBoardX(screenWidth int) float32 {
+	frameWidth := BoardWidth + 2*BoardMargin
+	return float32(screenWidth-frameWidth) / 2
+}
+
+// drawBoardFrame draws the board outline
+func drawBoardFrame(screen *ebiten.Image, x, y float32) {
+	frameW := float32(BoardWidth + 2*BoardMargin)
+	frameH := float32(SlotHeight + 2*BoardMargin)
+	vector.StrokeRect(screen, x, y, frameW, frameH, FrameStroke, color.White, false)
+}
+
+// drawUnitsOnBoard renders units left-aligned within the board
+func drawUnitsOnBoard(screen *ebiten.Image, units []entity.Unit, boardX, boardY float32, c color.RGBA) {
+	currentX := boardX + float32(BoardMargin)
+	unitY := boardY + float32(BoardMargin)
+
+	for _, unit := range units {
+		cw := getCombatWidth(unit)
+		w := calcUnitWidth(cw)
+		drawUnit(screen, unit.ID, getAttr(unit, "health"), c, currentX, unitY, w)
+		currentX += w + UnitGap
+	}
+}
 
 // RenderEbiten renders the Model to an Ebitengine screen
 func RenderEbiten(screen *ebiten.Image, m tea.Model) {
@@ -64,80 +119,88 @@ func renderGameOver(screen *ebiten.Image) {
 func renderCombat(screen *ebiten.Image, combat model.CombatModel) {
 	w := screen.Bounds().Dx()
 
-	// Draw tick counter in top-left
+	// Header
 	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Tick: %d", combat.Tick), 10, 10)
-
-	// Draw controls hint
 	ebitenutil.DebugPrintAt(screen, "SPACE=Pause  ESC=Quit", 10, 30)
 
-	// Draw enemy units at top
-	if len(combat.EnemyUnits) > 0 {
-		enemyStartX := centerUnits(w, len(combat.EnemyUnits))
-		for i, unit := range combat.EnemyUnits {
-			x := float32(enemyStartX + i*(unitWidth+unitPadding))
-			drawUnit(screen, unit.ID, getHealthFromUnit(unit), colorEnemy, x, enemyRowY)
-		}
-	}
+	// Board X position (centered)
+	boardX := calcBoardX(w)
 
-	// Draw player units at bottom
-	if len(combat.PlayerUnits) > 0 {
-		playerStartX := centerUnits(w, len(combat.PlayerUnits))
-		for i, unit := range combat.PlayerUnits {
-			x := float32(playerStartX + i*(unitWidth+unitPadding))
-			drawUnit(screen, unit.ID, getHealthFromUnit(unit), colorPlayer, x, playerRowY)
-		}
-	}
+	// Enemy board (top)
+	drawBoardFrame(screen, boardX, enemyBoardY)
+	drawUnitsOnBoard(screen, combat.EnemyUnits, boardX, enemyBoardY, colorEnemy)
 
-	// Draw combat log on the right side
+	// Player board (bottom)
+	drawBoardFrame(screen, boardX, playerBoardY)
+	drawUnitsOnBoard(screen, combat.PlayerUnits, boardX, playerBoardY, colorPlayer)
+
 	renderLog(screen, combat.Log)
 
-	// Draw paused overlay
+	// Paused overlay
 	if combat.Phase == model.CombatPaused {
 		renderPausedOverlay(screen)
 	}
 }
 
-func centerUnits(screenWidth, count int) int {
-	totalWidth := count*unitWidth + (count-1)*unitPadding
-	return (screenWidth - totalWidth) / 2
-}
+func drawUnit(screen *ebiten.Image, id string, health int, c color.RGBA, x, y, width float32) {
+	vector.FillRect(screen, x, y, width, SlotHeight, c, false)
+	vector.StrokeRect(screen, x, y, width, SlotHeight, FrameStroke, color.White, false)
 
-func drawUnit(screen *ebiten.Image, id string, health int, c color.RGBA, x, y float32) {
-	// Draw unit rectangle
-	vector.DrawFilledRect(screen, x, y, unitWidth, unitHeight, c, false)
-
-	// Draw border
-	vector.StrokeRect(screen, x, y, unitWidth, unitHeight, 2, color.White, false)
-
-	// Draw ID
-	ebitenutil.DebugPrintAt(screen, id, int(x)+5, int(y)+5)
-
-	// Draw health
-	healthStr := fmt.Sprintf("HP: %d", health)
-	ebitenutil.DebugPrintAt(screen, healthStr, int(x)+5, int(y)+25)
-}
-
-func getHealthFromUnit(unit entity.Unit) int {
-	if attr, ok := unit.Attributes["health"]; ok {
-		return attr.Base
+	// Truncate ID for narrow units
+	displayID := id
+	if width < 80 && len(id) > 6 {
+		displayID = id[:6]
 	}
-	return 0
+
+	ebitenutil.DebugPrintAt(screen, displayID, int(x)+4, int(y)+4)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("HP:%d", health), int(x)+4, int(y)+SlotHeight-16)
 }
 
 func renderLog(screen *ebiten.Image, log []string) {
+	w := screen.Bounds().Dx()
+	logX := w - logChars*charWidth - BoardMargin
+
 	ebitenutil.DebugPrintAt(screen, "Combat Log:", logX, logY)
 
-	start := 0
-	if len(log) > logMaxLen {
-		start = len(log) - logMaxLen
+	var lines []string
+	for _, entry := range log {
+		lines = append(lines, wrapText(entry, logChars)...)
 	}
 
-	for i, entry := range log[start:] {
-		if len(entry) > 30 {
-			entry = entry[:27] + "..."
-		}
-		ebitenutil.DebugPrintAt(screen, entry, logX, logY+20+i*15)
+	start := 0
+	if len(lines) > logMaxLines {
+		start = len(lines) - logMaxLines
 	}
+
+	for i, line := range lines[start:] {
+		ebitenutil.DebugPrintAt(screen, line, logX, logY+lineHeight+i*lineHeight)
+	}
+}
+
+func wrapText(text string, maxChars int) []string {
+	if len(text) <= maxChars {
+		return []string{text}
+	}
+
+	var lines []string
+	for len(text) > maxChars {
+		breakAt := maxChars
+		for i := maxChars; i > 0; i-- {
+			if text[i] == ' ' {
+				breakAt = i
+				break
+			}
+		}
+		lines = append(lines, text[:breakAt])
+		text = text[breakAt:]
+		if len(text) > 0 && text[0] == ' ' {
+			text = text[1:]
+		}
+	}
+	if len(text) > 0 {
+		lines = append(lines, text)
+	}
+	return lines
 }
 
 func renderPausedOverlay(screen *ebiten.Image) {
@@ -145,7 +208,7 @@ func renderPausedOverlay(screen *ebiten.Image) {
 
 	// Semi-transparent overlay
 	overlay := color.RGBA{0, 0, 0, 128}
-	vector.DrawFilledRect(screen, 0, 0, float32(w), float32(h), overlay, false)
+	vector.FillRect(screen, 0, 0, float32(w), float32(h), overlay, false)
 
 	// PAUSED text
 	ebitenutil.DebugPrintAt(screen, "=== PAUSED ===", w/2-50, h/2-10)
