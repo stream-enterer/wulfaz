@@ -209,89 +209,68 @@ func ResolvePosition(pos model.FiringPosition, combat model.CombatModel) Cmd {
 	return func() Msg {
 		var attacks []AttackResult
 		unitMap := buildUnitMap(combat)
-
-		// Build snapshot of current HP/shields for all targets
 		hpSnapshot := buildHPSnapshot(combat)
 
-		// Find command units for gap targeting
 		playerCmd := findPlayerCommandUnit(combat)
 		enemyCmd := findEnemyCommandUnit(combat)
 
-		// Calculate player unit attacks -> enemy units
-		for _, uid := range pos.PlayerUnits {
-			attacker, ok := unitMap[uid]
-			if !ok || !attacker.IsAlive() {
-				continue
-			}
-			rolled := combat.RolledDice[uid]
-			targetID := SelectTarget(attacker, combat.EnemyUnits, enemyCmd)
-			if targetID == "" {
-				continue
-			}
+		// Player units attack enemy units
+		attacks = resolveAttacks(attacks, pos.PlayerUnits, combat.EnemyUnits, enemyCmd,
+			unitMap, combat.RolledDice, hpSnapshot)
 
-			for dieIdx, rd := range rolled {
-				if rd.Type != entity.DieDamage || rd.Result == 0 {
-					continue // Skip non-damage and blank dice
-				}
-
-				hp, shields := hpSnapshot[targetID][0], hpSnapshot[targetID][1]
-				remaining := rd.Result
-				if shields > 0 {
-					absorbed := min(remaining, shields)
-					remaining -= absorbed
-					shields -= absorbed
-				}
-				hp = max(0, hp-remaining)
-
-				attacks = append(attacks, AttackResult{
-					AttackerID: uid, TargetID: targetID, DieIndex: dieIdx,
-					Damage: rd.Result, NewHealth: hp, NewShields: shields,
-					TargetDead: hp <= 0,
-				})
-
-				// Update snapshot for subsequent dice (same attacker's dice hit same target)
-				hpSnapshot[targetID] = [2]int{hp, shields}
-			}
-		}
-
-		// Calculate enemy unit attacks -> player units (same pattern)
-		for _, uid := range pos.EnemyUnits {
-			attacker, ok := unitMap[uid]
-			if !ok || !attacker.IsAlive() {
-				continue
-			}
-			rolled := combat.RolledDice[uid]
-			targetID := SelectTarget(attacker, combat.PlayerUnits, playerCmd)
-			if targetID == "" {
-				continue
-			}
-
-			for dieIdx, rd := range rolled {
-				if rd.Type != entity.DieDamage || rd.Result == 0 {
-					continue
-				}
-
-				hp, shields := hpSnapshot[targetID][0], hpSnapshot[targetID][1]
-				remaining := rd.Result
-				if shields > 0 {
-					absorbed := min(remaining, shields)
-					remaining -= absorbed
-					shields -= absorbed
-				}
-				hp = max(0, hp-remaining)
-
-				attacks = append(attacks, AttackResult{
-					AttackerID: uid, TargetID: targetID, DieIndex: dieIdx,
-					Damage: rd.Result, NewHealth: hp, NewShields: shields,
-					TargetDead: hp <= 0,
-				})
-
-				hpSnapshot[targetID] = [2]int{hp, shields}
-			}
-		}
+		// Enemy units attack player units
+		attacks = resolveAttacks(attacks, pos.EnemyUnits, combat.PlayerUnits, playerCmd,
+			unitMap, combat.RolledDice, hpSnapshot)
 
 		return PositionResolved{Position: pos.Position, Attacks: attacks}
 	}
+}
+
+// resolveAttacks calculates damage from attackerIDs to targets, updating hpSnapshot.
+func resolveAttacks(
+	attacks []AttackResult,
+	attackerIDs []string,
+	targets []entity.Unit,
+	targetCmd *entity.Unit,
+	unitMap map[string]entity.Unit,
+	rolledDice map[string][]entity.RolledDie,
+	hpSnapshot map[string][2]int,
+) []AttackResult {
+	for _, uid := range attackerIDs {
+		attacker, ok := unitMap[uid]
+		if !ok || !attacker.IsAlive() {
+			continue
+		}
+		rolled := rolledDice[uid]
+		targetID := SelectTarget(attacker, targets, targetCmd)
+		if targetID == "" {
+			continue
+		}
+
+		for dieIdx, rd := range rolled {
+			if rd.Type != entity.DieDamage || rd.Result == 0 {
+				continue
+			}
+
+			hp, shields := hpSnapshot[targetID][0], hpSnapshot[targetID][1]
+			remaining := rd.Result
+			if shields > 0 {
+				absorbed := min(remaining, shields)
+				remaining -= absorbed
+				shields -= absorbed
+			}
+			hp = max(0, hp-remaining)
+
+			attacks = append(attacks, AttackResult{
+				AttackerID: uid, TargetID: targetID, DieIndex: dieIdx,
+				Damage: rd.Result, NewHealth: hp, NewShields: shields,
+				TargetDead: hp <= 0,
+			})
+
+			hpSnapshot[targetID] = [2]int{hp, shields}
+		}
+	}
+	return attacks
 }
 
 // StartNextRound wraps RollAllDice with round-based seed variation.

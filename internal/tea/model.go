@@ -3,6 +3,8 @@ package tea
 import (
 	"fmt"
 	"maps"
+	"math"
+	"slices"
 
 	"wulfaz/internal/core"
 	"wulfaz/internal/effect"
@@ -535,7 +537,7 @@ func findEnemyCommandUnit(combat model.CombatModel) *entity.Unit {
 // findLowestHPAliveUnit returns ID of alive unit with lowest HP (or "").
 func findLowestHPAliveUnit(units []entity.Unit) string {
 	var lowestID string
-	lowestHP := int(^uint(0) >> 1) // Max int
+	lowestHP := math.MaxInt
 	for _, u := range units {
 		if !u.IsAlive() {
 			continue
@@ -574,14 +576,7 @@ func buildFiringOrder(combat model.CombatModel) []model.FiringPosition {
 	for pos := range positionSet {
 		positions = append(positions, pos)
 	}
-	// Simple bubble sort for small set
-	for i := 0; i < len(positions); i++ {
-		for j := i + 1; j < len(positions); j++ {
-			if positions[i] > positions[j] {
-				positions[i], positions[j] = positions[j], positions[i]
-			}
-		}
-	}
+	slices.Sort(positions)
 
 	// Build firing order
 	var order []model.FiringPosition
