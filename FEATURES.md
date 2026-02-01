@@ -195,52 +195,52 @@ _Reserved: F-157 – F-159_
 Target selection, overlap rules, overflow, command targeting.
 
 ### F-160: Positional Targeting (Overlap)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:117-123, 185, 392
 - **Depends:** None (F-122 complete)
-- **Description:** _deferred_
+- **Description:** Units target enemies based on board position overlap (Wave 4)
 
 ### F-161: Target Selection (Lowest HP First)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:121
 - **Depends:** F-160
-- **Description:** _deferred_
+- **Description:** SelectTargetUnit picks lowest HP overlapping enemy, ties broken left-to-right (Wave 4)
 
 ### F-162: Multi-Die Separate Attacks
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:123
 - **Depends:** F-132
-- **Description:** _deferred_
+- **Description:** Each die resolves separately in resolveAttacks loop (Wave 4)
 
 ### F-163: Overflow Damage (MTG-Style)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:125-126, 393, 492
 - **Depends:** F-161
-- **Description:** _deferred_
+- **Description:** ApplyDamageWithOverflow chains through overlapping enemies, stops at command (Wave 4)
 
 ### F-164: Command Unit Targeting (Any Enemy)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:131, 209, 260-261
 - **Depends:** F-114, F-160
-- **Description:** _deferred_
+- **Description:** Command dice target lowest HP player/enemy unit (Wave 3)
 
 ### F-165: Friendly Targeting (Shield/Heal)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:255-258, 265-266, 272
 - **Depends:** F-137, F-138
-- **Description:** _deferred_
+- **Description:** handleDiceActivated routes shield/heal to friendly units (Wave 3)
 
 ### F-166: Gap-to-Command Fallback
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:127-128, 394
 - **Depends:** F-124, F-164
-- **Description:** _deferred_
+- **Description:** Gap damage hits command only when all units dead (Wave 4, constrained by F-167)
 
 ### F-167: Units-Only-Target-Units Rule
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:129
 - **Depends:** F-160
-- **Description:** _deferred_
+- **Description:** AnyAliveUnits prevents command targeting while units alive (Wave 4)
 
 _Reserved: F-168 – F-169_
 
@@ -595,15 +595,15 @@ Explicitly out of MVP scope per DESIGN.md.
 | Positioning | F-120 – F-129 | 2 | 3 |
 | Dice System | F-130 – F-149 | 10 | 0 |
 | Damage Model | F-150 – F-159 | 5 | 2 |
-| Targeting | F-160 – F-169 | 8 | 0 |
-| Combat Flow | F-170 – F-179 | 8 | 1 |
+| Targeting | F-160 – F-169 | 0 | 8 |
+| Combat Flow | F-170 – F-179 | 0 | 8 |
 | Victory Conditions | F-180 – F-189 | 4 | 0 |
 | Edge Cases | F-190 – F-199 | 4 | 0 |
 | Enemy AI | F-200 – F-209 | 4 | 0 |
 | Run Structure | F-210 – F-219 | 2 | 5 |
 | UI / Display | F-220 – F-239 | 7 | 3 |
 | Templates / Content | F-240 – F-249 | 4 | 2 |
-| **MVP Total** | | **61** | **23** |
+| **MVP Total** | | **45** | **38** |
 | Deferred | F-D01 – F-D20 | 20 | — |
 
 ---

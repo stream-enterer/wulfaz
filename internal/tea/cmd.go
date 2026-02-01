@@ -226,7 +226,9 @@ func ResolvePosition(pos model.FiringPosition, combat model.CombatModel) Cmd {
 	}
 }
 
-// resolveAttacks calculates damage from attackerIDs to targets, updating hpSnapshot.
+// resolveAttacks calculates damage from attackerIDs to targets with overflow.
+// Each die attack is resolved separately with MTG-style overflow.
+// Gap damage only hits command if ALL enemy units are dead (F-167).
 func resolveAttacks(
 	attacks []AttackResult,
 	attackerIDs []string,
@@ -242,32 +244,52 @@ func resolveAttacks(
 			continue
 		}
 		rolled := rolledDice[uid]
-		targetID := SelectTarget(attacker, targets, targetCmd)
-		if targetID == "" {
-			continue
-		}
 
 		for dieIdx, rd := range rolled {
 			if rd.Type != entity.DieDamage || rd.Result == 0 {
 				continue
 			}
 
-			hp, shields := hpSnapshot[targetID][0], hpSnapshot[targetID][1]
-			remaining := rd.Result
-			if shields > 0 {
-				absorbed := min(remaining, shields)
-				remaining -= absorbed
-				shields -= absorbed
+			// Try overflow damage to overlapping enemies
+			results := ApplyDamageWithOverflow(attacker, rd.Result, targets, hpSnapshot)
+
+			if len(results) > 0 {
+				// Convert overflow results to AttackResults
+				for _, r := range results {
+					attacks = append(attacks, AttackResult{
+						AttackerID: uid,
+						TargetID:   r.TargetID,
+						DieIndex:   dieIdx,
+						Damage:     r.Damage,
+						NewHealth:  r.NewHP,
+						NewShields: r.NewShields,
+						TargetDead: r.Killed,
+					})
+				}
+			} else {
+				// Gap case: F-166 + F-167
+				// Only hit command if ALL enemy units are dead
+				if !AnyAliveUnits(targets) && targetCmd != nil && targetCmd.IsAlive() {
+					hp, shields := hpSnapshot[targetCmd.ID][0], hpSnapshot[targetCmd.ID][1]
+					remaining := rd.Result
+					absorbed := min(remaining, shields)
+					remaining -= absorbed
+					shields -= absorbed
+					hp = max(0, hp-remaining)
+
+					attacks = append(attacks, AttackResult{
+						AttackerID: uid,
+						TargetID:   targetCmd.ID,
+						DieIndex:   dieIdx,
+						Damage:     rd.Result,
+						NewHealth:  hp,
+						NewShields: shields,
+						TargetDead: hp <= 0,
+					})
+					hpSnapshot[targetCmd.ID] = [2]int{hp, shields}
+				}
+				// Else: gap but units exist elsewhere - damage wasted
 			}
-			hp = max(0, hp-remaining)
-
-			attacks = append(attacks, AttackResult{
-				AttackerID: uid, TargetID: targetID, DieIndex: dieIdx,
-				Damage: rd.Result, NewHealth: hp, NewShields: shields,
-				TargetDead: hp <= 0,
-			})
-
-			hpSnapshot[targetID] = [2]int{hp, shields}
 		}
 	}
 	return attacks

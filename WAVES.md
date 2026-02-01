@@ -1,7 +1,6 @@
 # Implementation Waves — Wulfaz MVP
 
-**Generated:** 2026-02-01
-**Source:** FEATURES.md (61 remaining features)
+**Source:** FEATURES.md (61 features)
 
 ---
 
@@ -17,133 +16,22 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 
 ---
 
-## Wave 1: Unlock Blockers ✓
+## Completed Waves
 
-**Goal:** Create the two primitives that unblock the most downstream work.
+### Wave 1: Unlock Blockers ✓
+Command unit entity (F-114) and die entity (F-130) — the primitives that unblock downstream work.
 
-| ID | Feature | Unlocks | Status |
-|----|---------|---------|--------|
-| F-114 | Command Unit Entity | F-123, F-133, F-164, F-180, F-190, F-241 | ✓ |
-| F-130 | Die Entity | F-131, F-132, F-133, F-136, F-137, F-138 | ✓ |
+### Wave 2: Dice Core ✓
+Dice rolling (F-131–F-133), lock/reroll mechanics (F-134–F-135), and effects for damage/shield/heal (F-136–F-139).
 
-**Deliverable:** Command unit type distinct from regular units. Die struct with type and faces.
+### Legacy Cleanup ✓
+Removed tick-based autocombat system to enable phase-based dice combat.
 
-**Implementation:**
-- `Unit.IsCommand()` method checks for `"command"` tag
-- `Die` struct with `Type` (damage/shield/heal) and `Faces []int`
-- `Unit.Dice []Die` field added
-- Full copy/immutability support for TEA compliance
+### Wave 3: Combat Phases ✓
+Phase structure (F-171–F-178): Preview → Player Command → Enemy Command → Execution → Round End → repeat. Includes stub targeting, simultaneous resolution, left-to-right firing order, and shield expiration (F-154).
 
----
-
-## Wave 2: Dice Core ✓
-
-**Goal:** Implement the dice rolling and manipulation mechanics.
-
-| Order | ID | Feature | Depends | Status |
-|-------|-----|---------|---------|--------|
-| 1 | F-131 | Dice Face Distribution (Data-Driven) | F-130 | ✓ |
-| 2 | F-132 | Unit Dice Rolling | F-130 | ✓ |
-| 3 | F-133 | Command Unit Dice Rolling | F-130, F-114 | ✓ |
-| 4 | F-134 | Lock/Unlock Mechanic | F-133 | ✓ |
-| 5 | F-135 | Reroll Mechanic | F-134 | ✓ |
-| 6 | F-136 | Dice Effect — Damage | F-130 | ✓ |
-| 7 | F-137 | Dice Effect — Shield | F-130 | ✓ |
-| 8 | F-138 | Dice Effect — Heal | F-130 | ✓ |
-| 9 | F-139 | Dice Activation (Click-to-Target) | F-134 | ✓ |
-
-**Deliverable:** Player can roll dice, lock/reroll command dice, and activate dice for effects.
-
-**Implementation:**
-- KDL parsing: `parseDieType`, `parseFaces`, `parseDie`, `parseDice` in `template/parse.go`
-- `RolledDie` struct with `FaceIndex` for deterministic replay
-- `DicePhase` enum: Preview → PlayerCommand → EnemyCommand → Execution → RoundEnd
-- 10 dice phase messages (RoundStarted, DieLockToggled, RerollRequested, etc.)
-- Cmd builders: `RollAllDice`, `RerollUnlockedDice`, `ApplyDiceEffect`
-- Targeting validation: damage→enemy only, shield/heal→friendly only
-- Copy functions for TEA immutability (`CopyRolledDiceMap`, `CopyActivatedMap`)
-- Command unit templates: `player_command.kdl`, `enemy_command.kdl`
-- Mech templates updated with `max_health`, `shields`, and `dice` blocks
-
----
-
-## Transition: Remove Legacy Tick System ✓
-
-**When:** After Wave 2 completes, before starting Wave 3.
-
-**Why:** The tick-based autocombat system (`on_combat_tick` events, `CombatTicked` message) is fundamentally incompatible with phase-based dice combat. Trying to layer phases on top of ticks creates architectural confusion.
-
-**What to remove:**
-- `CombatTicked` message and its handler in `tea/model.go`
-- `on_combat_tick` event type and trigger dispatch
-- Tick-based item cooldown system
-- Legacy `CombatPhase` states tied to tick flow
-
-**What to keep:**
-- TEA runtime infrastructure
-- Entity structures (Unit, attributes, tags)
-- KDL template loading
-- Board rendering and UI shell
-- Run loop state machine
-
-**Approach:**
-1. Create `combat-phases` branch
-2. Delete legacy tick dispatch code
-3. Build Wave 3 features on clean foundation
-4. Game will be temporarily unplayable until F-178 (Combat Loop) completes
-
-**Tradeoff:** Brief unplayable period (Wave 3 duration) in exchange for clean architecture. Dice mechanics from Wave 2 can still be unit tested in isolation.
-
----
-
-## Wave 3: Combat Phases ✓
-
-**Goal:** Replace tick-based combat with discrete phase structure.
-
-| Order | ID | Feature | Depends | Status |
-|-------|-----|---------|---------|--------|
-| 1 | F-171 | Preview Phase | F-132, F-133 | ✓ |
-| 2 | F-172 | Player Command Phase | F-134, F-135, F-139 | ✓ |
-| 3 | F-173 | Enemy Command Phase | F-133 | ✓ |
-| 4 | F-174 | Execution Phase | F-160 (stubbed) | ✓ |
-| 5 | F-175 | Simultaneous Resolution (Per Position) | F-174 | ✓ |
-| 6 | F-176 | Left-to-Right Firing Order | F-174 | ✓ |
-| 7 | F-177 | Round End Phase | F-154 | ✓ |
-| 8 | F-178 | Combat Loop (Repeat Until End) | F-177 | ✓ |
-| — | F-154 | Shield Expiration (Round End) | — | ✓ |
-
-**Deliverable:** Combat proceeds through Preview → Player Command → Enemy Command → Execution → Round End → repeat.
-
-**Implementation:**
-- Position field added to Unit entity (-1 = off-board command units)
-- Stub targeting: first overlapping enemy, gap falls through to command unit
-- Simultaneous resolution: attacks calculated per-position, then applied
-- Left-to-right firing order (positions 0-9)
-- Simple enemy AI: damage→lowest HP player, shield/heal→lowest HP enemy
-- Shield expiration at round end
-- Combat loop continues until command unit dies
-- Victory check after each position (immediate end per DESIGN.md)
-
----
-
-## Wave 4: Targeting
-
-**Goal:** Implement positional targeting based on board overlap.
-
-| Order | ID | Feature | Depends |
-|-------|-----|---------|---------|
-| 1 | F-160 | Positional Targeting (Overlap) | — |
-| 2 | F-161 | Target Selection (Lowest HP First) | F-160 |
-| 3 | F-162 | Multi-Die Separate Attacks | F-132 |
-| 4 | F-163 | Overflow Damage (MTG-Style) | F-161 |
-| 5 | F-164 | Command Unit Targeting (Any Enemy) | F-114, F-160 |
-| 6 | F-165 | Friendly Targeting (Shield/Heal) | F-137, F-138 |
-| 7 | F-166 | Gap-to-Command Fallback | F-124, F-164 |
-| 8 | F-167 | Units-Only-Target-Units Rule | F-160 |
-
-**Deliverable:** Units target enemies based on board position overlap. Damage overflows. Command units can target any enemy.
-
-**Estimated scope:** Medium — targeting resolution logic, position-based overlap calculation.
+### Wave 4: Targeting ✓
+Positional targeting with lowest HP priority (F-160–F-161), MTG-style overflow damage (F-163), units-only-target-units rule (F-167). Command unit targeting (F-164–F-165) done in Wave 3. Gap-to-command constrained by F-167: hits command only when all enemy units dead.
 
 ---
 
@@ -162,7 +50,6 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 | Order | ID | Feature | Depends |
 |-------|-----|---------|---------|
 | 1 | F-153 | Shield Buffer | F-137 |
-| 2 | F-154 | Shield Expiration (Round End) | F-153 |
 
 ### 5C: Victory Conditions
 | Order | ID | Feature | Depends |
@@ -241,34 +128,21 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 
 | Wave | Features | Focus | Status |
 |------|----------|-------|--------|
-| 1 | 2 | Unlock blockers (Command Unit, Die Entity) | ✓ |
-| 2 | 9 | Dice mechanics (roll, lock, reroll, effects) | ✓ |
-| — | — | *Remove legacy tick system* | ✓ |
-| 3 | 9 | Combat phases (build phase-based) | ✓ |
-| 4 | 8 | Targeting (positional, overflow) | |
-| 5 | 9 | Death & victory (shields, permadeath, win) | |
+| 1–3 | 20 | Dice core, combat phases | ✓ |
+| 4 | 8 | Targeting (positional, overflow) | ✓ |
+| 5 | 8 | Death & victory (shields, permadeath, win) | |
 | 6 | 25 | Polish & content (edge cases, AI, UI, templates) | |
-| **Total** | **61** | | **20 done** |
+| **Total** | **61** | | **28 done** |
 
 ---
 
 ## Dependencies to Watch
 
-Some cross-wave dependencies that may require ordering adjustments:
-
-- **F-174 (Execution Phase)** needs F-160 (Targeting) — consider doing Wave 4 before Wave 3, or stub targeting
-- **F-177 (Round End Phase)** needs F-154 (Shield Expiration) — pull F-153/F-154 into Wave 3 if needed
 - **F-166 (Gap-to-Command Fallback)** needs F-124 (Dead Unit Gap Handling) — may need to pull F-124 earlier
 
 ---
 
 ## Next Steps
 
-1. ~~**Plan Wave 1** — Define F-114 and F-130 implementation details~~ ✓
-2. ~~**Implement Wave 1** — Create Command Unit and Die entities~~ ✓
-3. ~~**Plan Wave 2** — Design dice mechanics in detail~~ ✓
-4. ~~**Implement Wave 2** — Dice rolling, lock/reroll, effects, activation~~ ✓
-5. ~~**Remove legacy tick system** — Clean up before Wave 3~~ ✓
-6. ~~**Implement Wave 3** — Combat phases with stub targeting~~ ✓
-7. **Plan Wave 4** — Full targeting (lowest HP, overflow damage)
-8. **Iterate** — Complete each wave, reassess, continue
+1. **Plan Wave 5** — Death & victory (shields, permadeath, win conditions)
+2. **Iterate** — Complete each wave, reassess, continue

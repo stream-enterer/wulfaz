@@ -175,7 +175,8 @@ func TestFindOverlappingEnemies_ExcludesDeadAndOffboard(t *testing.T) {
 }
 
 func TestSelectTarget_Gap(t *testing.T) {
-	// Attacker with no overlapping enemies -> should target command unit
+	// Attacker with no overlapping enemies and ALL enemies dead -> should target command unit
+	// Per F-167: Units only target units. Command only targetable when all enemy units dead.
 	attacker := entity.Unit{
 		ID:       "attacker",
 		Position: 9, // Far right, no enemies
@@ -190,7 +191,7 @@ func TestSelectTarget_Gap(t *testing.T) {
 			ID:       "enemy1",
 			Position: 0, // No overlap with position 9
 			Attributes: map[string]core.Attribute{
-				"health": {Base: 30},
+				"health": {Base: 0}, // Dead - so command is targetable
 			},
 		},
 	}
@@ -207,7 +208,7 @@ func TestSelectTarget_Gap(t *testing.T) {
 	result := SelectTarget(attacker, enemies, enemyCmd)
 
 	if result != "enemy_cmd" {
-		t.Errorf("SelectTarget() = %s, want enemy_cmd (gap -> command)", result)
+		t.Errorf("SelectTarget() = %s, want enemy_cmd (gap + all units dead -> command)", result)
 	}
 }
 
@@ -808,5 +809,402 @@ func TestFindLowestHPAliveUnit_Empty(t *testing.T) {
 	result := findLowestHPAliveUnit(units)
 	if result != "" {
 		t.Errorf("findLowestHPAliveUnit(empty) = %s, want empty", result)
+	}
+}
+
+// ===== Wave 4: Overflow Integration Tests =====
+
+func TestResolvePosition_OverflowDamage(t *testing.T) {
+	// Setup: Attacker with 50 damage die, two overlapping enemies (30 and 40 HP)
+	// Expected: 50 damage kills first (30 HP), 20 overflow to second
+	combat := model.CombatModel{
+		Phase:     model.CombatActive,
+		DicePhase: model.DicePhaseExecution,
+		PlayerUnits: []entity.Unit{
+			{
+				ID:       "player_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "attacker",
+				Position: 0,
+				Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{50}}},
+				Attributes: map[string]core.Attribute{
+					"health":       {Base: 50},
+					"combat_width": {Base: 2},
+				},
+			},
+		},
+		EnemyUnits: []entity.Unit{
+			{
+				ID:       "enemy_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "enemy1",
+				Position: 0,
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 30},
+				},
+			},
+			{
+				ID:       "enemy2",
+				Position: 1,
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 40},
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"attacker": {{Type: entity.DieDamage, Result: 50, FaceIndex: 0, Faces: []int{50}}},
+		},
+		FiringOrder:        []model.FiringPosition{{Position: 0, PlayerUnits: []string{"attacker"}}},
+		CurrentFiringIndex: 0,
+	}
+
+	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"attacker"}}, combat)
+	msg := cmd()
+
+	resolved, ok := msg.(PositionResolved)
+	if !ok {
+		t.Fatalf("expected PositionResolved, got %T", msg)
+	}
+
+	// Should have 2 attack results (overflow)
+	if len(resolved.Attacks) != 2 {
+		t.Fatalf("expected 2 attacks (overflow), got %d", len(resolved.Attacks))
+	}
+
+	// First attack should kill enemy1
+	if resolved.Attacks[0].TargetID != "enemy1" {
+		t.Errorf("first attack target = %s, want enemy1", resolved.Attacks[0].TargetID)
+	}
+	if resolved.Attacks[0].Damage != 30 {
+		t.Errorf("first attack damage = %d, want 30", resolved.Attacks[0].Damage)
+	}
+	if !resolved.Attacks[0].TargetDead {
+		t.Error("first attack should kill enemy1")
+	}
+
+	// Second attack should overflow to enemy2
+	if resolved.Attacks[1].TargetID != "enemy2" {
+		t.Errorf("second attack target = %s, want enemy2", resolved.Attacks[1].TargetID)
+	}
+	if resolved.Attacks[1].Damage != 20 {
+		t.Errorf("second attack damage = %d, want 20 (overflow)", resolved.Attacks[1].Damage)
+	}
+	if resolved.Attacks[1].NewHealth != 20 {
+		t.Errorf("enemy2 NewHP = %d, want 20", resolved.Attacks[1].NewHealth)
+	}
+}
+
+func TestResolvePosition_GapToCommand(t *testing.T) {
+	// Setup: All enemies dead, attacker has gap -> damage hits command
+	combat := model.CombatModel{
+		Phase:     model.CombatActive,
+		DicePhase: model.DicePhaseExecution,
+		PlayerUnits: []entity.Unit{
+			{
+				ID:       "player_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "attacker",
+				Position: 9, // Far right, no enemies overlap
+				Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{25}}},
+				Attributes: map[string]core.Attribute{
+					"health":       {Base: 50},
+					"combat_width": {Base: 1},
+				},
+			},
+		},
+		EnemyUnits: []entity.Unit{
+			{
+				ID:       "enemy_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "dead_enemy",
+				Position: 0,
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 0}, // Dead
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"attacker": {{Type: entity.DieDamage, Result: 25, FaceIndex: 0, Faces: []int{25}}},
+		},
+		FiringOrder:        []model.FiringPosition{{Position: 9, PlayerUnits: []string{"attacker"}}},
+		CurrentFiringIndex: 0,
+	}
+
+	cmd := ResolvePosition(model.FiringPosition{Position: 9, PlayerUnits: []string{"attacker"}}, combat)
+	msg := cmd()
+
+	resolved, ok := msg.(PositionResolved)
+	if !ok {
+		t.Fatalf("expected PositionResolved, got %T", msg)
+	}
+
+	// Should hit command unit
+	if len(resolved.Attacks) != 1 {
+		t.Fatalf("expected 1 attack, got %d", len(resolved.Attacks))
+	}
+	if resolved.Attacks[0].TargetID != "enemy_cmd" {
+		t.Errorf("attack target = %s, want enemy_cmd", resolved.Attacks[0].TargetID)
+	}
+	if resolved.Attacks[0].Damage != 25 {
+		t.Errorf("attack damage = %d, want 25", resolved.Attacks[0].Damage)
+	}
+}
+
+func TestResolvePosition_GapWithLiveUnits_DamageWasted(t *testing.T) {
+	// Setup: Gap exists but live enemies elsewhere -> damage wasted (F-167)
+	combat := model.CombatModel{
+		Phase:     model.CombatActive,
+		DicePhase: model.DicePhaseExecution,
+		PlayerUnits: []entity.Unit{
+			{
+				ID:       "player_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "attacker",
+				Position: 9, // Far right, no enemies overlap
+				Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{25}}},
+				Attributes: map[string]core.Attribute{
+					"health":       {Base: 50},
+					"combat_width": {Base: 1},
+				},
+			},
+		},
+		EnemyUnits: []entity.Unit{
+			{
+				ID:       "enemy_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "alive_enemy",
+				Position: 0, // Alive but not overlapping
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 30},
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"attacker": {{Type: entity.DieDamage, Result: 25, FaceIndex: 0, Faces: []int{25}}},
+		},
+		FiringOrder:        []model.FiringPosition{{Position: 9, PlayerUnits: []string{"attacker"}}},
+		CurrentFiringIndex: 0,
+	}
+
+	cmd := ResolvePosition(model.FiringPosition{Position: 9, PlayerUnits: []string{"attacker"}}, combat)
+	msg := cmd()
+
+	resolved, ok := msg.(PositionResolved)
+	if !ok {
+		t.Fatalf("expected PositionResolved, got %T", msg)
+	}
+
+	// Should have NO attacks (damage wasted)
+	if len(resolved.Attacks) != 0 {
+		t.Errorf("expected 0 attacks (damage wasted), got %d", len(resolved.Attacks))
+		for _, a := range resolved.Attacks {
+			t.Logf("  attack: %+v", a)
+		}
+	}
+}
+
+func TestResolvePosition_MultiDieSeparateTargets(t *testing.T) {
+	// Setup: Two damage dice, first kills target, second should find new target
+	combat := model.CombatModel{
+		Phase:     model.CombatActive,
+		DicePhase: model.DicePhaseExecution,
+		PlayerUnits: []entity.Unit{
+			{
+				ID:       "player_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "attacker",
+				Position: 0,
+				Dice: []entity.Die{
+					{Type: entity.DieDamage, Faces: []int{30}},
+					{Type: entity.DieDamage, Faces: []int{20}},
+				},
+				Attributes: map[string]core.Attribute{
+					"health":       {Base: 50},
+					"combat_width": {Base: 2},
+				},
+			},
+		},
+		EnemyUnits: []entity.Unit{
+			{
+				ID:       "enemy_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "enemy1",
+				Position: 0,
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 20}, // Lowest HP, will be killed by die 1
+				},
+			},
+			{
+				ID:       "enemy2",
+				Position: 1,
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 40},
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"attacker": {
+				{Type: entity.DieDamage, Result: 30, FaceIndex: 0, Faces: []int{30}},
+				{Type: entity.DieDamage, Result: 20, FaceIndex: 0, Faces: []int{20}},
+			},
+		},
+		FiringOrder:        []model.FiringPosition{{Position: 0, PlayerUnits: []string{"attacker"}}},
+		CurrentFiringIndex: 0,
+	}
+
+	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"attacker"}}, combat)
+	msg := cmd()
+
+	resolved, ok := msg.(PositionResolved)
+	if !ok {
+		t.Fatalf("expected PositionResolved, got %T", msg)
+	}
+
+	// Die 1 (30 damage) hits enemy1 (20 HP), kills it, 10 overflow to enemy2
+	// Die 2 (20 damage) hits enemy2 (now 30 HP after overflow)
+	// Total: enemy1 killed, enemy2 takes 10+20 = 30 damage -> 10 HP left
+
+	// Count attacks per target
+	enemy1Attacks := 0
+	enemy2Attacks := 0
+	var enemy2TotalDamage int
+	for _, a := range resolved.Attacks {
+		if a.TargetID == "enemy1" {
+			enemy1Attacks++
+		} else if a.TargetID == "enemy2" {
+			enemy2Attacks++
+			enemy2TotalDamage += a.Damage
+		}
+	}
+
+	if enemy1Attacks != 1 {
+		t.Errorf("enemy1 attacks = %d, want 1", enemy1Attacks)
+	}
+	// enemy2 should be hit by overflow from die 1 + full die 2
+	if enemy2Attacks < 1 {
+		t.Errorf("enemy2 attacks = %d, want at least 1", enemy2Attacks)
+	}
+	// Total damage to enemy2 should be 10 (overflow) + 20 (die 2) = 30
+	if enemy2TotalDamage != 30 {
+		t.Errorf("enemy2 total damage = %d, want 30", enemy2TotalDamage)
+	}
+}
+
+func TestResolvePosition_OverflowStopsAtCommand(t *testing.T) {
+	// Setup: 100 damage, only 50 HP overlapping -> excess wasted, NOT to command
+	combat := model.CombatModel{
+		Phase:     model.CombatActive,
+		DicePhase: model.DicePhaseExecution,
+		PlayerUnits: []entity.Unit{
+			{
+				ID:       "player_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "attacker",
+				Position: 0,
+				Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{100}}},
+				Attributes: map[string]core.Attribute{
+					"health":       {Base: 50},
+					"combat_width": {Base: 1},
+				},
+			},
+		},
+		EnemyUnits: []entity.Unit{
+			{
+				ID:       "enemy_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "enemy1",
+				Position: 0,
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 50},
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"attacker": {{Type: entity.DieDamage, Result: 100, FaceIndex: 0, Faces: []int{100}}},
+		},
+		FiringOrder:        []model.FiringPosition{{Position: 0, PlayerUnits: []string{"attacker"}}},
+		CurrentFiringIndex: 0,
+	}
+
+	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"attacker"}}, combat)
+	msg := cmd()
+
+	resolved, ok := msg.(PositionResolved)
+	if !ok {
+		t.Fatalf("expected PositionResolved, got %T", msg)
+	}
+
+	// Should only hit enemy1, NOT overflow to command
+	if len(resolved.Attacks) != 1 {
+		t.Errorf("expected 1 attack (no overflow to command), got %d", len(resolved.Attacks))
+	}
+	if len(resolved.Attacks) > 0 && resolved.Attacks[0].TargetID != "enemy1" {
+		t.Errorf("attack target = %s, want enemy1", resolved.Attacks[0].TargetID)
+	}
+	// Verify command not hit
+	for _, a := range resolved.Attacks {
+		if a.TargetID == "enemy_cmd" {
+			t.Error("overflow should NOT hit command unit")
+		}
 	}
 }
