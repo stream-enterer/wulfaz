@@ -94,8 +94,18 @@ All combat is dice-based. Every unit (including command units) rolls dice each r
 │ 4. EXECUTION PHASE                                          │
 │    Units fire left → right by board position                │
 │    Both sides at same position fire simultaneously          │
+│    All dice at a position resolve together:                 │
+│      - Targeting locked in before damage                    │
+│      - All damage applies at once                           │
 │    Each unit fires once (their dice result)                 │
+│    Dead units removed instantly                             │
 │    Player watches                                           │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 5. ROUND END                                                │
+│    Shields expire on all units                              │
+│    "Round N" toast displayed, player clicks to continue     │
 └─────────────────────────────────────────────────────────────┘
                             ↓
                       (repeat from 1)
@@ -103,21 +113,31 @@ All combat is dice-based. Every unit (including command units) rolls dice each r
 
 ### Targeting
 
-**Positional targeting:** Units hit enemy unit(s) at the same board position.
+**Positional targeting:** Units hit enemies overlapping the same board spaces. A Medium at position 0 occupies spaces 0-1, so it can hit enemies at spaces 0 or 1.
 
-**Overflow (MTG-style):** Damage kills lowest HP unit first, excess carries over to next unit at that position.
+**Target selection:** Among overlapping enemies, target lowest HP first. Ties go left-to-right.
 
-**Gaps:** If no enemy unit at position, damage hits enemy command unit.
+**Each die is a separate attack:** A Medium with 2 dice makes two independent attacks, not one combined attack.
+
+**Overflow (MTG-style):** Damage kills lowest HP unit first, excess carries to next unit overlapping the same spaces. Overflow does NOT hit command unit — if no other unit overlaps, excess is wasted.
+
+**Gaps:** If no enemy unit overlaps your spaces, damage hits enemy command unit.
 
 **Units only target units:** Command unit only targetable when all enemy units are dead.
 
-**Command unit targeting:** Command unit dice can target anything (any enemy unit, enemy command unit).
+**Command unit targeting:** Command unit dice can target anything (any enemy unit, enemy command unit) regardless of position.
 
 ### Win Condition
 
 **Destroy the enemy command unit.** Units don't determine victory — losing all units doesn't end combat.
 
+**Combat ends immediately** when a command unit hits 0 HP.
+
 **Player wins ties:** If both command units die simultaneously, player wins.
+
+**No victory/defeat screen for MVP** — returns directly to run loop.
+
+**Damage persists:** Units and command unit carry damage into next fight (roguelike attrition).
 
 ---
 
@@ -152,9 +172,11 @@ ENEMY TEAM (facing down)
 ### Positioning Rules
 
 - Single row only (10 spaces total per side)
-- Position determines which enemy you hit (same position)
+- One unit per space (a Medium at position 0 occupies spaces 0-1)
+- Position determines which enemy you hit (overlapping spaces)
 - Command units are off-board, not part of the 10 spaces
 - Position set between fights; free repositioning between fights
+- Dead units leave gaps (positions stay fixed mid-combat)
 
 ---
 
@@ -192,8 +214,14 @@ No hit locations, armor/structure layers, critical hits, or complex death states
 
 - Granted by Shield dice
 - Absorb damage before HP (overflow hits HP)
-- Stack additively
-- Expire at end of round
+- Stack additively (no limit)
+- Expire at end of round (after execution phase)
+
+### Between Rounds
+
+- Shields expire
+- No healing or regeneration (MVP)
+- Dead units stay dead
 
 ---
 
@@ -220,12 +248,14 @@ No hit locations, armor/structure layers, critical hits, or complex death states
 - Effect: deal damage to target
 
 **Shield:**
-- Target: any friendly unit OR player command unit
+- Target: any friendly unit OR command unit (any position)
 - Effect: grant shields that absorb damage
+- Can shield preemptively (full HP units)
+- No stack limit within a round
 - Shields expire at end of round
 
 **Heal:**
-- Target: any friendly unit only (NOT command unit for MVP)
+- Target: any friendly unit OR command unit (any position)
 - Effect: restore HP, capped at max HP
 
 ### Lock/Reroll (Player Command Unit Only)
@@ -539,9 +569,9 @@ item id="targeting_computer" {
 
 ### MVP Behavior
 
-- Lock good faces (non-zero), reroll bad faces (zeros)
-- Random targeting for damage dice
-- Random targeting for heal/shield dice
+- Rolls once (no lock/reroll simulation)
+- Basic heuristics for targeting (lowest HP enemy for damage, lowest HP ally for heal/shield)
+- Enemy command effects cannot undo player command damage (player resolves first)
 
 ### Display
 
