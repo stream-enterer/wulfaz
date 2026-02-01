@@ -54,6 +54,35 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 
 ---
 
+## Transition: Remove Legacy Tick System
+
+**When:** After Wave 2 completes, before starting Wave 3.
+
+**Why:** The tick-based autocombat system (`on_combat_tick` events, `CombatTicked` message) is fundamentally incompatible with phase-based dice combat. Trying to layer phases on top of ticks creates architectural confusion.
+
+**What to remove:**
+- `CombatTicked` message and its handler in `tea/model.go`
+- `on_combat_tick` event type and trigger dispatch
+- Tick-based item cooldown system
+- Legacy `CombatPhase` states tied to tick flow
+
+**What to keep:**
+- TEA runtime infrastructure
+- Entity structures (Unit, attributes, tags)
+- KDL template loading
+- Board rendering and UI shell
+- Run loop state machine
+
+**Approach:**
+1. Create `combat-phases` branch
+2. Delete legacy tick dispatch code
+3. Build Wave 3 features on clean foundation
+4. Game will be temporarily unplayable until F-178 (Combat Loop) completes
+
+**Tradeoff:** Brief unplayable period (Wave 3 duration) in exchange for clean architecture. Dice mechanics from Wave 2 can still be unit tested in isolation.
+
+---
+
 ## Wave 3: Combat Phases
 
 **Goal:** Replace tick-based combat with discrete phase structure.
@@ -194,7 +223,8 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 |------|----------|-------|
 | 1 | 2 | Unlock blockers (Command Unit, Die Entity) |
 | 2 | 9 | Dice mechanics (roll, lock, reroll, effects) |
-| 3 | 8 | Combat phases (replace tick-based) |
+| — | — | *Remove legacy tick system* |
+| 3 | 8 | Combat phases (build phase-based) |
 | 4 | 8 | Targeting (positional, overflow) |
 | 5 | 9 | Death & victory (shields, permadeath, win) |
 | 6 | 25 | Polish & content (edge cases, AI, UI, templates) |
