@@ -62,6 +62,8 @@ type Model struct {
 	Choices           []string
 	// Run progression
 	FightNumber int
+	// F-155/F-156: Persistent player roster (survives between fights)
+	PlayerRoster []entity.Unit
 }
 
 func (m Model) Update(msg Msg) (Model, Cmd) {
@@ -72,6 +74,10 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 
 	case CombatEnded:
 		if msg.Victor == VictorPlayer {
+			// F-155: Persist surviving units with current HP back to roster
+			// F-156: Dead units (removed by handleRoundEnded) won't be in combat slice
+			m.PlayerRoster = syncRosterFromCombat(m.Combat.PlayerUnits)
+
 			m.Phase = PhaseChoice
 			m.ChoiceType = ChoiceReward
 			m.RewardChoicesLeft = 2
@@ -459,6 +465,36 @@ func copyUnitSlice(units []entity.Unit) []entity.Unit {
 	copied := make([]entity.Unit, len(units))
 	copy(copied, units)
 	return copied
+}
+
+// DeepCopyUnits creates deep copies of units preserving their IDs.
+// Exported for use by app package when building combat from roster.
+func DeepCopyUnits(units []entity.Unit) []entity.Unit {
+	if units == nil {
+		return nil
+	}
+	copied := make([]entity.Unit, len(units))
+	for i, u := range units {
+		copied[i] = entity.CopyUnit(u, u.ID) // Same ID, deep copy
+	}
+	return copied
+}
+
+// removeDeadUnits filters out units with health <= 0.
+func removeDeadUnits(units []entity.Unit) []entity.Unit {
+	alive := make([]entity.Unit, 0, len(units))
+	for _, u := range units {
+		if u.IsAlive() {
+			alive = append(alive, u)
+		}
+	}
+	return alive
+}
+
+// syncRosterFromCombat returns deep copies of combat units as new roster.
+// Only living units remain in combat slice (dead removed by handleRoundEnded).
+func syncRosterFromCombat(combatUnits []entity.Unit) []entity.Unit {
+	return DeepCopyUnits(combatUnits)
 }
 
 // applyModifications applies serialized modifications to a unit
@@ -1082,7 +1118,11 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
 	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
 
-	// Expire ALL shields (including command units)
+	// F-152: Remove dead units (HP <= 0) from combat
+	combat.PlayerUnits = removeDeadUnits(combat.PlayerUnits)
+	combat.EnemyUnits = removeDeadUnits(combat.EnemyUnits)
+
+	// F-154: Expire ALL shields (including command units)
 	expireShields := func(units []entity.Unit) {
 		for i := range units {
 			if s, ok := units[i].Attributes["shields"]; ok && s.Base > 0 {

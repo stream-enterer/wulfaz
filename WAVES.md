@@ -33,35 +33,8 @@ Phase structure (F-171–F-178): Preview → Player Command → Enemy Command �
 ### Wave 4: Targeting ✓
 Positional targeting with lowest HP priority (F-160–F-161), MTG-style overflow damage (F-163), units-only-target-units rule (F-167). Command unit targeting (F-164–F-165) done in Wave 3. Gap-to-command constrained by F-167: hits command only when all enemy units dead.
 
----
-
-## Wave 5: Death & Victory
-
-**Goal:** Complete the damage model and implement win conditions.
-
-### 5A: Death System
-| Order | ID | Feature | Depends |
-|-------|-----|---------|---------|
-| 1 | F-152 | Unit Death (Immediate Removal) | — |
-| 2 | F-155 | Damage Persistence (Between Fights) | — |
-| 3 | F-156 | Permadeath (Destroyed Units Gone) | F-152 |
-
-### 5B: Shield System
-| Order | ID | Feature | Depends |
-|-------|-----|---------|---------|
-| 1 | F-153 | Shield Buffer | F-137 |
-
-### 5C: Victory Conditions
-| Order | ID | Feature | Depends |
-|-------|-----|---------|---------|
-| 1 | F-180 | Win Condition (Destroy Enemy Command) | F-114, F-152 |
-| 2 | F-181 | Immediate Combat End | F-180 |
-| 3 | F-182 | Player Wins Ties | F-180 |
-| 4 | F-183 | No Victory Screen (MVP) | F-180 |
-
-**Deliverable:** Units die and are removed. Shields absorb damage and expire. Game ends when command unit dies.
-
-**Estimated scope:** Medium — death removal logic, shield attribute, victory check.
+### Wave 5: Death & Victory ✓
+Death system (F-152, F-155, F-156): Dead units removed at round end, damage persists between fights via PlayerRoster, permadeath through roster sync. Shield buffer (F-153) absorbs damage first. Victory conditions (F-180–F-183) implemented in Wave 3: checkCombatEnd detects command death, immediate combat end, player wins ties.
 
 ---
 
@@ -130,19 +103,19 @@ Positional targeting with lowest HP priority (F-160–F-161), MTG-style overflow
 |------|----------|-------|--------|
 | 1–3 | 20 | Dice core, combat phases | ✓ |
 | 4 | 8 | Targeting (positional, overflow) | ✓ |
-| 5 | 8 | Death & victory (shields, permadeath, win) | |
+| 5 | 8 | Death & victory (shields, permadeath, win) | ✓ |
 | 6 | 25 | Polish & content (edge cases, AI, UI, templates) | |
-| **Total** | **61** | | **28 done** |
+| **Total** | **61** | | **36 done** |
 
 ---
 
 ## Dependencies to Watch
 
-- **F-124 (Dead Unit Gap Handling)** affects board display when units die — currently units remain as dead but F-124 will handle visual gaps
+- **F-124 (Dead Unit Gap Handling)** affects board display when units die — dead units are now removed at round end
 
 ---
 
 ## Next Steps
 
-1. **Plan Wave 5** — Death & victory (shields, permadeath, win conditions)
+1. **Plan Wave 6** — Polish & content (edge cases, AI, UI, templates)
 2. **Iterate** — Complete each wave, reassess, continue

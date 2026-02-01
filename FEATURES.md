@@ -157,16 +157,16 @@ _Reserved: F-140 – F-149_
 HP, damage application, death, shields, persistence.
 
 ### F-152: Unit Death (Immediate Removal)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:104, 218-219
 - **Depends:** None (F-151 complete)
-- **Description:** _deferred_
+- **Description:** Dead units removed at round end via removeDeadUnits in handleRoundEnded (Wave 5)
 
 ### F-153: Shield Buffer
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:222-228
 - **Depends:** F-137
-- **Description:** _deferred_
+- **Description:** Shields absorb damage first in applyDiceEffectToCombat (Wave 3/4)
 
 ### F-154: Shield Expiration (Round End)
 - **Status:** Complete
@@ -175,16 +175,16 @@ HP, damage application, death, shields, persistence.
 - **Description:** Shields expire at round end (Wave 3)
 
 ### F-155: Damage Persistence (Between Fights)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:143, 395
 - **Depends:** None (F-150 complete)
-- **Description:** _deferred_
+- **Description:** PlayerRoster persists between fights; synced via syncRosterFromCombat on victory (Wave 5)
 
 ### F-156: Permadeath (Destroyed Units Gone)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:11, 233, 396
 - **Depends:** F-152
-- **Description:** _deferred_
+- **Description:** Dead units removed from roster; only surviving units sync back (Wave 5)
 
 _Reserved: F-157 – F-159_
 
@@ -307,28 +307,28 @@ _Reserved: F-179_
 Win/loss detection, tie-breaking, combat end.
 
 ### F-180: Win Condition (Destroy Enemy Command)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:133-138
 - **Depends:** F-114, F-152
-- **Description:** _deferred_
+- **Description:** checkCombatEnd detects command death and returns victor (Wave 3)
 
 ### F-181: Immediate Combat End
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:137
 - **Depends:** F-180
-- **Description:** _deferred_
+- **Description:** applyCombatEnd called after each position resolve (Wave 3)
 
 ### F-182: Player Wins Ties
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:139, 488
 - **Depends:** F-180
-- **Description:** _deferred_
+- **Description:** checkCombatEnd returns VictorPlayer when both commands dead (Wave 3)
 
 ### F-183: No Victory Screen (MVP)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:141
 - **Depends:** F-180
-- **Description:** _deferred_
+- **Description:** Combat victory transitions to PhaseChoice, no dedicated screen (Wave 3)
 
 _Reserved: F-184 – F-189_
 
@@ -594,16 +594,16 @@ Explicitly out of MVP scope per DESIGN.md.
 | Entity System | F-110 – F-119 | 3 | 3 |
 | Positioning | F-120 – F-129 | 2 | 3 |
 | Dice System | F-130 – F-149 | 10 | 0 |
-| Damage Model | F-150 – F-159 | 5 | 2 |
+| Damage Model | F-150 – F-159 | 1 | 6 |
 | Targeting | F-160 – F-169 | 0 | 8 |
 | Combat Flow | F-170 – F-179 | 0 | 8 |
-| Victory Conditions | F-180 – F-189 | 4 | 0 |
+| Victory Conditions | F-180 – F-189 | 0 | 4 |
 | Edge Cases | F-190 – F-199 | 4 | 0 |
 | Enemy AI | F-200 – F-209 | 4 | 0 |
 | Run Structure | F-210 – F-219 | 2 | 5 |
 | UI / Display | F-220 – F-239 | 7 | 3 |
 | Templates / Content | F-240 – F-249 | 4 | 2 |
-| **MVP Total** | | **45** | **38** |
+| **MVP Total** | | **37** | **46** |
 | Deferred | F-D01 – F-D20 | 20 | — |
 
 ---
