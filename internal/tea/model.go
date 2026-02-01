@@ -526,6 +526,7 @@ func applyModifications(unit entity.Unit, mods ModifiedUnit) entity.Unit {
 		Parts:      unit.Parts,
 		Triggers:   unit.Triggers,
 		Abilities:  unit.Abilities,
+		Dice:       unit.Dice,
 		Pilot:      unit.Pilot,
 		HasPilot:   unit.HasPilot,
 	}

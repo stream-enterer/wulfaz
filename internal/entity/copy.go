@@ -114,8 +114,30 @@ func CopyPilot(p Pilot) Pilot {
 	}
 }
 
+// CopyDie creates a deep copy of a Die.
+func CopyDie(d Die) Die {
+	if d.Faces == nil {
+		return Die{Type: d.Type}
+	}
+	faces := make([]int, len(d.Faces))
+	copy(faces, d.Faces)
+	return Die{Type: d.Type, Faces: faces}
+}
+
+// CopyDice copies a slice of Dice.
+func CopyDice(dice []Die) []Die {
+	if dice == nil {
+		return nil
+	}
+	result := make([]Die, len(dice))
+	for i, d := range dice {
+		result[i] = CopyDie(d)
+	}
+	return result
+}
+
 // CopyUnit creates a deep copy with a new ID.
-// Copies: Tags, Attributes, Parts, Triggers, Abilities, Pilot.
+// Copies: Tags, Attributes, Parts, Triggers, Abilities, Dice, Pilot.
 func CopyUnit(u Unit, newID string) Unit {
 	return Unit{
 		ID:         newID,
@@ -125,6 +147,7 @@ func CopyUnit(u Unit, newID string) Unit {
 		Parts:      CopyParts(u.Parts),
 		Triggers:   core.CopyTriggers(u.Triggers),
 		Abilities:  core.CopyAbilities(u.Abilities),
+		Dice:       CopyDice(u.Dice),
 		Pilot:      CopyPilot(u.Pilot),
 		HasPilot:   u.HasPilot,
 	}

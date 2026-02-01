@@ -134,6 +134,51 @@ func TestCopyPilot_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestCopyDie_RoundTrip(t *testing.T) {
+	orig := Die{
+		Type:  DieDamage,
+		Faces: []int{2, 2, 3, 4, 0, 0},
+	}
+	copied := CopyDie(orig)
+
+	if !reflect.DeepEqual(orig, copied) {
+		t.Errorf("CopyDie round-trip failed\norig:   %+v\ncopied: %+v", orig, copied)
+	}
+}
+
+func TestCopyDie_Independence(t *testing.T) {
+	orig := Die{
+		Type:  DieDamage,
+		Faces: []int{2, 2, 3, 4, 0, 0},
+	}
+	copied := CopyDie(orig)
+
+	copied.Faces[0] = 999
+
+	if orig.Faces[0] != 2 {
+		t.Error("original Faces was mutated")
+	}
+}
+
+func TestCopyDice_Nil(t *testing.T) {
+	result := CopyDice(nil)
+	if result != nil {
+		t.Error("expected nil for nil input")
+	}
+}
+
+func TestCopyDie_NilFaces(t *testing.T) {
+	orig := Die{Type: DieShield}
+	copied := CopyDie(orig)
+
+	if copied.Type != DieShield {
+		t.Errorf("expected Type DieShield, got %v", copied.Type)
+	}
+	if copied.Faces != nil {
+		t.Error("expected nil Faces")
+	}
+}
+
 func TestCopyUnit_RoundTrip(t *testing.T) {
 	orig := Unit{
 		ID:         "unit_original",
@@ -152,6 +197,10 @@ func TestCopyUnit_RoundTrip(t *testing.T) {
 		},
 		Abilities: []core.Ability{
 			{ID: "jump_jets", Tags: []core.Tag{"movement"}, Charges: 2},
+		},
+		Dice: []Die{
+			{Type: DieDamage, Faces: []int{2, 2, 3, 4, 0, 0}},
+			{Type: DieShield, Faces: []int{1, 1, 2, 3, 0, 0}},
 		},
 		Pilot:    Pilot{ID: "pilot_001", Name: "Commander Rex"},
 		HasPilot: true,
@@ -393,6 +442,9 @@ func TestCopyUnit_Independence(t *testing.T) {
 		Triggers: []core.Trigger{
 			{Event: core.EventOnTurnStart, EffectName: "regen"},
 		},
+		Dice: []Die{
+			{Type: DieDamage, Faces: []int{1, 2, 3}},
+		},
 		Pilot:    Pilot{ID: "pilot1", Name: "Test Pilot"},
 		HasPilot: true,
 	}
@@ -409,6 +461,7 @@ func TestCopyUnit_Independence(t *testing.T) {
 	copiedPart := copied.Parts["torso"]
 	copiedPart.Tags[0] = "modified"
 	copied.Parts["torso"] = copiedPart
+	copied.Dice[0].Faces[0] = 999
 
 	if orig.Tags[0] != "mech" {
 		t.Error("original Tags was mutated")
@@ -418,6 +471,9 @@ func TestCopyUnit_Independence(t *testing.T) {
 	}
 	if orig.Parts["torso"].Tags[0] != "center" {
 		t.Error("original Parts was mutated")
+	}
+	if orig.Dice[0].Faces[0] != 1 {
+		t.Error("original Dice was mutated")
 	}
 }
 
@@ -429,6 +485,7 @@ func TestCopyUnit_NilSlices(t *testing.T) {
 		Attributes: nil,
 		Parts:      nil,
 		Triggers:   nil,
+		Dice:       nil,
 	}
 	copied := CopyUnit(orig, "new_id")
 
@@ -443,5 +500,8 @@ func TestCopyUnit_NilSlices(t *testing.T) {
 	}
 	if copied.Triggers != nil {
 		t.Error("expected nil Triggers")
+	}
+	if copied.Dice != nil {
+		t.Error("expected nil Dice")
 	}
 }
