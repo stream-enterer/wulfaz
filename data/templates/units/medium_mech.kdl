@@ -3,6 +3,12 @@ unit id="medium_mech" {
     attributes {
         attribute name="combat_width" base=2
         attribute name="health" base=100 min=0
+        attribute name="max_health" base=100
+        attribute name="shields" base=0 min=0
+    }
+    dice {
+        die type="damage" faces="2,2,3,4,0,0"
+        die type="damage" faces="2,2,3,4,0,0"
     }
     parts {
         part id="left_arm" template_id="mech_arm" {

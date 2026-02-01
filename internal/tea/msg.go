@@ -2,6 +2,7 @@ package tea
 
 import (
 	"wulfaz/internal/core"
+	"wulfaz/internal/entity"
 	"wulfaz/internal/model"
 )
 
@@ -117,3 +118,84 @@ type FollowUpEvent struct {
 	SourceID string
 	TargetID string
 }
+
+// ===== Dice Phase Messages (Wave 2) =====
+
+// RoundStarted signals a new round began with pre-rolled dice.
+// UnitRolls maps UnitID -> face indices (not values) for deterministic replay.
+type RoundStarted struct {
+	Round     int
+	UnitRolls map[string][]int // UnitID -> []faceIndex
+}
+
+func (RoundStarted) isMsg() {}
+
+// PreviewDone signals player acknowledged preview, ready for command phase.
+type PreviewDone struct{}
+
+func (PreviewDone) isMsg() {}
+
+// DieLockToggled signals a die's lock state was toggled.
+type DieLockToggled struct {
+	UnitID   string
+	DieIndex int
+}
+
+func (DieLockToggled) isMsg() {}
+
+// RerollRequested signals player wants to reroll unlocked dice.
+// Carries pre-rolled results (RNG in Cmd, not Update).
+type RerollRequested struct {
+	UnitID  string
+	Results []int // New face indices for ALL dice (locked dice get same index)
+}
+
+func (RerollRequested) isMsg() {}
+
+// DieSelected signals player selected a die for activation.
+type DieSelected struct {
+	UnitID   string
+	DieIndex int
+}
+
+func (DieSelected) isMsg() {}
+
+// DieDeselected signals player deselected the current die.
+type DieDeselected struct{}
+
+func (DieDeselected) isMsg() {}
+
+// DiceActivated signals a die effect was activated on a target.
+type DiceActivated struct {
+	SourceUnitID string
+	DieIndex     int
+	TargetUnitID string
+	Value        int            // The die's result value
+	Effect       entity.DieType // damage/shield/heal
+}
+
+func (DiceActivated) isMsg() {}
+
+// DiceEffectApplied signals effect resolution completed.
+type DiceEffectApplied struct {
+	SourceUnitID string
+	TargetUnitID string
+	Effect       entity.DieType
+	Value        int
+	NewHealth    int
+	NewShields   int
+}
+
+func (DiceEffectApplied) isMsg() {}
+
+// PlayerCommandDone signals player finished their command phase.
+type PlayerCommandDone struct{}
+
+func (PlayerCommandDone) isMsg() {}
+
+// DicePhaseAdvanced signals transition to next dice phase.
+type DicePhaseAdvanced struct {
+	NewPhase model.DicePhase
+}
+
+func (DicePhaseAdvanced) isMsg() {}

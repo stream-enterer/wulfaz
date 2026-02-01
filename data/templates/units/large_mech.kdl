@@ -3,6 +3,13 @@ unit id="large_mech" {
     attributes {
         attribute name="combat_width" base=3
         attribute name="health" base=150 min=0
+        attribute name="max_health" base=150
+        attribute name="shields" base=0 min=0
+    }
+    dice {
+        die type="damage" faces="2,2,3,4,0,0"
+        die type="damage" faces="2,2,3,4,0,0"
+        die type="damage" faces="2,2,3,4,0,0"
     }
     parts {
         part id="torso" template_id="heavy_torso" {

@@ -2,6 +2,8 @@ package template
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/sblinch/kdl-go/document"
 
@@ -240,6 +242,68 @@ func parseConditionType(s string) (core.ConditionType, error) {
 	default:
 		return "", fmt.Errorf("unknown condition type: %q", s)
 	}
+}
+
+// parseDieType validates and converts a string to DieType.
+func parseDieType(s string) (entity.DieType, error) {
+	switch s {
+	case "damage":
+		return entity.DieDamage, nil
+	case "shield":
+		return entity.DieShield, nil
+	case "heal":
+		return entity.DieHeal, nil
+	default:
+		return "", fmt.Errorf("unknown die type: %q", s)
+	}
+}
+
+// parseFaces parses comma-separated face values "2,2,3,4,0,0" -> []int.
+func parseFaces(s string) ([]int, error) {
+	parts := strings.Split(s, ",")
+	faces := make([]int, len(parts))
+	for i, p := range parts {
+		v, err := strconv.Atoi(strings.TrimSpace(p))
+		if err != nil {
+			return nil, fmt.Errorf("invalid face value %q", p)
+		}
+		faces[i] = v
+	}
+	return faces, nil
+}
+
+// parseDie parses a single "die" node.
+func parseDie(node *document.Node, filename string) (entity.Die, error) {
+	typeStr, err := getStringProp(node, "type")
+	if err != nil {
+		return entity.Die{}, &ParseError{File: filename, Node: "die", Field: "type", Message: err.Error()}
+	}
+	dieType, err := parseDieType(typeStr)
+	if err != nil {
+		return entity.Die{}, &ParseError{File: filename, Node: "die", Field: "type", Message: err.Error()}
+	}
+	facesStr, err := getStringProp(node, "faces")
+	if err != nil {
+		return entity.Die{}, &ParseError{File: filename, Node: "die", Field: "faces", Message: err.Error()}
+	}
+	faces, err := parseFaces(facesStr)
+	if err != nil {
+		return entity.Die{}, &ParseError{File: filename, Node: "die", Field: "faces", Message: err.Error()}
+	}
+	return entity.Die{Type: dieType, Faces: faces}, nil
+}
+
+// parseDice parses a "dice" block containing multiple die nodes.
+func parseDice(node *document.Node, filename string) ([]entity.Die, error) {
+	var dice []entity.Die
+	for _, dieNode := range findChildren(node, "die") {
+		die, err := parseDie(dieNode, filename)
+		if err != nil {
+			return nil, err
+		}
+		dice = append(dice, die)
+	}
+	return dice, nil
 }
 
 // Component parsers
@@ -658,6 +722,15 @@ func parseUnit(node *document.Node, filename string) (entity.Unit, error) {
 			return entity.Unit{}, err
 		}
 		unit.Triggers = triggers
+	}
+
+	// Parse dice
+	if diceNode := findChild(node, "dice"); diceNode != nil {
+		dice, err := parseDice(diceNode, filename)
+		if err != nil {
+			return entity.Unit{}, err
+		}
+		unit.Dice = dice
 	}
 
 	return unit, nil

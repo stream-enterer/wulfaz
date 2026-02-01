@@ -1,0 +1,14 @@
+unit id="enemy_command" {
+    tags "command" "large"
+    attributes {
+        attribute name="combat_width" base=3
+        attribute name="health" base=100 min=0
+        attribute name="max_health" base=100
+        attribute name="shields" base=0 min=0
+    }
+    dice {
+        die type="damage" faces="5,5,8,12,0,0"
+        die type="shield" faces="5,5,8,12,0,0"
+        die type="heal" faces="5,5,8,12,0,0"
+    }
+}

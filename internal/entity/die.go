@@ -16,3 +16,12 @@ type Die struct {
 	Type  DieType
 	Faces []int
 }
+
+// RolledDie represents a die that has been rolled with its current result.
+type RolledDie struct {
+	Type      DieType
+	Faces     []int
+	FaceIndex int  // Index into Faces array (for reroll tracking)
+	Result    int  // The actual face value (Faces[FaceIndex])
+	Locked    bool // Whether locked from rerolling
+}

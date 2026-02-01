@@ -136,6 +136,69 @@ func CopyDice(dice []Die) []Die {
 	return result
 }
 
+// CopyIntSlice copies a slice of ints (helper).
+func CopyIntSlice(s []int) []int {
+	if s == nil {
+		return nil
+	}
+	result := make([]int, len(s))
+	copy(result, s)
+	return result
+}
+
+// CopyRolledDie creates a deep copy of a RolledDie.
+func CopyRolledDie(rd RolledDie) RolledDie {
+	return RolledDie{
+		Type:      rd.Type,
+		Faces:     CopyIntSlice(rd.Faces),
+		FaceIndex: rd.FaceIndex,
+		Result:    rd.Result,
+		Locked:    rd.Locked,
+	}
+}
+
+// CopyRolledDice copies a slice of RolledDie.
+func CopyRolledDice(dice []RolledDie) []RolledDie {
+	if dice == nil {
+		return nil
+	}
+	result := make([]RolledDie, len(dice))
+	for i, d := range dice {
+		result[i] = CopyRolledDie(d)
+	}
+	return result
+}
+
+// CopyRolledDiceMap copies a map of unit ID to rolled dice.
+func CopyRolledDiceMap(m map[string][]RolledDie) map[string][]RolledDie {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string][]RolledDie, len(m))
+	for k, v := range m {
+		result[k] = CopyRolledDice(v)
+	}
+	return result
+}
+
+// CopyActivatedMap copies a map of unit ID to activated dice flags.
+func CopyActivatedMap(m map[string][]bool) map[string][]bool {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string][]bool, len(m))
+	for k, v := range m {
+		if v == nil {
+			result[k] = nil
+		} else {
+			flags := make([]bool, len(v))
+			copy(flags, v)
+			result[k] = flags
+		}
+	}
+	return result
+}
+
 // CopyUnit creates a deep copy with a new ID.
 // Copies: Tags, Attributes, Parts, Triggers, Abilities, Dice, Pilot.
 func CopyUnit(u Unit, newID string) Unit {

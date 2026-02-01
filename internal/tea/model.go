@@ -1,6 +1,7 @@
 package tea
 
 import (
+	"fmt"
 	"maps"
 	"strings"
 
@@ -123,6 +124,27 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 
 	case EffectsResolved:
 		return m.handleEffectsResolved(msg)
+
+	case RoundStarted:
+		return m.handleRoundStarted(msg)
+	case PreviewDone:
+		return m.handlePreviewDone(msg)
+	case DieLockToggled:
+		return m.handleDieLockToggled(msg)
+	case RerollRequested:
+		return m.handleRerollRequested(msg)
+	case DieSelected:
+		return m.handleDieSelected(msg)
+	case DieDeselected:
+		return m.handleDieDeselected(msg)
+	case DiceActivated:
+		return m.handleDiceActivated(msg)
+	case DiceEffectApplied:
+		return m.handleDiceEffectApplied(msg)
+	case PlayerCommandDone:
+		return m.handlePlayerCommandDone(msg)
+	case DicePhaseAdvanced:
+		return m.handleDicePhaseAdvanced(msg)
 
 	default:
 		return m, nil
@@ -563,4 +585,314 @@ func lookupItemCooldown(units []entity.Unit, path string) int {
 		}
 	}
 	return 0
+}
+
+// ===== Dice Phase Helpers (Wave 2) =====
+
+// isPlayerUnit checks if unit ID belongs to player side.
+func isPlayerUnit(combat model.CombatModel, unitID string) bool {
+	for _, u := range combat.PlayerUnits {
+		if u.ID == unitID {
+			return true
+		}
+	}
+	return false
+}
+
+// isEnemyUnit checks if unit ID belongs to enemy side.
+func isEnemyUnit(combat model.CombatModel, unitID string) bool {
+	for _, u := range combat.EnemyUnits {
+		if u.ID == unitID {
+			return true
+		}
+	}
+	return false
+}
+
+// findPlayerCommandUnit returns the player's command unit (or nil).
+func findPlayerCommandUnit(combat model.CombatModel) *entity.Unit {
+	for i := range combat.PlayerUnits {
+		if combat.PlayerUnits[i].IsCommand() {
+			return &combat.PlayerUnits[i]
+		}
+	}
+	return nil
+}
+
+// allCommandDiceActivated checks if all player command dice are activated.
+func allCommandDiceActivated(combat model.CombatModel) bool {
+	cmd := findPlayerCommandUnit(combat)
+	if cmd == nil {
+		return true
+	}
+	activated := combat.ActivatedDice[cmd.ID]
+	if activated == nil {
+		return false
+	}
+	for _, a := range activated {
+		if !a {
+			return false
+		}
+	}
+	return true
+}
+
+// ===== Dice Phase Handlers (Wave 2) =====
+
+func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
+	combat := m.Combat
+	combat.Round = msg.Round
+	combat.DicePhase = model.DicePhasePreview
+	combat.RerollsRemaining = 2 // Per DESIGN.md
+	combat.RolledDice = make(map[string][]entity.RolledDie)
+	combat.ActivatedDice = make(map[string][]bool)
+	combat.SelectedUnitID = ""
+	combat.SelectedDieIndex = -1
+
+	// Convert roll indices to RolledDie for all units
+	allUnits := append(append([]entity.Unit{}, combat.PlayerUnits...), combat.EnemyUnits...)
+	for _, unit := range allUnits {
+		rolls, ok := msg.UnitRolls[unit.ID]
+		if !ok || len(unit.Dice) == 0 {
+			continue
+		}
+		rolled := make([]entity.RolledDie, len(unit.Dice))
+		for i, die := range unit.Dice {
+			faceIdx := 0
+			if i < len(rolls) {
+				faceIdx = rolls[i]
+			}
+			result := 0
+			if faceIdx < len(die.Faces) {
+				result = die.Faces[faceIdx]
+			}
+			rolled[i] = entity.RolledDie{
+				Type:      die.Type,
+				Faces:     die.Faces, // Share reference (immutable template data)
+				FaceIndex: faceIdx,
+				Result:    result,
+				Locked:    false,
+			}
+		}
+		combat.RolledDice[unit.ID] = rolled
+		combat.ActivatedDice[unit.ID] = make([]bool, len(unit.Dice))
+	}
+
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handlePreviewDone(_ PreviewDone) (Model, Cmd) {
+	if m.Combat.DicePhase != model.DicePhasePreview {
+		return m, nil
+	}
+	combat := m.Combat
+	combat.DicePhase = model.DicePhasePlayerCommand
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleDieLockToggled(msg DieLockToggled) (Model, Cmd) {
+	// Only in PlayerCommand phase
+	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
+	// Only for player's command unit
+	cmd := findPlayerCommandUnit(m.Combat)
+	if cmd == nil || msg.UnitID != cmd.ID {
+		return m, nil
+	}
+
+	combat := m.Combat
+	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
+
+	if dice, ok := combat.RolledDice[msg.UnitID]; ok && msg.DieIndex < len(dice) {
+		dice[msg.DieIndex].Locked = !dice[msg.DieIndex].Locked
+	}
+
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
+	// Only in PlayerCommand phase with rerolls remaining
+	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
+	if m.Combat.RerollsRemaining <= 0 {
+		return m, nil
+	}
+	// Only for player's command unit
+	cmd := findPlayerCommandUnit(m.Combat)
+	if cmd == nil || msg.UnitID != cmd.ID {
+		return m, nil
+	}
+
+	combat := m.Combat
+	combat.RerollsRemaining--
+	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
+
+	dice := combat.RolledDice[msg.UnitID]
+	for i := range dice {
+		if !dice[i].Locked && i < len(msg.Results) {
+			faceIdx := msg.Results[i]
+			dice[i].FaceIndex = faceIdx
+			if faceIdx < len(dice[i].Faces) {
+				dice[i].Result = dice[i].Faces[faceIdx]
+			}
+		}
+	}
+
+	// Auto-lock all dice if no rerolls remaining
+	if combat.RerollsRemaining == 0 {
+		for i := range dice {
+			dice[i].Locked = true
+		}
+	}
+
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleDieSelected(msg DieSelected) (Model, Cmd) {
+	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
+	// Only player's command unit dice can be selected
+	cmd := findPlayerCommandUnit(m.Combat)
+	if cmd == nil || msg.UnitID != cmd.ID {
+		return m, nil
+	}
+	// Check die not already activated
+	activated := m.Combat.ActivatedDice[msg.UnitID]
+	if activated != nil && msg.DieIndex < len(activated) && activated[msg.DieIndex] {
+		return m, nil
+	}
+
+	combat := m.Combat
+	combat.SelectedUnitID = msg.UnitID
+	combat.SelectedDieIndex = msg.DieIndex
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleDieDeselected(_ DieDeselected) (Model, Cmd) {
+	combat := m.Combat
+	combat.SelectedUnitID = ""
+	combat.SelectedDieIndex = -1
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
+	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
+	// Validate source is selected die
+	if msg.SourceUnitID != m.Combat.SelectedUnitID || msg.DieIndex != m.Combat.SelectedDieIndex {
+		return m, nil
+	}
+
+	rolled := m.Combat.RolledDice[msg.SourceUnitID]
+	if msg.DieIndex >= len(rolled) {
+		return m, nil
+	}
+	die := rolled[msg.DieIndex]
+
+	// Targeting validation per DESIGN.md:
+	// - damage: enemy only
+	// - shield/heal: friendly only
+	targetIsEnemy := isEnemyUnit(m.Combat, msg.TargetUnitID)
+	targetIsPlayer := isPlayerUnit(m.Combat, msg.TargetUnitID)
+
+	if die.Type == entity.DieDamage && !targetIsEnemy {
+		return m, nil // Invalid: damage must target enemy
+	}
+	if (die.Type == entity.DieShield || die.Type == entity.DieHeal) && !targetIsPlayer {
+		return m, nil // Invalid: shield/heal must target friendly
+	}
+
+	// Mark die as activated, clear selection
+	combat := m.Combat
+	combat.ActivatedDice = entity.CopyActivatedMap(combat.ActivatedDice)
+	if combat.ActivatedDice[msg.SourceUnitID] == nil {
+		combat.ActivatedDice[msg.SourceUnitID] = make([]bool, len(rolled))
+	}
+	combat.ActivatedDice[msg.SourceUnitID][msg.DieIndex] = true
+	combat.SelectedUnitID = ""
+	combat.SelectedDieIndex = -1
+	m.Combat = combat
+
+	// Return Cmd to apply effect
+	return m, ApplyDiceEffect(msg.SourceUnitID, msg.TargetUnitID, die.Type, die.Result, m.Combat)
+}
+
+func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
+	combat := m.Combat
+
+	// Copy unit slices before modification
+	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
+	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
+
+	// Update target unit's health/shields
+	updateUnit := func(units []entity.Unit) {
+		for i, u := range units {
+			if u.ID != msg.TargetUnitID {
+				continue
+			}
+			attrs := core.CopyAttributes(u.Attributes)
+
+			if msg.Effect == entity.DieDamage || msg.Effect == entity.DieHeal {
+				if h, ok := attrs["health"]; ok {
+					h.Base = msg.NewHealth
+					attrs["health"] = h
+				}
+			}
+			if msg.Effect == entity.DieShield || msg.Effect == entity.DieDamage {
+				if s, ok := attrs["shields"]; ok {
+					s.Base = msg.NewShields
+					attrs["shields"] = s
+				} else if msg.NewShields > 0 {
+					attrs["shields"] = core.Attribute{Name: "shields", Base: msg.NewShields, Min: 0}
+				}
+			}
+
+			units[i].Attributes = attrs
+			break
+		}
+	}
+
+	updateUnit(combat.PlayerUnits)
+	updateUnit(combat.EnemyUnits)
+
+	// Add to combat log
+	combat.Log = append([]string{}, combat.Log...)
+	combat.Log = append(combat.Log, fmt.Sprintf("%s -> %s: %s %d",
+		msg.SourceUnitID, msg.TargetUnitID, msg.Effect, msg.Value))
+
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handlePlayerCommandDone(_ PlayerCommandDone) (Model, Cmd) {
+	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
+
+	combat := m.Combat
+	combat.DicePhase = model.DicePhaseEnemyCommand
+	combat.SelectedUnitID = ""
+	combat.SelectedDieIndex = -1
+	m.Combat = combat
+
+	// TODO: In future, trigger enemy command AI here
+	// For now, skip to execution
+	return m, AdvanceDicePhase(model.DicePhaseExecution)
+}
+
+func (m Model) handleDicePhaseAdvanced(msg DicePhaseAdvanced) (Model, Cmd) {
+	combat := m.Combat
+	combat.DicePhase = msg.NewPhase
+	m.Combat = combat
+	return m, nil
 }
