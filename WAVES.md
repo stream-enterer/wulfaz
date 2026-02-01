@@ -138,7 +138,7 @@ Positional targeting with lowest HP priority (F-160–F-161), MTG-style overflow
 
 ## Dependencies to Watch
 
-- **F-166 (Gap-to-Command Fallback)** needs F-124 (Dead Unit Gap Handling) — may need to pull F-124 earlier
+- **F-124 (Dead Unit Gap Handling)** affects board display when units die — currently units remain as dead but F-124 will handle visual gaps
 
 ---
 
