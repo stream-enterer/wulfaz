@@ -34,7 +34,7 @@ func TestCopyItem_RoundTrip(t *testing.T) {
 		},
 		Triggers: []core.Trigger{
 			{
-				Event:            core.EventOnCombatTick,
+				Event:            core.EventOnDamaged,
 				Conditions:       []core.Condition{{Type: core.ConditionHasTag, Params: map[string]any{"tag": "active"}}},
 				TargetConditions: []core.Condition{{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 1}}},
 				EffectName:       "fire_laser",
@@ -266,7 +266,7 @@ func TestCopyItem_Independence(t *testing.T) {
 			"damage": {Name: "damage", Base: 10},
 		},
 		Triggers: []core.Trigger{
-			{Event: core.EventOnCombatTick, EffectName: "fire", Params: map[string]any{"dmg": 5}},
+			{Event: core.EventOnDamaged, EffectName: "fire", Params: map[string]any{"dmg": 5}},
 		},
 		ProvidedModifiers: []core.ProvidedModifier{
 			{Scope: core.ScopeUnit, Attribute: "speed", Value: 2},

@@ -120,7 +120,7 @@ func TestParseTrigger(t *testing.T) {
 }
 
 func TestParseTrigger_WithTargetConditions(t *testing.T) {
-	kdlStr := `trigger event="on_combat_tick" effect_name="deal_damage" {
+	kdlStr := `trigger event="on_activate" effect_name="deal_damage" {
 		params damage=5 target="enemy"
 		target_conditions {
 			condition type="attr_gte" attribute="health" value=1
@@ -151,7 +151,7 @@ func TestParseTrigger_WithTargetConditions(t *testing.T) {
 }
 
 func TestParseTrigger_BothConditionTypes(t *testing.T) {
-	kdlStr := `trigger event="on_combat_tick" effect_name="deal_damage" {
+	kdlStr := `trigger event="on_activate" effect_name="deal_damage" {
 		params damage=5 target="enemy"
 		conditions {
 			condition type="attr_gte" attribute="health" value=1
@@ -337,7 +337,6 @@ func TestParseEventType_Valid(t *testing.T) {
 	}{
 		{"on_damaged", core.EventOnDamaged},
 		{"on_destroyed", core.EventOnDestroyed},
-		{"on_combat_tick", core.EventOnCombatTick},
 		{"on_turn_start", core.EventOnTurnStart},
 		{"on_turn_end", core.EventOnTurnEnd},
 		{"on_activate", core.EventOnActivate},

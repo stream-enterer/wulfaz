@@ -4,17 +4,5 @@ item id="medium_laser" {
         attribute name="size" base=1
         attribute name="damage" base=5
         attribute name="heat" base=3
-        attribute name="cooldown" base=4
-    }
-    triggers {
-        trigger event="on_combat_tick" effect_name="deal_damage" {
-            params damage=5 target="enemy"
-            conditions {
-                condition type="attr_gte" attribute="health" value=1
-            }
-            target_conditions {
-                condition type="attr_gte" attribute="health" value=1
-            }
-        }
     }
 }

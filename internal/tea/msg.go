@@ -27,10 +27,6 @@ type ChoiceSelected struct{ Index int }
 
 func (ChoiceSelected) isMsg() {}
 
-type CombatTicked struct{ Rolls []int }
-
-func (CombatTicked) isMsg() {}
-
 type AbilityActivated struct {
 	SourceID  string
 	AbilityID string

@@ -22,7 +22,7 @@ func TestCopyCondition_RoundTrip(t *testing.T) {
 
 func TestCopyTrigger_RoundTrip(t *testing.T) {
 	orig := Trigger{
-		Event:            EventOnCombatTick,
+		Event:            EventOnDamaged,
 		Conditions:       []Condition{{Type: ConditionHasTag, Params: map[string]any{"tag": "active"}}},
 		TargetConditions: []Condition{{Type: ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 1}}},
 		EffectName:       "deal_damage",
@@ -174,7 +174,7 @@ func TestCopyConditions_Nil(t *testing.T) {
 
 func TestCopyTrigger_Independence(t *testing.T) {
 	orig := Trigger{
-		Event:      EventOnCombatTick,
+		Event:      EventOnDamaged,
 		EffectName: "deal_damage",
 		Params:     map[string]any{"damage": 5},
 		Conditions: []Condition{

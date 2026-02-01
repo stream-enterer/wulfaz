@@ -12,7 +12,7 @@ func TestDispatch_UnitLevelTrigger(t *testing.T) {
 		ID: "unit1",
 		Triggers: []core.Trigger{
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "deal_damage",
 				Params:     map[string]any{"damage": 10},
 				Priority:   1,
@@ -21,7 +21,7 @@ func TestDispatch_UnitLevelTrigger(t *testing.T) {
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged,
 		SourceUnit: unit,
 	}
 
@@ -46,14 +46,14 @@ func TestDispatch_WrongEvent(t *testing.T) {
 		ID: "unit1",
 		Triggers: []core.Trigger{
 			{
-				Event:      core.EventOnDamaged,
+				Event:      core.EventOnDestroyed, // Trigger is for on_destroyed
 				EffectName: "deal_damage",
 			},
 		},
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged, // But we dispatch on_damaged
 		SourceUnit: unit,
 	}
 
@@ -72,7 +72,7 @@ func TestDispatch_FailingCondition(t *testing.T) {
 		},
 		Triggers: []core.Trigger{
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "deal_damage",
 				Conditions: []core.Condition{
 					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 100}},
@@ -82,7 +82,7 @@ func TestDispatch_FailingCondition(t *testing.T) {
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged,
 		SourceUnit: unit,
 	}
 
@@ -101,7 +101,7 @@ func TestDispatch_PassingCondition(t *testing.T) {
 		},
 		Triggers: []core.Trigger{
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "deal_damage",
 				Conditions: []core.Condition{
 					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 50}},
@@ -111,7 +111,7 @@ func TestDispatch_PassingCondition(t *testing.T) {
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged,
 		SourceUnit: unit,
 	}
 
@@ -128,14 +128,14 @@ func TestDispatch_HasTagCondition(t *testing.T) {
 		Tags: []core.Tag{"mech", "heavy"},
 		Triggers: []core.Trigger{
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "effect1",
 				Conditions: []core.Condition{
 					{Type: core.ConditionHasTag, Params: map[string]any{"tag": "heavy"}},
 				},
 			},
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "effect2",
 				Conditions: []core.Condition{
 					{Type: core.ConditionHasTag, Params: map[string]any{"tag": "light"}},
@@ -145,7 +145,7 @@ func TestDispatch_HasTagCondition(t *testing.T) {
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged,
 		SourceUnit: unit,
 	}
 
@@ -163,14 +163,14 @@ func TestDispatch_PrioritySorting(t *testing.T) {
 	unit := entity.Unit{
 		ID: "unit1",
 		Triggers: []core.Trigger{
-			{Event: core.EventOnCombatTick, EffectName: "effect3", Priority: 3},
-			{Event: core.EventOnCombatTick, EffectName: "effect1", Priority: 1},
-			{Event: core.EventOnCombatTick, EffectName: "effect2", Priority: 2},
+			{Event: core.EventOnDamaged, EffectName: "effect3", Priority: 3},
+			{Event: core.EventOnDamaged, EffectName: "effect1", Priority: 1},
+			{Event: core.EventOnDamaged, EffectName: "effect2", Priority: 2},
 		},
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged,
 		SourceUnit: unit,
 	}
 
@@ -197,14 +197,14 @@ func TestDispatch_PartLevelTrigger(t *testing.T) {
 			"left_arm": {
 				ID: "left_arm",
 				Triggers: []core.Trigger{
-					{Event: core.EventOnCombatTick, EffectName: "arm_effect"},
+					{Event: core.EventOnDamaged, EffectName: "arm_effect"},
 				},
 			},
 		},
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged,
 		SourceUnit: unit,
 	}
 
@@ -231,7 +231,7 @@ func TestDispatch_ItemLevelTrigger(t *testing.T) {
 							{
 								ID: "laser",
 								Triggers: []core.Trigger{
-									{Event: core.EventOnCombatTick, EffectName: "fire_laser"},
+									{Event: core.EventOnDamaged, EffectName: "fire_laser"},
 								},
 							},
 						},
@@ -242,7 +242,7 @@ func TestDispatch_ItemLevelTrigger(t *testing.T) {
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged,
 		SourceUnit: unit,
 	}
 
@@ -270,42 +270,42 @@ func TestDispatch_AttrConditions(t *testing.T) {
 		},
 		Triggers: []core.Trigger{
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "gte_pass",
 				Conditions: []core.Condition{
 					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 50}},
 				},
 			},
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "gte_fail",
 				Conditions: []core.Condition{
 					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 51}},
 				},
 			},
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "lte_pass",
 				Conditions: []core.Condition{
 					{Type: core.ConditionAttrLTE, Params: map[string]any{"attribute": "health", "value": 50}},
 				},
 			},
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "lte_fail",
 				Conditions: []core.Condition{
 					{Type: core.ConditionAttrLTE, Params: map[string]any{"attribute": "health", "value": 49}},
 				},
 			},
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "eq_pass",
 				Conditions: []core.Condition{
 					{Type: core.ConditionAttrEQ, Params: map[string]any{"attribute": "health", "value": 50}},
 				},
 			},
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "eq_fail",
 				Conditions: []core.Condition{
 					{Type: core.ConditionAttrEQ, Params: map[string]any{"attribute": "health", "value": 51}},
@@ -315,7 +315,7 @@ func TestDispatch_AttrConditions(t *testing.T) {
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged,
 		SourceUnit: unit,
 	}
 
@@ -352,7 +352,7 @@ func TestDispatch_MissingAttribute(t *testing.T) {
 		Attributes: map[string]core.Attribute{},
 		Triggers: []core.Trigger{
 			{
-				Event:      core.EventOnCombatTick,
+				Event:      core.EventOnDamaged,
 				EffectName: "effect1",
 				Conditions: []core.Condition{
 					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "nonexistent", "value": 50}},
@@ -362,7 +362,7 @@ func TestDispatch_MissingAttribute(t *testing.T) {
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged,
 		SourceUnit: unit,
 	}
 
@@ -381,26 +381,26 @@ func TestDispatch_DeterministicPartOrder(t *testing.T) {
 			"zebra_part": {
 				ID: "zebra_part",
 				Triggers: []core.Trigger{
-					{Event: core.EventOnCombatTick, EffectName: "zebra_effect", Priority: 1},
+					{Event: core.EventOnDamaged, EffectName: "zebra_effect", Priority: 1},
 				},
 			},
 			"alpha_part": {
 				ID: "alpha_part",
 				Triggers: []core.Trigger{
-					{Event: core.EventOnCombatTick, EffectName: "alpha_effect", Priority: 1},
+					{Event: core.EventOnDamaged, EffectName: "alpha_effect", Priority: 1},
 				},
 			},
 			"middle_part": {
 				ID: "middle_part",
 				Triggers: []core.Trigger{
-					{Event: core.EventOnCombatTick, EffectName: "middle_effect", Priority: 1},
+					{Event: core.EventOnDamaged, EffectName: "middle_effect", Priority: 1},
 				},
 			},
 		},
 	}
 
 	ctx := TriggerContext{
-		Event:      core.EventOnCombatTick,
+		Event:      core.EventOnDamaged,
 		SourceUnit: unit,
 	}
 

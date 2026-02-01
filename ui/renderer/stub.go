@@ -29,7 +29,7 @@ func Render(m tea.Model) string {
 
 func renderCombatText(sb *strings.Builder, combat model.CombatModel) {
 	sb.WriteString("=== COMBAT ===\n")
-	fmt.Fprintf(sb, "Tick: %d\n", combat.Tick)
+	fmt.Fprintf(sb, "Round: %d\n", combat.Round)
 
 	if combat.Phase == model.CombatPaused {
 		sb.WriteString("** PAUSED **\n")

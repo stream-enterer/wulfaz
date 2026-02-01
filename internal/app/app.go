@@ -3,7 +3,6 @@ package app
 import (
 	"log"
 	"math/rand/v2"
-	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -18,7 +17,6 @@ import (
 const (
 	screenWidth  = 1280
 	screenHeight = 720
-	tickInterval = 500 * time.Millisecond
 )
 
 // App implements ebiten.Game and drives the TEA runtime
@@ -26,7 +24,6 @@ type App struct {
 	model    tea.Model
 	registry *template.Registry // Immutable after init; for shop/rewards later
 	rng      *rand.Rand
-	lastTick time.Time
 }
 
 // New creates a new App with units loaded from templates
@@ -51,7 +48,6 @@ func New(seed int64) *App {
 		},
 		registry: reg,
 		rng:      rng,
-		lastTick: time.Now(),
 	}
 	a.model.Combat = a.buildCombat()
 	return a
@@ -64,8 +60,6 @@ func (a *App) Update() error {
 	if a.model.Phase == tea.PhaseGameOver {
 		return ebiten.Termination
 	}
-
-	a.maybeTick()
 
 	return nil
 }
@@ -120,27 +114,6 @@ func (a *App) pollInput() {
 			a.dispatch(tea.PlayerResumed{})
 		}
 	}
-}
-
-// maybeTick generates a CombatTicked message if the tick interval has elapsed
-func (a *App) maybeTick() {
-	if a.model.Combat.Phase != model.CombatActive {
-		return
-	}
-
-	if time.Since(a.lastTick) < tickInterval {
-		return
-	}
-
-	a.lastTick = time.Now()
-
-	// Generate random rolls for the tick
-	rolls := make([]int, 10)
-	for i := range rolls {
-		rolls[i] = a.rng.IntN(100)
-	}
-
-	a.dispatch(tea.CombatTicked{Rolls: rolls})
 }
 
 // dispatch sends a message through the TEA update cycle
@@ -234,32 +207,10 @@ func (a *App) buildCombat() model.CombatModel {
 		log.Fatalf("equip enemy_2: %v", err)
 	}
 
-	allUnits := []entity.Unit{player1, player2, enemy1, enemy2}
-
 	return model.CombatModel{
-		Phase:         model.CombatActive,
-		PlayerUnits:   []entity.Unit{player1, player2},
-		EnemyUnits:    []entity.Unit{enemy1, enemy2},
-		Tick:          0,
-		Log:           []string{"Combat started"},
-		ItemCooldowns: initItemCooldowns(allUnits),
+		Phase:       model.CombatActive,
+		PlayerUnits: []entity.Unit{player1, player2},
+		EnemyUnits:  []entity.Unit{enemy1, enemy2},
+		Log:         []string{"Combat started"},
 	}
-}
-
-// initItemCooldowns creates initial cooldown map for all equipped items with cooldown > 0
-func initItemCooldowns(units []entity.Unit) map[string]int {
-	cds := make(map[string]int)
-	for _, unit := range units {
-		for partID, part := range unit.Parts {
-			for _, mount := range part.Mounts {
-				for _, item := range mount.Contents {
-					if cd, ok := item.Attributes["cooldown"]; ok && cd.Base > 0 {
-						path := unit.ID + "/" + partID + "/" + mount.ID + "/" + item.ID
-						cds[path] = cd.Base
-					}
-				}
-			}
-		}
-	}
-	return cds
 }

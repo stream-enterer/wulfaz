@@ -165,8 +165,6 @@ func parseEventType(s string) (core.EventType, error) {
 		return core.EventOnDamaged, nil
 	case "on_destroyed":
 		return core.EventOnDestroyed, nil
-	case "on_combat_tick":
-		return core.EventOnCombatTick, nil
 	case "on_turn_start":
 		return core.EventOnTurnStart, nil
 	case "on_turn_end":

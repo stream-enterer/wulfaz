@@ -27,13 +27,11 @@ const DefaultRerollsPerRound = 2
 
 type CombatModel struct {
 	// Existing fields
-	PlayerUnits   []entity.Unit
-	EnemyUnits    []entity.Unit
-	Tick          int // Legacy tick system (kept for now)
-	Phase         CombatPhase
-	Log           []string
-	Victor        string         // "player", "enemy", "draw", or ""
-	ItemCooldowns map[string]int // Legacy cooldowns
+	PlayerUnits []entity.Unit
+	EnemyUnits  []entity.Unit
+	Phase       CombatPhase
+	Log         []string
+	Victor      string // "player", "enemy", "draw", or ""
 
 	// Dice phase fields (Wave 2)
 	Round            int                           // Current round number (1-indexed)
