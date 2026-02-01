@@ -38,62 +38,83 @@ Death system (F-152, F-155, F-156): Dead units removed at round end, damage pers
 
 ---
 
-## Wave 6: Polish & Content
+## Wave 6: Dice UI (Make It Playable)
 
-**Goal:** Fill remaining gaps, add content, handle edge cases.
+**Goal:** Display dice and let players interact with them. This is the critical path — without this, the game cannot be played.
 
-### 6A: Entity Gaps
-| ID | Feature |
-|----|---------|
-| F-113 | Size System (Spaces + Dice Count) |
-| F-115 | Unit Type Tags (Mech/Vehicle/BattleArmor) |
-| F-123 | Command Unit Off-Board Position |
-| F-124 | Dead Unit Gap Handling |
+| ID | Feature | Why Now |
+|----|---------|---------|
+| F-225 | Dice Display (Preview Phase) | Must see dice to play |
+| F-226 | Dice Interaction UI (Player Command) | Must lock/reroll/activate to play |
+| F-223 | Shield Display | Must see defense state |
+| F-224 | Round Number Display | Context for combat progress |
 
-### 6B: Edge Cases
-| ID | Feature |
-|----|---------|
-| F-190 | Pure Command vs Command (All Units Dead) |
-| F-191 | Zero-Dice Unit Handling |
-| F-192 | Dead Target Skip |
-| F-193 | Simultaneous Death Resolution |
+**Deliverable:** Player can see rolled dice, click to lock/reroll, and activate them. Combat is now playable.
 
-### 6C: Enemy AI
-| ID | Feature |
-|----|---------|
-| F-200 | Enemy Dice Rolling (No Reroll) |
-| F-201 | Enemy Target Heuristics |
-| F-202 | Enemy Targeting Display (Lines) |
-| F-203 | Player-First Resolution Order |
+---
 
-### 6D: Run Structure Gaps
-| ID | Feature |
-|----|---------|
-| F-215 | Repair Action |
-| F-216 | Free Repositioning (Between Fights) |
+## Wave 7: Combat Visualization
 
-### 6E: UI Gaps
-| ID | Feature |
-|----|---------|
-| F-223 | Shield Display |
-| F-224 | Round Number Display |
-| F-225 | Dice Display (Preview Phase) |
-| F-226 | Dice Interaction UI (Player Command) |
-| F-227 | Targeting Lines Display |
-| F-228 | Execution Phase Visual Delay |
-| F-229 | Round Toast / Continue Prompt |
+**Goal:** Make combat understandable — show what's happening and why.
 
-### 6F: Templates & Content
-| ID | Feature |
-|----|---------|
-| F-241 | Command Unit Template Schema |
-| F-243 | MVP Fight Encounter Templates |
-| F-244 | Symmetric Unit Pool |
-| F-245 | MVP Event Templates |
+| ID | Feature | Why Now |
+|----|---------|---------|
+| F-228 | Execution Phase Visual Delay | See damage as it happens |
+| F-227 | Targeting Lines Display | Understand who targets whom |
+| F-202 | Enemy Targeting Display (Lines) | See enemy intent in Preview |
+| F-229 | Round Toast / Continue Prompt | Clear phase transitions |
 
-**Deliverable:** Complete MVP with all features implemented.
+**Deliverable:** Combat is readable. Players understand the flow and can anticipate outcomes.
 
-**Estimated scope:** Large (25 features) — but many are small/independent and can be parallelized.
+---
+
+## Wave 8: Combat Edge Cases
+
+**Goal:** Fix gameplay bugs and edge cases that break combat logic.
+
+| ID | Feature | Why Now |
+|----|---------|---------|
+| F-192 | Dead Target Skip | AI must retarget when target dies |
+| F-124 | Dead Unit Gap Handling | Board display when units die |
+| F-190 | Pure Command vs Command | Handle all-units-dead scenario |
+| F-191 | Zero-Dice Unit Handling | Units with no dice shouldn't break |
+| F-193 | Simultaneous Death Resolution | Multiple deaths in one frame |
+
+**Deliverable:** Combat handles all edge cases correctly. No crashes or undefined behavior.
+
+---
+
+## Wave 9: Run Structure
+
+**Goal:** Complete the roguelike loop — actions between fights and content variety.
+
+| ID | Feature | Why Now |
+|----|---------|---------|
+| F-215 | Repair Action | Restore HP between fights |
+| F-216 | Free Repositioning | Tactical depth between fights |
+| F-243 | MVP Fight Encounter Templates | Multiple enemy compositions |
+| F-245 | MVP Event Templates | Meaningful choice events |
+
+**Deliverable:** Full run loop with repair, repositioning, varied encounters, and events.
+
+---
+
+## Wave 10: Polish & Systems
+
+**Goal:** Entity system cleanup, AI improvements, and remaining content.
+
+| ID | Feature | Why Now |
+|----|---------|---------|
+| F-113 | Size System (Spaces + Dice Count) | Proper size mechanics |
+| F-115 | Unit Type Tags (Mech/Vehicle/BA) | Type-based effects |
+| F-123 | Command Unit Off-Board Position | Visual distinction |
+| F-200 | Enemy Dice Rolling (No Reroll) | AI dice behavior |
+| F-201 | Enemy Target Heuristics | Smarter AI targeting |
+| F-203 | Player-First Resolution Order | Balance tuning |
+| F-241 | Command Unit Template Schema | Data cleanup |
+| F-244 | Symmetric Unit Pool | Content variety |
+
+**Deliverable:** Complete MVP with polished systems.
 
 ---
 
@@ -104,18 +125,24 @@ Death system (F-152, F-155, F-156): Dead units removed at round end, damage pers
 | 1–3 | 20 | Dice core, combat phases | ✓ |
 | 4 | 8 | Targeting (positional, overflow) | ✓ |
 | 5 | 8 | Death & victory (shields, permadeath, win) | ✓ |
-| 6 | 25 | Polish & content (edge cases, AI, UI, templates) | |
+| 6 | 4 | Dice UI (display, interact, shields, round) | |
+| 7 | 4 | Combat visualization (delays, lines, toasts) | |
+| 8 | 5 | Edge cases (dead targets, gaps, zero dice) | |
+| 9 | 4 | Run structure (repair, reposition, content) | |
+| 10 | 8 | Polish & systems (size, tags, AI, templates) | |
 | **Total** | **61** | | **36 done** |
 
 ---
 
 ## Dependencies to Watch
 
-- **F-124 (Dead Unit Gap Handling)** affects board display when units die — dead units are now removed at round end
+- **F-225/F-226 (Dice UI)** — Everything else depends on playable combat
+- **F-228 (Execution Delay)** — Needed before F-227 targeting lines make sense
+- **F-124 (Dead Unit Gap Handling)** — Affects board display when units die
 
 ---
 
 ## Next Steps
 
-1. **Plan Wave 6** — Polish & content (edge cases, AI, UI, templates)
-2. **Iterate** — Complete each wave, reassess, continue
+1. **Wave 6: Dice UI** — Display dice, enable lock/reroll/activate interaction
+2. After Wave 6, the game is playable — iterate on feedback
