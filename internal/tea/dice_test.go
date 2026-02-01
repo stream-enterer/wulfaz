@@ -32,8 +32,8 @@ func TestHandleRoundStarted(t *testing.T) {
 	if newM.Combat.DicePhase != model.DicePhasePreview {
 		t.Errorf("DicePhase = %v, want Preview", newM.Combat.DicePhase)
 	}
-	if newM.Combat.RerollsRemaining != 2 {
-		t.Errorf("RerollsRemaining = %d, want 2", newM.Combat.RerollsRemaining)
+	if newM.Combat.RerollsRemaining != model.DefaultRerollsPerRound {
+		t.Errorf("RerollsRemaining = %d, want %d", newM.Combat.RerollsRemaining, model.DefaultRerollsPerRound)
 	}
 
 	rolled := newM.Combat.RolledDice["unit1"]
@@ -151,6 +151,52 @@ func TestHandleDieLockToggled(t *testing.T) {
 	newM2, _ := newM.Update(msg)
 	if newM2.Combat.RolledDice["player_cmd"][0].Locked {
 		t.Error("die should be unlocked after second toggle")
+	}
+}
+
+func TestHandleDieSelected_BoundsCheck(t *testing.T) {
+	playerCmd := entity.Unit{
+		ID:   "player_cmd",
+		Tags: []core.Tag{"command"},
+		Dice: []entity.Die{{Type: entity.DieDamage, Faces: []int{5}}},
+	}
+
+	m := Model{
+		Version: 1,
+		Combat: model.CombatModel{
+			PlayerUnits:      []entity.Unit{playerCmd},
+			DicePhase:        model.DicePhasePlayerCommand,
+			SelectedUnitID:   "",
+			SelectedDieIndex: -1,
+			RolledDice: map[string][]entity.RolledDie{
+				"player_cmd": {{Type: entity.DieDamage, Result: 5}},
+			},
+			ActivatedDice: map[string][]bool{"player_cmd": {false}},
+		},
+	}
+
+	// Out of bounds index should be rejected
+	msg := DieSelected{UnitID: "player_cmd", DieIndex: 99}
+	newM, _ := m.Update(msg)
+
+	if newM.Combat.SelectedDieIndex != -1 {
+		t.Errorf("SelectedDieIndex = %d, want -1 (invalid index should be rejected)", newM.Combat.SelectedDieIndex)
+	}
+
+	// Negative index should be rejected
+	msg2 := DieSelected{UnitID: "player_cmd", DieIndex: -1}
+	newM2, _ := m.Update(msg2)
+
+	if newM2.Combat.SelectedDieIndex != -1 {
+		t.Errorf("SelectedDieIndex = %d, want -1 (negative index should be rejected)", newM2.Combat.SelectedDieIndex)
+	}
+
+	// Valid index should be accepted
+	msg3 := DieSelected{UnitID: "player_cmd", DieIndex: 0}
+	newM3, _ := m.Update(msg3)
+
+	if newM3.Combat.SelectedDieIndex != 0 {
+		t.Errorf("SelectedDieIndex = %d, want 0", newM3.Combat.SelectedDieIndex)
 	}
 }
 

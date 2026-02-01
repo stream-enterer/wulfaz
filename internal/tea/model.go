@@ -643,14 +643,14 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 	combat := m.Combat
 	combat.Round = msg.Round
 	combat.DicePhase = model.DicePhasePreview
-	combat.RerollsRemaining = 2 // Per DESIGN.md
+	combat.RerollsRemaining = model.DefaultRerollsPerRound
 	combat.RolledDice = make(map[string][]entity.RolledDie)
 	combat.ActivatedDice = make(map[string][]bool)
 	combat.SelectedUnitID = ""
 	combat.SelectedDieIndex = -1
 
 	// Convert roll indices to RolledDie for all units
-	allUnits := append(append([]entity.Unit{}, combat.PlayerUnits...), combat.EnemyUnits...)
+	allUnits := getAllUnits(combat)
 	for _, unit := range allUnits {
 		rolls, ok := msg.UnitRolls[unit.ID]
 		if !ok || len(unit.Dice) == 0 {
@@ -763,6 +763,11 @@ func (m Model) handleDieSelected(msg DieSelected) (Model, Cmd) {
 	if cmd == nil || msg.UnitID != cmd.ID {
 		return m, nil
 	}
+	// Validate die index is within bounds
+	rolled := m.Combat.RolledDice[msg.UnitID]
+	if msg.DieIndex < 0 || msg.DieIndex >= len(rolled) {
+		return m, nil
+	}
 	// Check die not already activated
 	activated := m.Combat.ActivatedDice[msg.UnitID]
 	if activated != nil && msg.DieIndex < len(activated) && activated[msg.DieIndex] {
@@ -865,9 +870,10 @@ func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
 	updateUnit(combat.PlayerUnits)
 	updateUnit(combat.EnemyUnits)
 
-	// Add to combat log
-	combat.Log = append([]string{}, combat.Log...)
-	combat.Log = append(combat.Log, fmt.Sprintf("%s -> %s: %s %d",
+	// Add to combat log (copy slice before appending per TEA immutability)
+	newLog := make([]string, len(combat.Log), len(combat.Log)+1)
+	copy(newLog, combat.Log)
+	combat.Log = append(newLog, fmt.Sprintf("%s -> %s: %s %d",
 		msg.SourceUnitID, msg.TargetUnitID, msg.Effect, msg.Value))
 
 	m.Combat = combat
