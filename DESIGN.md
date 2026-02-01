@@ -70,17 +70,19 @@ All combat is dice-based. Every unit (including command units) rolls dice each r
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. PREVIEW PHASE                                            │
 │    All dice roll (visually shown for enemy command unit)    │
-│    Display: all unit dice + enemy command unit dice         │
-│    Show targeting lines for all units                       │
+│    Display: all unit dice (both sides) + enemy command dice │
+│    Show targeting lines for enemy command unit only         │
 │    Player command unit dice NOT shown (interactive)         │
+│    Player unit targeting lines NOT shown                    │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 2. PLAYER COMMAND PHASE                                     │
+│ 2. PLAYER COMMAND PHASE (no time limit, fully turn-based)   │
 │    Player command unit rolls its dice                       │
 │    Lock/unlock individual dice                              │
 │    Spend rerolls (rerolls all unlocked dice)                │
-│    Activate dice one by one (choose order, targets)         │
+│    Out of rerolls → auto-lock all remaining                 │
+│    Activate: click die → click target → effect fires        │
 │    Effects fire immediately (Shield/Heal before execution)  │
 └─────────────────────────────────────────────────────────────┘
                             ↓
@@ -93,6 +95,7 @@ All combat is dice-based. Every unit (including command units) rolls dice each r
 ┌─────────────────────────────────────────────────────────────┐
 │ 4. EXECUTION PHASE                                          │
 │    Units fire left → right by board position                │
+│    Visual delay between positions for clarity               │
 │    Both sides at same position fire simultaneously          │
 │    All dice at a position resolve together:                 │
 │      - Targeting locked in before damage                    │
@@ -138,6 +141,12 @@ All combat is dice-based. Every unit (including command units) rolls dice each r
 **No victory/defeat screen for MVP** — returns directly to run loop.
 
 **Damage persists:** Units and command unit carry damage into next fight (roguelike attrition).
+
+### Edge Cases
+
+**Pure command vs command:** If all units on both sides die, combat continues as command unit vs command unit (dice phases only, no execution).
+
+**0-dice units:** Valid state — unit does nothing during execution. Nothing breaks.
 
 ---
 
@@ -242,6 +251,11 @@ No hit locations, armor/structure layers, critical hits, or complex death states
 - Rerolls: 2 per round (global pool)
 
 ### Dice Effects
+
+**Universal targeting rules (data-driven):**
+- Damage dice can ONLY target enemies
+- Shield/Heal dice can ONLY target self or allies
+- Same rules apply to enemy AI
 
 **Damage:**
 - Target: any enemy unit OR enemy command unit
@@ -375,12 +389,15 @@ This enables: full replay, turn-level undo, time-travel debugging, deterministic
 | Unit dice | All damage, distribution `[2, 2, 3, 4, 0, 0]` |
 | Command dice distribution | `[5, 5, 8, 12, 0, 0]` (all types) |
 | Rerolls per round | 2 |
-| Unit targeting | Positional (same board position) |
-| Overflow | MTG-style (lowest HP first) |
+| Unit targeting | Positional (overlapping spaces) |
+| Overflow | MTG-style (lowest HP first, same spaces only) |
 | Gaps | Hit command unit |
 | Damage persistence | Carries forward between fights |
 | Destroyed units | Gone forever (permadeath) |
 | Simultaneous resolution | Yes (per position) |
+| Starting loadout | Placeholder (units start at full HP) |
+| Starting positions | Placeholder |
+| Enemy scaling | Placeholder (static for MVP) |
 
 ### Explicit Cuts (Not in MVP)
 
@@ -562,6 +579,31 @@ item id="targeting_computer" {
     }
 }
 ```
+
+---
+
+## UI / Display
+
+### Always Visible
+
+- Command unit HP and shields
+- All unit HP bars
+- Current round number
+
+### Preview Phase Display
+
+- All unit dice (both sides) — results shown
+- Enemy command unit dice — results and targeting lines shown
+- Player command unit — NOT shown (interactive)
+- Player unit targeting — NOT shown
+
+### Activation Flow
+
+Click die → click target → effect fires (no confirmation step)
+
+### Deferred
+
+- Undo button for dice activation
 
 ---
 
