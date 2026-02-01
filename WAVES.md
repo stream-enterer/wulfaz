@@ -67,7 +67,7 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 
 ---
 
-## Transition: Remove Legacy Tick System
+## Transition: Remove Legacy Tick System ✓
 
 **When:** After Wave 2 completes, before starting Wave 3.
 
@@ -236,7 +236,7 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 |------|----------|-------|--------|
 | 1 | 2 | Unlock blockers (Command Unit, Die Entity) | ✓ |
 | 2 | 9 | Dice mechanics (roll, lock, reroll, effects) | ✓ |
-| — | — | *Remove legacy tick system* | |
+| — | — | *Remove legacy tick system* | ✓ |
 | 3 | 8 | Combat phases (build phase-based) | |
 | 4 | 8 | Targeting (positional, overflow) | |
 | 5 | 9 | Death & victory (shields, permadeath, win) | |
@@ -261,6 +261,6 @@ Some cross-wave dependencies that may require ordering adjustments:
 2. ~~**Implement Wave 1** — Create Command Unit and Die entities~~ ✓
 3. ~~**Plan Wave 2** — Design dice mechanics in detail~~ ✓
 4. ~~**Implement Wave 2** — Dice rolling, lock/reroll, effects, activation~~ ✓
-5. **Remove legacy tick system** — Clean up before Wave 3
+5. ~~**Remove legacy tick system** — Clean up before Wave 3~~ ✓
 6. **Plan Wave 3** — Design combat phase transitions
 7. **Iterate** — Complete each wave, reassess, continue
