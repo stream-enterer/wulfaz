@@ -49,10 +49,10 @@ Core data structures — tags, attributes, units, dice holders.
 - **Description:** _deferred_
 
 ### F-114: Command Unit Entity
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:202-211, 550-566
 - **Depends:** None (F-112 complete)
-- **Description:** _deferred_
+- **Description:** Command unit with off-board position and 3-dice pool (Wave 1)
 
 ### F-115: Unit Type Tags (Mech/Vehicle/BattleArmor)
 - **Status:** Not Started
@@ -89,64 +89,64 @@ _Reserved: F-125 – F-129_
 Die entities, face distributions, rolling, lock/reroll mechanics.
 
 ### F-130: Die Entity
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:435-437
 - **Depends:** None (F-101 complete)
-- **Description:** _deferred_
+- **Description:** Die entity with face values and locked state (Wave 1)
 
 ### F-131: Dice Face Distribution (Data-Driven)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:243-244, 249, 389-390, 631-632
 - **Depends:** F-130
-- **Description:** _deferred_
+- **Description:** KDL-driven face distributions for dice types (Wave 2)
 
 ### F-132: Unit Dice Rolling
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:239-244
 - **Depends:** F-130
-- **Description:** _deferred_
+- **Description:** Units roll their dice pool at round start (Wave 2)
 
 ### F-133: Command Unit Dice Rolling
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:246-252
 - **Depends:** F-130, F-114
-- **Description:** _deferred_
+- **Description:** Command unit rolls 3 dice (damage/shield/heal) at round start (Wave 2)
 
 ### F-134: Lock/Unlock Mechanic
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:275-284, 82-84
 - **Depends:** F-133
-- **Description:** _deferred_
+- **Description:** Player can lock dice to preserve values across rerolls (Wave 2)
 
 ### F-135: Reroll Mechanic
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:275-284, 83-84, 251, 391
 - **Depends:** F-134
-- **Description:** _deferred_
+- **Description:** Player can reroll unlocked dice (Wave 2)
 
 ### F-136: Dice Effect — Damage
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:260-262
 - **Depends:** F-130
-- **Description:** _deferred_
+- **Description:** Damage dice deal damage to target (Wave 2)
 
 ### F-137: Dice Effect — Shield
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:264-269
 - **Depends:** F-130
-- **Description:** _deferred_
+- **Description:** Shield dice add temporary shields to friendly target (Wave 2)
 
 ### F-138: Dice Effect — Heal
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:271-273
 - **Depends:** F-130
-- **Description:** _deferred_
+- **Description:** Heal dice restore HP to friendly target (Wave 2)
 
 ### F-139: Dice Activation (Click-to-Target)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:85-86, 600-602
 - **Depends:** F-134
-- **Description:** _deferred_
+- **Description:** Player activates dice to apply effects (Wave 2)
 
 _Reserved: F-140 – F-149_
 
@@ -591,19 +591,19 @@ Explicitly out of MVP scope per DESIGN.md.
 | Category | ID Range | Remaining | Complete |
 |----------|----------|-----------|----------|
 | Core Architecture | F-100 – F-109 | 0 | 4 |
-| Entity System | F-110 – F-119 | 3 | 3 |
+| Entity System | F-110 – F-119 | 2 | 4 |
 | Positioning | F-120 – F-129 | 2 | 3 |
-| Dice System | F-130 – F-149 | 10 | 0 |
-| Damage Model | F-150 – F-159 | 1 | 6 |
+| Dice System | F-130 – F-149 | 0 | 10 |
+| Damage Model | F-150 – F-159 | 0 | 5 |
 | Targeting | F-160 – F-169 | 0 | 8 |
 | Combat Flow | F-170 – F-179 | 0 | 8 |
 | Victory Conditions | F-180 – F-189 | 0 | 4 |
 | Edge Cases | F-190 – F-199 | 4 | 0 |
 | Enemy AI | F-200 – F-209 | 4 | 0 |
 | Run Structure | F-210 – F-219 | 2 | 5 |
-| UI / Display | F-220 – F-239 | 7 | 3 |
+| UI / Display | F-220 – F-239 | 7 | 0 |
 | Templates / Content | F-240 – F-249 | 4 | 2 |
-| **MVP Total** | | **37** | **46** |
+| **MVP Total** | | **25** | **36** |
 | Deferred | F-D01 – F-D20 | 20 | — |
 
 ---
@@ -614,17 +614,17 @@ Explicitly out of MVP scope per DESIGN.md.
 [COMPLETE] F-100 (TEA Runtime)
  ├─► [COMPLETE] F-101 (Model) ─► [COMPLETE] F-110 (Tags) ─► [COMPLETE] F-112 (Unit)
  │                            ─► [COMPLETE] F-111 (Attr) ─► [COMPLETE] F-150 (HP)
- │                            ─► F-130 (Die)  ─► F-132 (Roll)
- ├─► [COMPLETE] F-102 (RNG)  ─► F-132, F-133
+ │                            ─► [COMPLETE] F-130 (Die) ─► [COMPLETE] F-132 (Roll)
+ ├─► [COMPLETE] F-102 (RNG)  ─► [COMPLETE] F-132, F-133
  └─► [COMPLETE] F-103 (KDL)  ─► [COMPLETE] F-240 (Templates)
 
 [COMPLETE] F-112 (Unit)
- ├─► F-113 (Size) ─► [COMPLETE] F-122 (Occupation) ─► F-160 (Targeting)
- ├─► F-114 (Cmd)  ─► F-133 (Cmd Dice)   ─► F-134 (Lock)
+ ├─► F-113 (Size) ─► [COMPLETE] F-122 (Occupation) ─► [COMPLETE] F-160 (Targeting)
+ ├─► [COMPLETE] F-114 (Cmd) ─► [COMPLETE] F-133 (Cmd Dice) ─► [COMPLETE] F-134 (Lock)
  └─► [COMPLETE] F-120 (Board)─► [COMPLETE] F-121 (Placement)
 
-F-160 (Targeting) + [COMPLETE] F-151 (Damage) ─► F-174 (Execution)
-F-174 ─► F-175 (Simultaneous) ─► [COMPLETE] F-170 (Round)
+[COMPLETE] F-160 (Targeting) + [COMPLETE] F-151 (Damage) ─► [COMPLETE] F-174 (Execution)
+[COMPLETE] F-174 ─► [COMPLETE] F-175 (Simultaneous) ─► [COMPLETE] F-170 (Round)
 [COMPLETE] F-170 ─► [COMPLETE] F-210 (Run Loop)
 ```
 
@@ -635,13 +635,13 @@ F-174 ─► F-175 (Simultaneous) ─► [COMPLETE] F-170 (Round)
 | Phase | Focus | Features | Status |
 |-------|-------|----------|--------|
 | 1 | Foundation | F-100, F-101, F-102, F-103 | **COMPLETE** |
-| 2 | Entities | F-110 – F-115, F-130, F-131 | Partial (F-113, F-114, F-115, F-130, F-131 remain) |
+| 2 | Entities | F-110 – F-115, F-130, F-131 | Partial (F-113, F-115 remain) |
 | 3 | Board | F-120 – F-124 | Partial (F-123, F-124 remain) |
-| 4 | Dice Mechanics | F-132 – F-139 | Not Started |
-| 5 | Damage | F-150 – F-156 | Partial (F-152 – F-156 remain) |
-| 6 | Targeting | F-160 – F-167 | Not Started |
-| 7 | Combat Flow | F-170 – F-178 | Partial (F-171 – F-178 remain) |
-| 8 | Victory + Edge | F-180 – F-183, F-190 – F-193 | Not Started |
+| 4 | Dice Mechanics | F-132 – F-139 | **COMPLETE** |
+| 5 | Damage | F-150 – F-156 | **COMPLETE** |
+| 6 | Targeting | F-160 – F-167 | **COMPLETE** |
+| 7 | Combat Flow | F-170 – F-178 | **COMPLETE** |
+| 8 | Victory + Edge | F-180 – F-183, F-190 – F-193 | Partial (F-190 – F-193 remain) |
 | 9 | Enemy AI | F-200 – F-203 | Not Started |
 | 10 | Run Structure | F-210 – F-216 | Partial (F-215, F-216 remain) |
 | 11 | UI | F-220 – F-229 | Partial (F-223 – F-229 remain) |
