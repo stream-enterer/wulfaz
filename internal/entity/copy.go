@@ -200,7 +200,7 @@ func CopyActivatedMap(m map[string][]bool) map[string][]bool {
 }
 
 // CopyUnit creates a deep copy with a new ID.
-// Copies: Tags, Attributes, Parts, Triggers, Abilities, Dice, Pilot.
+// Copies: Tags, Attributes, Parts, Triggers, Abilities, Dice, Pilot, Position.
 func CopyUnit(u Unit, newID string) Unit {
 	return Unit{
 		ID:         newID,
@@ -213,5 +213,6 @@ func CopyUnit(u Unit, newID string) Unit {
 		Dice:       CopyDice(u.Dice),
 		Pilot:      CopyPilot(u.Pilot),
 		HasPilot:   u.HasPilot,
+		Position:   u.Position,
 	}
 }

@@ -42,14 +42,16 @@ func New(seed int64) *App {
 	a := &App{
 		model: tea.Model{
 			Version:     1,
-			Phase:       tea.PhaseCombat,
+			Phase:       tea.PhaseMenu, // Start at menu, dispatch CombatStarted
 			Seed:        seed,
-			FightNumber: 1,
+			FightNumber: 0, // Will be incremented by CombatStarted
 		},
 		registry: reg,
 		rng:      rng,
 	}
-	a.model.Combat = a.buildCombat()
+	// Trigger first combat through message dispatch (Wave 3)
+	combat := a.buildCombat()
+	a.dispatch(tea.CombatStarted{Combat: combat})
 	return a
 }
 
@@ -140,25 +142,44 @@ func (a *App) dispatch(msg tea.Msg) {
 
 // buildCombat creates a new combat with fresh units for the next fight.
 func (a *App) buildCombat() model.CombatModel {
+	// Instantiate command units (Wave 3)
+	playerCmd, err := template.InstantiateUnit(a.registry, "player_command", "player_cmd")
+	if err != nil {
+		log.Fatalf("instantiate player_cmd: %v", err)
+	}
+	playerCmd.Position = -1 // Off-board
+
+	enemyCmd, err := template.InstantiateUnit(a.registry, "enemy_command", "enemy_cmd")
+	if err != nil {
+		log.Fatalf("instantiate enemy_cmd: %v", err)
+	}
+	enemyCmd.Position = -1 // Off-board
+
 	// Instantiate player units
 	player1, err := template.InstantiateUnit(a.registry, "medium_mech", "player_1")
 	if err != nil {
 		log.Fatalf("instantiate player_1: %v", err)
 	}
+	player1.Position = 0 // Width 2 -> occupies 0-1
+
 	player2, err := template.InstantiateUnit(a.registry, "small_mech", "player_2")
 	if err != nil {
 		log.Fatalf("instantiate player_2: %v", err)
 	}
+	player2.Position = 2 // Width 1 -> occupies 2
 
 	// Instantiate enemy units
 	enemy1, err := template.InstantiateUnit(a.registry, "small_mech", "enemy_1")
 	if err != nil {
 		log.Fatalf("instantiate enemy_1: %v", err)
 	}
+	enemy1.Position = 0 // Width 1 -> occupies 0
+
 	enemy2, err := template.InstantiateUnit(a.registry, "medium_mech", "enemy_2")
 	if err != nil {
 		log.Fatalf("instantiate enemy_2: %v", err)
 	}
+	enemy2.Position = 1 // Width 2 -> occupies 1-2
 
 	// Equip player weapons
 	laser1, err := template.InstantiateItem(a.registry, "medium_laser", "p1_laser_r")
@@ -209,8 +230,8 @@ func (a *App) buildCombat() model.CombatModel {
 
 	return model.CombatModel{
 		Phase:       model.CombatActive,
-		PlayerUnits: []entity.Unit{player1, player2},
-		EnemyUnits:  []entity.Unit{enemy1, enemy2},
+		PlayerUnits: []entity.Unit{playerCmd, player1, player2},
+		EnemyUnits:  []entity.Unit{enemyCmd, enemy1, enemy2},
 		Log:         []string{"Combat started"},
 	}
 }

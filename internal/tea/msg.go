@@ -195,3 +195,57 @@ type DicePhaseAdvanced struct {
 }
 
 func (DicePhaseAdvanced) isMsg() {}
+
+// ===== Wave 3: Combat Phase Messages =====
+
+// EnemyCommandResolved signals enemy AI finished activating command dice.
+type EnemyCommandResolved struct {
+	Actions []EnemyDiceAction
+}
+
+func (EnemyCommandResolved) isMsg() {}
+
+// EnemyDiceAction records one enemy command die activation.
+type EnemyDiceAction struct {
+	SourceUnitID string
+	TargetUnitID string
+	DieIndex     int
+	Effect       entity.DieType
+	Value        int
+}
+
+// ExecutionStarted signals execution phase began with firing order.
+type ExecutionStarted struct {
+	FiringOrder []model.FiringPosition
+}
+
+func (ExecutionStarted) isMsg() {}
+
+// PositionResolved signals one position's attacks calculated.
+type PositionResolved struct {
+	Position int
+	Attacks  []AttackResult
+}
+
+func (PositionResolved) isMsg() {}
+
+// AttackResult records one attack's outcome.
+type AttackResult struct {
+	AttackerID string
+	TargetID   string
+	DieIndex   int
+	Damage     int
+	NewHealth  int
+	NewShields int
+	TargetDead bool
+}
+
+// ExecutionComplete signals all positions resolved.
+type ExecutionComplete struct{}
+
+func (ExecutionComplete) isMsg() {}
+
+// RoundEnded signals round cleanup complete.
+type RoundEnded struct{}
+
+func (RoundEnded) isMsg() {}

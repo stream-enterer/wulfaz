@@ -426,7 +426,8 @@ func TestUpdate_CombatStarted(t *testing.T) {
 	if newModel.Combat.Phase != model.CombatActive {
 		t.Errorf("expected combat phase CombatActive")
 	}
-	if cmd != nil {
-		t.Error("expected nil command")
+	// Wave 3: CombatStarted now returns StartNextRound cmd
+	if cmd == nil {
+		t.Error("expected StartNextRound command (Wave 3)")
 	}
 }

@@ -169,10 +169,10 @@ HP, damage application, death, shields, persistence.
 - **Description:** _deferred_
 
 ### F-154: Shield Expiration (Round End)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:109-110, 227, 229-230, 269
 - **Depends:** F-153
-- **Description:** _deferred_
+- **Description:** Shields expire at round end (Wave 3)
 
 ### F-155: Damage Persistence (Between Fights)
 - **Status:** Not Started
@@ -251,52 +251,52 @@ _Reserved: F-168 – F-169_
 Round structure, phases, resolution order.
 
 ### F-171: Preview Phase
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:70-77, 593-598
 - **Depends:** F-132, F-133
-- **Description:** _deferred_
+- **Description:** All dice rolled at round start, player sees enemy plan (Wave 2)
 
 ### F-172: Player Command Phase
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:79-87
 - **Depends:** F-134, F-135, F-139
-- **Description:** _deferred_
+- **Description:** Player locks/rerolls/activates command dice (Wave 2)
 
 ### F-173: Enemy Command Phase
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:89-93
 - **Depends:** F-133
-- **Description:** _deferred_
+- **Description:** Simple AI activates enemy command dice (Wave 3)
 
 ### F-174: Execution Phase
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:95-106
 - **Depends:** F-160
-- **Description:** _deferred_
+- **Description:** Units fire in position order (Wave 3, stub targeting)
 
 ### F-175: Simultaneous Resolution (Per Position)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:55, 99-102, 397
 - **Depends:** F-174
-- **Description:** _deferred_
+- **Description:** Attacks at same position calculated before applying (Wave 3)
 
 ### F-176: Left-to-Right Firing Order
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:97
 - **Depends:** F-174
-- **Description:** _deferred_
+- **Description:** Positions 0-9 resolve in order (Wave 3)
 
 ### F-177: Round End Phase
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:108-112
 - **Depends:** F-154
-- **Description:** _deferred_
+- **Description:** Shields expire, round cleanup (Wave 3)
 
 ### F-178: Combat Loop (Repeat Until End)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:114
 - **Depends:** F-177
-- **Description:** _deferred_
+- **Description:** Combat continues until command unit dies (Wave 3)
 
 _Reserved: F-179_
 

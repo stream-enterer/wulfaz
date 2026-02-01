@@ -41,4 +41,15 @@ type CombatModel struct {
 	SelectedUnitID   string                        // Unit whose die is selected (empty if none)
 	SelectedDieIndex int                           // Index of selected die (-1 if none)
 	ActivatedDice    map[string][]bool             // UnitID -> which dice have been activated
+
+	// Execution phase fields (Wave 3)
+	FiringOrder        []FiringPosition // Positions to resolve in order
+	CurrentFiringIndex int              // Index into FiringOrder
+}
+
+// FiringPosition groups units at same board position for simultaneous resolution
+type FiringPosition struct {
+	Position    int      // Board position (0-9)
+	PlayerUnits []string // Unit IDs of player units at this position
+	EnemyUnits  []string // Unit IDs of enemy units at this position
 }

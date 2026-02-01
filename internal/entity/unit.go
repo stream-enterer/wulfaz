@@ -13,6 +13,7 @@ type Unit struct {
 	Dice       []Die
 	Pilot      Pilot
 	HasPilot   bool
+	Position   int // Board position (0-9), -1 for off-board command units
 }
 
 // IsCommand returns true if this unit has the "command" tag.

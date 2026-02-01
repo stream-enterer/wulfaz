@@ -95,7 +95,8 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		m.Phase = PhaseCombat
 		m.FightNumber++
 		m.Combat = msg.Combat
-		return m, nil
+		// Trigger first round (Wave 3)
+		return m, StartNextRound(m.Seed, 1, getAllUnits(m.Combat))
 
 	case PlayerPaused:
 		if m.Phase != PhaseCombat {
@@ -141,6 +142,18 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handlePlayerCommandDone(msg)
 	case DicePhaseAdvanced:
 		return m.handleDicePhaseAdvanced(msg)
+
+	// Wave 3: Combat phase messages
+	case EnemyCommandResolved:
+		return m.handleEnemyCommandResolved(msg)
+	case ExecutionStarted:
+		return m.handleExecutionStarted(msg)
+	case PositionResolved:
+		return m.handlePositionResolved(msg)
+	case ExecutionComplete:
+		return m.handleExecutionComplete(msg)
+	case RoundEnded:
+		return m.handleRoundEnded(msg)
 
 	default:
 		return m, nil
@@ -309,28 +322,29 @@ func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 }
 
 // checkCombatEnd returns the victor if combat has ended, or VictorNone if ongoing.
+// Combat ends when a command unit dies.
 func (m Model) checkCombatEnd() Victor {
-	playerAlive := false
+	var playerCmdAlive, enemyCmdAlive bool
+
 	for _, u := range m.Combat.PlayerUnits {
-		if u.IsAlive() {
-			playerAlive = true
+		if u.IsCommand() && u.IsAlive() {
+			playerCmdAlive = true
 			break
 		}
 	}
-	enemyAlive := false
 	for _, u := range m.Combat.EnemyUnits {
-		if u.IsAlive() {
-			enemyAlive = true
+		if u.IsCommand() && u.IsAlive() {
+			enemyCmdAlive = true
 			break
 		}
 	}
 
 	switch {
-	case !playerAlive && !enemyAlive:
-		return VictorDraw
-	case !enemyAlive:
+	case !playerCmdAlive && !enemyCmdAlive:
+		return VictorPlayer // Player wins ties per DESIGN.md
+	case !enemyCmdAlive:
 		return VictorPlayer
-	case !playerAlive:
+	case !playerCmdAlive:
 		return VictorEnemy
 	default:
 		return VictorNone
@@ -472,6 +486,7 @@ func applyModifications(unit entity.Unit, mods ModifiedUnit) entity.Unit {
 		Dice:       unit.Dice,
 		Pilot:      unit.Pilot,
 		HasPilot:   unit.HasPilot,
+		Position:   unit.Position,
 	}
 }
 
@@ -505,6 +520,190 @@ func findPlayerCommandUnit(combat model.CombatModel) *entity.Unit {
 		}
 	}
 	return nil
+}
+
+// findEnemyCommandUnit returns the enemy's command unit (or nil).
+func findEnemyCommandUnit(combat model.CombatModel) *entity.Unit {
+	for i := range combat.EnemyUnits {
+		if combat.EnemyUnits[i].IsCommand() {
+			return &combat.EnemyUnits[i]
+		}
+	}
+	return nil
+}
+
+// findLowestHPAliveUnit returns ID of alive unit with lowest HP (or "").
+func findLowestHPAliveUnit(units []entity.Unit) string {
+	var lowestID string
+	lowestHP := int(^uint(0) >> 1) // Max int
+	for _, u := range units {
+		if !u.IsAlive() {
+			continue
+		}
+		if h, ok := u.Attributes["health"]; ok && h.Base < lowestHP {
+			lowestHP = h.Base
+			lowestID = u.ID
+		}
+	}
+	return lowestID
+}
+
+// buildFiringOrder creates left-to-right position list.
+// Excludes Position < 0 (off-board command units) and dead units.
+func buildFiringOrder(combat model.CombatModel) []model.FiringPosition {
+	// Map position -> units at that position
+	playerAtPos := make(map[int][]string)
+	enemyAtPos := make(map[int][]string)
+	positionSet := make(map[int]bool)
+
+	for _, u := range combat.PlayerUnits {
+		if u.Position >= 0 && u.IsAlive() {
+			playerAtPos[u.Position] = append(playerAtPos[u.Position], u.ID)
+			positionSet[u.Position] = true
+		}
+	}
+	for _, u := range combat.EnemyUnits {
+		if u.Position >= 0 && u.IsAlive() {
+			enemyAtPos[u.Position] = append(enemyAtPos[u.Position], u.ID)
+			positionSet[u.Position] = true
+		}
+	}
+
+	// Sort positions left-to-right
+	var positions []int
+	for pos := range positionSet {
+		positions = append(positions, pos)
+	}
+	// Simple bubble sort for small set
+	for i := 0; i < len(positions); i++ {
+		for j := i + 1; j < len(positions); j++ {
+			if positions[i] > positions[j] {
+				positions[i], positions[j] = positions[j], positions[i]
+			}
+		}
+	}
+
+	// Build firing order
+	var order []model.FiringPosition
+	for _, pos := range positions {
+		order = append(order, model.FiringPosition{
+			Position:    pos,
+			PlayerUnits: playerAtPos[pos],
+			EnemyUnits:  enemyAtPos[pos],
+		})
+	}
+	return order
+}
+
+// buildHPSnapshot creates map of unitID -> {health, shields} for simultaneous resolution.
+func buildHPSnapshot(combat model.CombatModel) map[string][2]int {
+	snapshot := make(map[string][2]int)
+	for _, u := range combat.PlayerUnits {
+		hp := 0
+		if h, ok := u.Attributes["health"]; ok {
+			hp = h.Base
+		}
+		shields := 0
+		if s, ok := u.Attributes["shields"]; ok {
+			shields = s.Base
+		}
+		snapshot[u.ID] = [2]int{hp, shields}
+	}
+	for _, u := range combat.EnemyUnits {
+		hp := 0
+		if h, ok := u.Attributes["health"]; ok {
+			hp = h.Base
+		}
+		shields := 0
+		if s, ok := u.Attributes["shields"]; ok {
+			shields = s.Base
+		}
+		snapshot[u.ID] = [2]int{hp, shields}
+	}
+	return snapshot
+}
+
+// applyDiceEffectToCombat applies damage/shield/heal to a target unit in combat.
+// Shields absorb damage first.
+func applyDiceEffectToCombat(combat model.CombatModel, targetID string,
+	effectType entity.DieType, value int) model.CombatModel {
+
+	updateInSlice := func(units []entity.Unit) {
+		for i, u := range units {
+			if u.ID != targetID {
+				continue
+			}
+			attrs := core.CopyAttributes(u.Attributes)
+
+			health := 0
+			if h, ok := attrs["health"]; ok {
+				health = h.Base
+			}
+			maxHealth := health
+			if mh, ok := attrs["max_health"]; ok {
+				maxHealth = mh.Base
+			}
+			shields := 0
+			if s, ok := attrs["shields"]; ok {
+				shields = s.Base
+			}
+
+			switch effectType {
+			case entity.DieDamage:
+				remaining := value
+				if remaining > 0 && shields > 0 {
+					absorbed := min(remaining, shields)
+					remaining -= absorbed
+					shields -= absorbed
+				}
+				health = max(0, health-remaining)
+			case entity.DieShield:
+				shields += value
+			case entity.DieHeal:
+				health = min(health+value, maxHealth)
+			}
+
+			if h, ok := attrs["health"]; ok {
+				h.Base = health
+				attrs["health"] = h
+			}
+			if s, ok := attrs["shields"]; ok {
+				s.Base = shields
+				attrs["shields"] = s
+			} else if shields > 0 {
+				attrs["shields"] = core.Attribute{Name: "shields", Base: shields, Min: 0}
+			}
+
+			units[i].Attributes = attrs
+			break
+		}
+	}
+
+	updateInSlice(combat.PlayerUnits)
+	updateInSlice(combat.EnemyUnits)
+	return combat
+}
+
+// updateUnitHP updates a unit's health/shields in a slice by ID.
+func updateUnitHP(units []entity.Unit, unitID string, newHP, newShields int) {
+	for i, u := range units {
+		if u.ID != unitID {
+			continue
+		}
+		attrs := core.CopyAttributes(u.Attributes)
+		if h, ok := attrs["health"]; ok {
+			h.Base = newHP
+			attrs["health"] = h
+		}
+		if s, ok := attrs["shields"]; ok {
+			s.Base = newShields
+			attrs["shields"] = s
+		} else if newShields > 0 {
+			attrs["shields"] = core.Attribute{Name: "shields", Base: newShields, Min: 0}
+		}
+		units[i].Attributes = attrs
+		break
+	}
 }
 
 // allCommandDiceActivated checks if all player command dice are activated.
@@ -779,9 +978,8 @@ func (m Model) handlePlayerCommandDone(_ PlayerCommandDone) (Model, Cmd) {
 	combat.SelectedDieIndex = -1
 	m.Combat = combat
 
-	// TODO: In future, trigger enemy command AI here
-	// For now, skip to execution
-	return m, AdvanceDicePhase(model.DicePhaseExecution)
+	// Trigger enemy command AI (Wave 3)
+	return m, ExecuteEnemyCommand(m.Combat)
 }
 
 func (m Model) handleDicePhaseAdvanced(msg DicePhaseAdvanced) (Model, Cmd) {
@@ -789,4 +987,128 @@ func (m Model) handleDicePhaseAdvanced(msg DicePhaseAdvanced) (Model, Cmd) {
 	combat.DicePhase = msg.NewPhase
 	m.Combat = combat
 	return m, nil
+}
+
+// ===== Wave 3: Combat Phase Handlers =====
+
+func (m Model) handleEnemyCommandResolved(msg EnemyCommandResolved) (Model, Cmd) {
+	combat := m.Combat
+	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
+	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
+
+	// Apply each enemy action (damage/shield/heal)
+	for _, action := range msg.Actions {
+		combat = applyDiceEffectToCombat(combat, action.TargetUnitID,
+			action.Effect, action.Value)
+	}
+
+	// Add to combat log
+	for _, action := range msg.Actions {
+		newLog := make([]string, len(combat.Log), len(combat.Log)+1)
+		copy(newLog, combat.Log)
+		combat.Log = append(newLog, fmt.Sprintf("Enemy: %s -> %s: %s %d",
+			action.SourceUnitID, action.TargetUnitID, action.Effect, action.Value))
+	}
+
+	combat.DicePhase = model.DicePhaseExecution
+	m.Combat = combat
+
+	// Check if player command died from enemy dice
+	if victor := m.checkCombatEnd(); victor != VictorNone {
+		return m.applyCombatEnd()
+	}
+
+	return m, ExecuteExecution(m.Combat)
+}
+
+func (m Model) handleExecutionStarted(msg ExecutionStarted) (Model, Cmd) {
+	combat := m.Combat
+	combat.FiringOrder = msg.FiringOrder
+	combat.CurrentFiringIndex = 0
+	m.Combat = combat
+
+	if len(msg.FiringOrder) == 0 {
+		return m, func() Msg { return ExecutionComplete{} }
+	}
+
+	return m, ResolvePosition(msg.FiringOrder[0], m.Combat)
+}
+
+func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
+	combat := m.Combat
+	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
+	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
+
+	// Apply all attacks (simultaneous - already calculated)
+	for _, atk := range msg.Attacks {
+		updateUnitHP(combat.PlayerUnits, atk.TargetID, atk.NewHealth, atk.NewShields)
+		updateUnitHP(combat.EnemyUnits, atk.TargetID, atk.NewHealth, atk.NewShields)
+	}
+
+	// Log attacks
+	for _, atk := range msg.Attacks {
+		newLog := make([]string, len(combat.Log), len(combat.Log)+1)
+		copy(newLog, combat.Log)
+		status := ""
+		if atk.TargetDead {
+			status = " [DESTROYED]"
+		}
+		combat.Log = append(newLog, fmt.Sprintf("Pos %d: %s -> %s: %d dmg%s",
+			msg.Position, atk.AttackerID, atk.TargetID, atk.Damage, status))
+	}
+
+	m.Combat = combat
+
+	// CRITICAL: Check victory after EACH position (immediate end per DESIGN.md)
+	if victor := m.checkCombatEnd(); victor != VictorNone {
+		return m.applyCombatEnd()
+	}
+
+	// Advance to next position
+	combat.CurrentFiringIndex++
+	m.Combat = combat
+
+	if combat.CurrentFiringIndex >= len(combat.FiringOrder) {
+		return m, func() Msg { return ExecutionComplete{} }
+	}
+
+	return m, ResolvePosition(combat.FiringOrder[combat.CurrentFiringIndex], m.Combat)
+}
+
+func (m Model) handleExecutionComplete(_ ExecutionComplete) (Model, Cmd) {
+	combat := m.Combat
+	combat.DicePhase = model.DicePhaseRoundEnd
+	m.Combat = combat
+	return m, func() Msg { return RoundEnded{} }
+}
+
+func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
+	combat := m.Combat
+	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
+	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
+
+	// Expire ALL shields (including command units)
+	expireShields := func(units []entity.Unit) {
+		for i := range units {
+			if s, ok := units[i].Attributes["shields"]; ok && s.Base > 0 {
+				attrs := core.CopyAttributes(units[i].Attributes)
+				s.Base = 0
+				attrs["shields"] = s
+				units[i].Attributes = attrs
+			}
+		}
+	}
+	expireShields(combat.PlayerUnits)
+	expireShields(combat.EnemyUnits)
+
+	// Reset phase state
+	combat.DicePhase = model.DicePhaseNone
+	combat.FiringOrder = nil
+	combat.CurrentFiringIndex = 0
+	combat.Round++
+
+	m.Combat = combat
+
+	// Start next round
+	return m, StartNextRound(m.Seed, combat.Round, getAllUnits(m.Combat))
 }

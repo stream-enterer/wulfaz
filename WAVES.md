@@ -96,26 +96,33 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 
 ---
 
-## Wave 3: Combat Phases
+## Wave 3: Combat Phases ✓
 
 **Goal:** Replace tick-based combat with discrete phase structure.
 
-| Order | ID | Feature | Depends |
-|-------|-----|---------|---------|
-| 1 | F-171 | Preview Phase | F-132, F-133 |
-| 2 | F-172 | Player Command Phase | F-134, F-135, F-139 |
-| 3 | F-173 | Enemy Command Phase | F-133 |
-| 4 | F-174 | Execution Phase | F-160 |
-| 5 | F-175 | Simultaneous Resolution (Per Position) | F-174 |
-| 6 | F-176 | Left-to-Right Firing Order | F-174 |
-| 7 | F-177 | Round End Phase | F-154 |
-| 8 | F-178 | Combat Loop (Repeat Until End) | F-177 |
+| Order | ID | Feature | Depends | Status |
+|-------|-----|---------|---------|--------|
+| 1 | F-171 | Preview Phase | F-132, F-133 | ✓ |
+| 2 | F-172 | Player Command Phase | F-134, F-135, F-139 | ✓ |
+| 3 | F-173 | Enemy Command Phase | F-133 | ✓ |
+| 4 | F-174 | Execution Phase | F-160 (stubbed) | ✓ |
+| 5 | F-175 | Simultaneous Resolution (Per Position) | F-174 | ✓ |
+| 6 | F-176 | Left-to-Right Firing Order | F-174 | ✓ |
+| 7 | F-177 | Round End Phase | F-154 | ✓ |
+| 8 | F-178 | Combat Loop (Repeat Until End) | F-177 | ✓ |
+| — | F-154 | Shield Expiration (Round End) | — | ✓ |
 
 **Deliverable:** Combat proceeds through Preview → Player Command → Enemy Command → Execution → Round End → repeat.
 
-**Estimated scope:** Medium — refactor `CombatPhase` enum, new phase transition logic, remove legacy tick dispatch.
-
-**Note:** F-174 depends on F-160 (targeting), F-177 depends on F-154 (shields). May need to pull those forward or stub them.
+**Implementation:**
+- Position field added to Unit entity (-1 = off-board command units)
+- Stub targeting: first overlapping enemy, gap falls through to command unit
+- Simultaneous resolution: attacks calculated per-position, then applied
+- Left-to-right firing order (positions 0-9)
+- Simple enemy AI: damage→lowest HP player, shield/heal→lowest HP enemy
+- Shield expiration at round end
+- Combat loop continues until command unit dies
+- Victory check after each position (immediate end per DESIGN.md)
 
 ---
 
@@ -237,11 +244,11 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 | 1 | 2 | Unlock blockers (Command Unit, Die Entity) | ✓ |
 | 2 | 9 | Dice mechanics (roll, lock, reroll, effects) | ✓ |
 | — | — | *Remove legacy tick system* | ✓ |
-| 3 | 8 | Combat phases (build phase-based) | |
+| 3 | 9 | Combat phases (build phase-based) | ✓ |
 | 4 | 8 | Targeting (positional, overflow) | |
 | 5 | 9 | Death & victory (shields, permadeath, win) | |
 | 6 | 25 | Polish & content (edge cases, AI, UI, templates) | |
-| **Total** | **61** | | **11 done** |
+| **Total** | **61** | | **20 done** |
 
 ---
 
@@ -262,5 +269,6 @@ Some cross-wave dependencies that may require ordering adjustments:
 3. ~~**Plan Wave 2** — Design dice mechanics in detail~~ ✓
 4. ~~**Implement Wave 2** — Dice rolling, lock/reroll, effects, activation~~ ✓
 5. ~~**Remove legacy tick system** — Clean up before Wave 3~~ ✓
-6. **Plan Wave 3** — Design combat phase transitions
-7. **Iterate** — Complete each wave, reassess, continue
+6. ~~**Implement Wave 3** — Combat phases with stub targeting~~ ✓
+7. **Plan Wave 4** — Full targeting (lowest HP, overflow damage)
+8. **Iterate** — Complete each wave, reassess, continue

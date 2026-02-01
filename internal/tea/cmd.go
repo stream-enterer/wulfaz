@@ -153,3 +153,149 @@ func AdvanceDicePhase(next model.DicePhase) Cmd {
 		return DicePhaseAdvanced{NewPhase: next}
 	}
 }
+
+// ===== Wave 3: Combat Phase Commands =====
+
+// ExecuteEnemyCommand runs simple enemy AI for command dice.
+// Damage -> lowest HP player unit; Shield/Heal -> lowest HP enemy unit.
+func ExecuteEnemyCommand(combat model.CombatModel) Cmd {
+	return func() Msg {
+		enemyCmd := findEnemyCommandUnit(combat)
+		if enemyCmd == nil {
+			return EnemyCommandResolved{Actions: nil}
+		}
+
+		rolled := combat.RolledDice[enemyCmd.ID]
+		var actions []EnemyDiceAction
+
+		for i, rd := range rolled {
+			if rd.Result == 0 { // Skip blank faces
+				continue
+			}
+
+			var targetID string
+			switch rd.Type {
+			case entity.DieDamage:
+				targetID = findLowestHPAliveUnit(combat.PlayerUnits)
+			case entity.DieShield, entity.DieHeal:
+				targetID = findLowestHPAliveUnit(combat.EnemyUnits)
+			}
+
+			if targetID != "" {
+				actions = append(actions, EnemyDiceAction{
+					SourceUnitID: enemyCmd.ID,
+					TargetUnitID: targetID,
+					DieIndex:     i,
+					Effect:       rd.Type,
+					Value:        rd.Result,
+				})
+			}
+		}
+		return EnemyCommandResolved{Actions: actions}
+	}
+}
+
+// ExecuteExecution builds firing order and starts execution.
+func ExecuteExecution(combat model.CombatModel) Cmd {
+	return func() Msg {
+		order := buildFiringOrder(combat)
+		return ExecutionStarted{FiringOrder: order}
+	}
+}
+
+// ResolvePosition calculates attacks for units at one position.
+// Key: Collect ALL attacks first, THEN calculate final HP (simultaneous).
+func ResolvePosition(pos model.FiringPosition, combat model.CombatModel) Cmd {
+	return func() Msg {
+		var attacks []AttackResult
+		unitMap := buildUnitMap(combat)
+
+		// Build snapshot of current HP/shields for all targets
+		hpSnapshot := buildHPSnapshot(combat)
+
+		// Find command units for gap targeting
+		playerCmd := findPlayerCommandUnit(combat)
+		enemyCmd := findEnemyCommandUnit(combat)
+
+		// Calculate player unit attacks -> enemy units
+		for _, uid := range pos.PlayerUnits {
+			attacker, ok := unitMap[uid]
+			if !ok || !attacker.IsAlive() {
+				continue
+			}
+			rolled := combat.RolledDice[uid]
+			targetID := SelectTarget(attacker, combat.EnemyUnits, enemyCmd)
+			if targetID == "" {
+				continue
+			}
+
+			for dieIdx, rd := range rolled {
+				if rd.Type != entity.DieDamage || rd.Result == 0 {
+					continue // Skip non-damage and blank dice
+				}
+
+				hp, shields := hpSnapshot[targetID][0], hpSnapshot[targetID][1]
+				remaining := rd.Result
+				if shields > 0 {
+					absorbed := min(remaining, shields)
+					remaining -= absorbed
+					shields -= absorbed
+				}
+				hp = max(0, hp-remaining)
+
+				attacks = append(attacks, AttackResult{
+					AttackerID: uid, TargetID: targetID, DieIndex: dieIdx,
+					Damage: rd.Result, NewHealth: hp, NewShields: shields,
+					TargetDead: hp <= 0,
+				})
+
+				// Update snapshot for subsequent dice (same attacker's dice hit same target)
+				hpSnapshot[targetID] = [2]int{hp, shields}
+			}
+		}
+
+		// Calculate enemy unit attacks -> player units (same pattern)
+		for _, uid := range pos.EnemyUnits {
+			attacker, ok := unitMap[uid]
+			if !ok || !attacker.IsAlive() {
+				continue
+			}
+			rolled := combat.RolledDice[uid]
+			targetID := SelectTarget(attacker, combat.PlayerUnits, playerCmd)
+			if targetID == "" {
+				continue
+			}
+
+			for dieIdx, rd := range rolled {
+				if rd.Type != entity.DieDamage || rd.Result == 0 {
+					continue
+				}
+
+				hp, shields := hpSnapshot[targetID][0], hpSnapshot[targetID][1]
+				remaining := rd.Result
+				if shields > 0 {
+					absorbed := min(remaining, shields)
+					remaining -= absorbed
+					shields -= absorbed
+				}
+				hp = max(0, hp-remaining)
+
+				attacks = append(attacks, AttackResult{
+					AttackerID: uid, TargetID: targetID, DieIndex: dieIdx,
+					Damage: rd.Result, NewHealth: hp, NewShields: shields,
+					TargetDead: hp <= 0,
+				})
+
+				hpSnapshot[targetID] = [2]int{hp, shields}
+			}
+		}
+
+		return PositionResolved{Position: pos.Position, Attacks: attacks}
+	}
+}
+
+// StartNextRound wraps RollAllDice with round-based seed variation.
+func StartNextRound(baseSeed int64, round int, units []entity.Unit) Cmd {
+	roundSeed := baseSeed + int64(round)*7919 // Prime offset per round
+	return RollAllDice(roundSeed, round, units)
+}
