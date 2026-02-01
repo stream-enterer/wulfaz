@@ -17,18 +17,22 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 
 ---
 
-## Wave 1: Unlock Blockers
+## Wave 1: Unlock Blockers ✓
 
 **Goal:** Create the two primitives that unblock the most downstream work.
 
-| ID | Feature | Unlocks |
-|----|---------|---------|
-| F-114 | Command Unit Entity | F-123, F-133, F-164, F-180, F-190, F-241 |
-| F-130 | Die Entity | F-131, F-132, F-133, F-136, F-137, F-138 |
+| ID | Feature | Unlocks | Status |
+|----|---------|---------|--------|
+| F-114 | Command Unit Entity | F-123, F-133, F-164, F-180, F-190, F-241 | ✓ |
+| F-130 | Die Entity | F-131, F-132, F-133, F-136, F-137, F-138 | ✓ |
 
 **Deliverable:** Command unit type distinct from regular units. Die struct with type and faces.
 
-**Estimated scope:** Small — two new structs in `internal/entity/` or `internal/core/`.
+**Implementation:**
+- `Unit.IsCommand()` method checks for `"command"` tag
+- `Die` struct with `Type` (damage/shield/heal) and `Faces []int`
+- `Unit.Dice []Die` field added
+- Full copy/immutability support for TEA compliance
 
 ---
 
@@ -244,7 +248,7 @@ Some cross-wave dependencies that may require ordering adjustments:
 
 ## Next Steps
 
-1. **Plan Wave 1** — Define F-114 and F-130 implementation details
-2. **Implement Wave 1** — Create Command Unit and Die entities
+1. ~~**Plan Wave 1** — Define F-114 and F-130 implementation details~~ ✓
+2. ~~**Implement Wave 1** — Create Command Unit and Die entities~~ ✓
 3. **Plan Wave 2** — Design dice mechanics in detail
 4. **Iterate** — Complete each wave, reassess, continue
