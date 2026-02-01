@@ -161,6 +161,8 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleExecutionComplete(msg)
 	case RoundEnded:
 		return m.handleRoundEnded(msg)
+	case RoundToastDismissed:
+		return m.handleRoundToastDismissed(msg)
 
 	default:
 		return m, nil
@@ -995,6 +997,12 @@ func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
 		msg.SourceUnitID, msg.TargetUnitID, msg.Effect, msg.Value))
 
 	m.Combat = combat
+
+	// Auto-advance when all command dice are activated (F-226)
+	if combat.DicePhase == model.DicePhasePlayerCommand && allCommandDiceActivated(m.Combat) {
+		return m, func() Msg { return PlayerCommandDone{} }
+	}
+
 	return m, nil
 }
 
@@ -1140,10 +1148,28 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 	combat.DicePhase = model.DicePhaseNone
 	combat.FiringOrder = nil
 	combat.CurrentFiringIndex = 0
-	combat.Round++
+	// NOTE: Round increment moved to handleRoundToastDismissed
 
 	m.Combat = combat
 
-	// Start next round
+	// Check if combat ended BEFORE showing toast
+	if victor := m.checkCombatEnd(); victor != VictorNone {
+		return m.applyCombatEnd()
+	}
+
+	// Show round toast, wait for player click
+	combat.ShowRoundToast = true
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleRoundToastDismissed(_ RoundToastDismissed) (Model, Cmd) {
+	if !m.Combat.ShowRoundToast {
+		return m, nil
+	}
+	combat := m.Combat
+	combat.ShowRoundToast = false
+	combat.Round++ // Increment here instead of in RoundEnded
+	m.Combat = combat
 	return m, StartNextRound(m.Seed, combat.Round, getAllUnits(m.Combat))
 }

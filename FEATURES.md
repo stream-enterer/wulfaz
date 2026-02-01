@@ -423,28 +423,28 @@ _Reserved: F-217 – F-219_
 Visual presentation of game state.
 
 ### F-223: Shield Display
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:588-589
 - **Depends:** F-153
-- **Description:** _deferred_
+- **Description:** "HP:X SH:Y" format in drawUnit() and drawCommandUnit() (Wave 6)
 
-### F-224: Round Number Display
-- **Status:** Not Started
-- **Source:** DESIGN.md:591
+### F-224: Round Toast
+- **Status:** Complete
+- **Source:** DESIGN.md:591, 111
 - **Depends:** None (F-170 complete)
-- **Description:** _deferred_
+- **Description:** Round toast overlay shown between rounds, click to continue (Wave 6)
 
 ### F-225: Dice Display (Preview Phase)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:593-598
 - **Depends:** F-171
-- **Description:** _deferred_
+- **Description:** Dice boxes with pip patterns on all units, command unit pyramid layout (Wave 6)
 
 ### F-226: Dice Interaction UI (Player Command)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:597, 600-602
 - **Depends:** F-172
-- **Description:** _deferred_
+- **Description:** Left-click select/target, right-click lock, R reroll, auto-advance when done (Wave 6)
 
 ### F-227: Targeting Lines Display
 - **Status:** Not Started
@@ -601,9 +601,9 @@ Explicitly out of MVP scope per DESIGN.md.
 | Edge Cases | F-190 – F-199 | 4 | 0 |
 | Enemy AI | F-200 – F-209 | 4 | 0 |
 | Run Structure | F-210 – F-219 | 2 | 5 |
-| UI / Display | F-220 – F-239 | 7 | 0 |
+| UI / Display | F-220 – F-239 | 3 | 4 |
 | Templates / Content | F-240 – F-249 | 4 | 2 |
-| **MVP Total** | | **25** | **36** |
+| **MVP Total** | | **21** | **40** |
 | Deferred | F-D01 – F-D20 | 20 | — |
 
 ---
@@ -644,5 +644,5 @@ Explicitly out of MVP scope per DESIGN.md.
 | 8 | Victory + Edge | F-180 – F-183, F-190 – F-193 | Partial (F-190 – F-193 remain) |
 | 9 | Enemy AI | F-200 – F-203 | Not Started |
 | 10 | Run Structure | F-210 – F-216 | Partial (F-215, F-216 remain) |
-| 11 | UI | F-220 – F-229 | Partial (F-223 – F-229 remain) |
+| 11 | UI | F-220 – F-229 | Partial (F-227 – F-229 remain) |
 | 12 | Content | F-240 – F-245 | Partial (F-241, F-243 – F-245 remain) |

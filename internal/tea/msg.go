@@ -249,3 +249,8 @@ func (ExecutionComplete) isMsg() {}
 type RoundEnded struct{}
 
 func (RoundEnded) isMsg() {}
+
+// RoundToastDismissed signals player clicked to dismiss round toast.
+type RoundToastDismissed struct{}
+
+func (RoundToastDismissed) isMsg() {}

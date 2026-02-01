@@ -1,6 +1,7 @@
 package app
 
 import (
+	"image"
 	"log"
 	"math/rand/v2"
 
@@ -21,9 +22,10 @@ const (
 
 // App implements ebiten.Game and drives the TEA runtime
 type App struct {
-	model    tea.Model
-	registry *template.Registry // Immutable after init; for shop/rewards later
-	rng      *rand.Rand
+	model      tea.Model
+	registry   *template.Registry    // Immutable after init; for shop/rewards later
+	rng        *rand.Rand
+	hitRegions []renderer.HitRegion // Updated each frame for input handling
 }
 
 // New creates a new App with units loaded from templates
@@ -73,7 +75,7 @@ func (a *App) Update() error {
 
 // Draw renders the game state (implements ebiten.Game)
 func (a *App) Draw(screen *ebiten.Image) {
-	renderer.RenderEbiten(screen, a.model)
+	a.hitRegions = renderer.RenderEbiten(screen, a.model)
 }
 
 // Layout returns the game's screen size (implements ebiten.Game)
@@ -83,11 +85,21 @@ func (a *App) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 // pollInput checks for player input and dispatches appropriate messages
 func (a *App) pollInput() {
+	// ESC always quits
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		a.dispatch(tea.PlayerQuit{})
 		return
 	}
 
+	// Toast dismissal blocks other input
+	if a.model.Combat.ShowRoundToast {
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			a.dispatch(tea.RoundToastDismissed{})
+		}
+		return
+	}
+
+	// Choice phase
 	if a.model.Phase == tea.PhaseChoice {
 		var selected int = -1
 		switch {
@@ -114,6 +126,12 @@ func (a *App) pollInput() {
 		return
 	}
 
+	// Combat phase input
+	if a.model.Phase == tea.PhaseCombat && a.model.Combat.Phase == model.CombatActive {
+		a.pollCombatInput()
+	}
+
+	// Pause/resume
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		if a.model.Combat.Phase == model.CombatActive {
 			a.dispatch(tea.PlayerPaused{})
@@ -121,6 +139,132 @@ func (a *App) pollInput() {
 			a.dispatch(tea.PlayerResumed{})
 		}
 	}
+}
+
+// pollCombatInput handles dice phase interactions
+func (a *App) pollCombatInput() {
+	combat := a.model.Combat
+
+	// PREVIEW PHASE: any click advances to PlayerCommand
+	if combat.DicePhase == model.DicePhasePreview {
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			a.dispatch(tea.PreviewDone{})
+		}
+		return
+	}
+
+	// PLAYER COMMAND PHASE
+	if combat.DicePhase == model.DicePhasePlayerCommand {
+		// R key = reroll
+		if inpututil.IsKeyJustPressed(ebiten.KeyR) && combat.RerollsRemaining > 0 {
+			playerCmd := findPlayerCommandUnit(combat)
+			if playerCmd != nil {
+				rolled := combat.RolledDice[playerCmd.ID]
+				cmd := tea.RerollUnlockedDice(a.model.Seed+int64(combat.Round)*100, playerCmd.ID, rolled)
+				a.dispatch(cmd())
+			}
+		}
+
+		// Left-click = select die or target unit
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			mx, my := ebiten.CursorPosition()
+			a.handleLeftClick(mx, my)
+		}
+
+		// Right-click = lock toggle
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
+			mx, my := ebiten.CursorPosition()
+			a.handleRightClick(mx, my)
+		}
+	}
+}
+
+// handleLeftClick processes left-click for die selection and targeting
+func (a *App) handleLeftClick(mx, my int) {
+	combat := a.model.Combat
+	pt := image.Point{mx, my}
+	playerCmd := findPlayerCommandUnit(combat)
+
+	// PASS 1: Check dice first (higher z-order priority)
+	for _, region := range a.hitRegions {
+		if region.Type != "die" || !pt.In(region.Rect) {
+			continue
+		}
+		// Only player command dice are interactive
+		if playerCmd == nil || region.UnitID != playerCmd.ID {
+			continue
+		}
+		// Check if already activated
+		if activated := combat.ActivatedDice[region.UnitID]; activated != nil && region.DieIndex < len(activated) && activated[region.DieIndex] {
+			continue // Can't interact with used dice
+		}
+
+		// Toggle selection
+		if combat.SelectedUnitID == region.UnitID && combat.SelectedDieIndex == region.DieIndex {
+			a.dispatch(tea.DieDeselected{})
+		} else {
+			a.dispatch(tea.DieSelected{UnitID: region.UnitID, DieIndex: region.DieIndex})
+		}
+		return
+	}
+
+	// PASS 2: Check units (only if a die is selected for targeting)
+	if combat.SelectedUnitID != "" {
+		for _, region := range a.hitRegions {
+			if region.Type != "unit" || !pt.In(region.Rect) {
+				continue
+			}
+			rolled := combat.RolledDice[combat.SelectedUnitID]
+			if combat.SelectedDieIndex < len(rolled) {
+				die := rolled[combat.SelectedDieIndex]
+				a.dispatch(tea.DiceActivated{
+					SourceUnitID: combat.SelectedUnitID,
+					DieIndex:     combat.SelectedDieIndex,
+					TargetUnitID: region.UnitID,
+					Value:        die.Result,
+					Effect:       die.Type,
+				})
+			}
+			return
+		}
+	}
+
+	// Clicked empty space - deselect
+	if combat.SelectedUnitID != "" {
+		a.dispatch(tea.DieDeselected{})
+	}
+}
+
+// handleRightClick processes right-click for lock toggle
+func (a *App) handleRightClick(mx, my int) {
+	combat := a.model.Combat
+	pt := image.Point{mx, my}
+	playerCmd := findPlayerCommandUnit(combat)
+
+	for _, region := range a.hitRegions {
+		if !pt.In(region.Rect) {
+			continue
+		}
+
+		if region.Type == "die" && playerCmd != nil && region.UnitID == playerCmd.ID {
+			// Check not already activated
+			if activated := combat.ActivatedDice[region.UnitID]; activated != nil && region.DieIndex < len(activated) && activated[region.DieIndex] {
+				return // Can't lock used dice
+			}
+			a.dispatch(tea.DieLockToggled{UnitID: region.UnitID, DieIndex: region.DieIndex})
+			return
+		}
+	}
+}
+
+// findPlayerCommandUnit returns the player's command unit (or nil).
+func findPlayerCommandUnit(combat model.CombatModel) *entity.Unit {
+	for i := range combat.PlayerUnits {
+		if combat.PlayerUnits[i].IsCommand() {
+			return &combat.PlayerUnits[i]
+		}
+	}
+	return nil
 }
 
 // dispatch sends a message through the TEA update cycle
