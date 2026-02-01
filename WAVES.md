@@ -36,25 +36,34 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 
 ---
 
-## Wave 2: Dice Core
+## Wave 2: Dice Core ✓
 
 **Goal:** Implement the dice rolling and manipulation mechanics.
 
-| Order | ID | Feature | Depends |
-|-------|-----|---------|---------|
-| 1 | F-131 | Dice Face Distribution (Data-Driven) | F-130 |
-| 2 | F-132 | Unit Dice Rolling | F-130 |
-| 3 | F-133 | Command Unit Dice Rolling | F-130, F-114 |
-| 4 | F-134 | Lock/Unlock Mechanic | F-133 |
-| 5 | F-135 | Reroll Mechanic | F-134 |
-| 6 | F-136 | Dice Effect — Damage | F-130 |
-| 7 | F-137 | Dice Effect — Shield | F-130 |
-| 8 | F-138 | Dice Effect — Heal | F-130 |
-| 9 | F-139 | Dice Activation (Click-to-Target) | F-134 |
+| Order | ID | Feature | Depends | Status |
+|-------|-----|---------|---------|--------|
+| 1 | F-131 | Dice Face Distribution (Data-Driven) | F-130 | ✓ |
+| 2 | F-132 | Unit Dice Rolling | F-130 | ✓ |
+| 3 | F-133 | Command Unit Dice Rolling | F-130, F-114 | ✓ |
+| 4 | F-134 | Lock/Unlock Mechanic | F-133 | ✓ |
+| 5 | F-135 | Reroll Mechanic | F-134 | ✓ |
+| 6 | F-136 | Dice Effect — Damage | F-130 | ✓ |
+| 7 | F-137 | Dice Effect — Shield | F-130 | ✓ |
+| 8 | F-138 | Dice Effect — Heal | F-130 | ✓ |
+| 9 | F-139 | Dice Activation (Click-to-Target) | F-134 | ✓ |
 
 **Deliverable:** Player can roll dice, lock/reroll command dice, and activate dice for effects.
 
-**Estimated scope:** Medium — new dice state in Model, KDL parsing for dice blocks, UI for dice display/interaction.
+**Implementation:**
+- KDL parsing: `parseDieType`, `parseFaces`, `parseDie`, `parseDice` in `template/parse.go`
+- `RolledDie` struct with `FaceIndex` for deterministic replay
+- `DicePhase` enum: Preview → PlayerCommand → EnemyCommand → Execution → RoundEnd
+- 10 dice phase messages (RoundStarted, DieLockToggled, RerollRequested, etc.)
+- Cmd builders: `RollAllDice`, `RerollUnlockedDice`, `ApplyDiceEffect`
+- Targeting validation: damage→enemy only, shield/heal→friendly only
+- Copy functions for TEA immutability (`CopyRolledDiceMap`, `CopyActivatedMap`)
+- Command unit templates: `player_command.kdl`, `enemy_command.kdl`
+- Mech templates updated with `max_health`, `shields`, and `dice` blocks
 
 ---
 
@@ -223,16 +232,16 @@ Build toward a **playable vertical slice** first, then expand. The dice combat s
 
 ## Summary
 
-| Wave | Features | Focus |
-|------|----------|-------|
-| 1 | 2 | Unlock blockers (Command Unit, Die Entity) |
-| 2 | 9 | Dice mechanics (roll, lock, reroll, effects) |
-| — | — | *Remove legacy tick system* |
-| 3 | 8 | Combat phases (build phase-based) |
-| 4 | 8 | Targeting (positional, overflow) |
-| 5 | 9 | Death & victory (shields, permadeath, win) |
-| 6 | 25 | Polish & content (edge cases, AI, UI, templates) |
-| **Total** | **61** | |
+| Wave | Features | Focus | Status |
+|------|----------|-------|--------|
+| 1 | 2 | Unlock blockers (Command Unit, Die Entity) | ✓ |
+| 2 | 9 | Dice mechanics (roll, lock, reroll, effects) | ✓ |
+| — | — | *Remove legacy tick system* | |
+| 3 | 8 | Combat phases (build phase-based) | |
+| 4 | 8 | Targeting (positional, overflow) | |
+| 5 | 9 | Death & victory (shields, permadeath, win) | |
+| 6 | 25 | Polish & content (edge cases, AI, UI, templates) | |
+| **Total** | **61** | | **11 done** |
 
 ---
 
@@ -250,5 +259,8 @@ Some cross-wave dependencies that may require ordering adjustments:
 
 1. ~~**Plan Wave 1** — Define F-114 and F-130 implementation details~~ ✓
 2. ~~**Implement Wave 1** — Create Command Unit and Die entities~~ ✓
-3. **Plan Wave 2** — Design dice mechanics in detail
-4. **Iterate** — Complete each wave, reassess, continue
+3. ~~**Plan Wave 2** — Design dice mechanics in detail~~ ✓
+4. ~~**Implement Wave 2** — Dice rolling, lock/reroll, effects, activation~~ ✓
+5. **Remove legacy tick system** — Clean up before Wave 3
+6. **Plan Wave 3** — Design combat phase transitions
+7. **Iterate** — Complete each wave, reassess, continue
