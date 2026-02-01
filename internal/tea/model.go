@@ -74,8 +74,7 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 
 	case CombatEnded:
 		if msg.Victor == VictorPlayer {
-			// F-155: Persist surviving units with current HP back to roster
-			// F-156: Dead units (removed by handleRoundEnded) won't be in combat slice
+			// F-155/F-156: Persist surviving units (syncRosterFromCombat filters dead)
 			m.PlayerRoster = syncRosterFromCombat(m.Combat.PlayerUnits)
 
 			m.Phase = PhaseChoice
@@ -491,10 +490,11 @@ func removeDeadUnits(units []entity.Unit) []entity.Unit {
 	return alive
 }
 
-// syncRosterFromCombat returns deep copies of combat units as new roster.
-// Only living units remain in combat slice (dead removed by handleRoundEnded).
+// syncRosterFromCombat returns deep copies of surviving combat units as new roster.
+// Filters dead units here (combat may end mid-execution before handleRoundEnded).
 func syncRosterFromCombat(combatUnits []entity.Unit) []entity.Unit {
-	return DeepCopyUnits(combatUnits)
+	alive := removeDeadUnits(combatUnits)
+	return DeepCopyUnits(alive)
 }
 
 // applyModifications applies serialized modifications to a unit
