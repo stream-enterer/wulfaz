@@ -842,6 +842,31 @@ COMMAND SHIP
 
 **Negative faces (future):** Full design space includes self-damage, buff enemy, resource drain. MVP only has blanks.
 
+### Dice UI Interaction
+
+**Two distinct phases:**
+
+**1. Lock Phase:**
+- All dice start in "rolling area"
+- Click die in rolling area → moves to "fixed area" (locked)
+- Click die in fixed area → moves back to rolling area (unlocked)
+- "Reroll" button rerolls all dice in rolling area
+- Phase ends when: all dice manually locked OR out of rerolls (remaining auto-lock)
+
+**2. Activate Phase:**
+- All dice now in fixed area
+- Click die → pick target (if needed) → effect fires immediately
+- Blanks (0) are auto-skipped
+- Player can skip non-blank dice by not activating them
+- "End Turn" button available at any time:
+  - If unactivated non-blanks remain: first click shows "Are you sure?", second click confirms
+  - If all dice handled: single click ends turn
+- Sequential activation: one die at a time, resolve before next
+
+**Room display:** Rooms shown in visual order (left/middle/right) but no mechanical difference in MVP.
+
+**Future:** Certain tags will force activation or auto-skip specific dice.
+
 ### Dice Effects
 
 **Damage:**
@@ -883,9 +908,13 @@ COMMAND SHIP
 
 ### Enemy AI
 
-**MVP:** Simple heuristics. Lock good faces, reroll bad faces, activate beneficial dice.
+**MVP:** Simple heuristics. Lock good faces, reroll bad faces. Random targeting for both damage and heal/shield dice.
 
-**Later:** Per-commander personalities (aggressive, defensive, greedy).
+**Display:** Player sees enemy's final locked faces and planned targets only (not the rolling/locking process). Lines/arrows drawn from each enemy die to its planned target.
+
+**Targeting scope:** Enemy can target both player units and player rooms.
+
+**Later:** Per-commander personalities (aggressive, defensive, greedy). Smarter targeting priorities.
 
 ### Combat Start
 
@@ -911,6 +940,18 @@ Two parallel battles:
 - **Ship war:** Ships trade dice fire every round (always active)
 - **Ground war:** Units fight units; winner's units can also attack enemy ship
 
+### Run Structure (MVP)
+
+**Loop:** Fight 1 → 2 events → Fight 2 → 2 events → Fight 1 → 2 events → ... (repeats indefinitely)
+
+**Starting loadout:** Placeholder for MVP (define later).
+
+**Loss condition:** Ship destroyed (all rooms gone) = game over.
+
+**No win condition:** Run loops until player loses or manually quits.
+
+**Loss screen:** Simple "You lost" text, click to restart. Placeholder for MVP.
+
 ### Two Build Layers
 
 Players construct two separate builds:
@@ -932,9 +973,15 @@ Players construct two separate builds:
 
 **Destroyed rooms:** Gone forever for MVP. High stakes—protect your ship. Repair option in future.
 
-**Destroyed units:** Gone forever for MVP.
+**Destroyed units:** Gone forever for MVP. Permadeath.
+
+**Repositioning:** Free repositioning of units between fights. Change unit positions in combat width at will.
+
+**Dice types:** Fixed for MVP (Damage, Shield, Heal). Future: acquire/swap dice types.
 
 **Rewards:** Immediate rewards screen after combat, then back to run map/shop.
+
+**Events:** Current placeholder event phases between fights.
 
 **Future:** Repair phase between fights (costs resources).
 
@@ -958,7 +1005,8 @@ Players construct two separate builds:
 | Command ship types | 1 |
 | Rooms per ship | 3 |
 | Room HP | 50 each |
-| Dice types | 3 (Damage, Shield, Heal) |
+| Room order | Visual only, no mechanical difference |
+| Dice types | 3 (Damage, Shield, Heal), fixed |
 | Faces per die | 6 |
 | Face distribution | `[5, 5, 8, 12, 0, 0]` (all dice) |
 | Crew | None |
@@ -971,9 +1019,18 @@ Players construct two separate builds:
 | Ticks per slot | 8 (placeholder) |
 | Cooldown behavior | Reset each round, countdown before first fire |
 | Damage persistence | Carries forward between fights |
-| Destroyed rooms/units | Gone forever |
+| Destroyed rooms/units | Gone forever (permadeath) |
+| Unit repositioning | Free between fights |
 | Overkill damage | Wasted |
 | Tie-breaker | Player wins, ship survives at 1 HP |
+| Enemy AI targeting | Random (both damage and heal/shield) |
+| Enemy display | Final results only, lines to targets |
+| Dice activation | Sequential, one at a time |
+| Skip mechanic | "End Turn" button with confirmation |
+| Run structure | Fight 1 → 2 events → Fight 2 → 2 events → loop |
+| Starting loadout | Placeholder |
+| Win condition | None (loop until loss or quit) |
+| Loss screen | "You lost" placeholder |
 
 ### Key Properties
 
