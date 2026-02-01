@@ -270,140 +270,6 @@ This enables: full replay, turn-level undo, time-travel debugging, deterministic
 
 ---
 
-## Implemented: Code Scaffold
-
-### Package Structure
-
-```
-wulfaz/
-├── cmd/wulfaz/main.go           # Entry point (Ebitengine bootstrap)
-├── internal/
-│   ├── app/app.go               # Ebitengine Game implementation
-│   ├── core/                    # Foundation types
-│   │   ├── tag.go               # Tag string type
-│   │   ├── valueref.go          # Static int (MVP), expandable
-│   │   ├── attribute.go         # Name, Base, Min, Max
-│   │   ├── condition.go         # ConditionType + Params
-│   │   ├── modifier.go          # ModifierOp, Scope, Modifier, ProvidedModifier
-│   │   ├── trigger.go           # EventType + Trigger
-│   │   ├── requirement.go       # OnUnmet + Requirement
-│   │   ├── ability.go           # TargetType, Targeting, Cost, EffectRef, Ability
-│   │   └── limits.go            # Hard caps (cascade depth, etc.)
-│   ├── entity/                  # Game entities (value types, no pointers)
-│   │   ├── pilot.go             # ID, Name (stub)
-│   │   ├── item.go              # Full item with triggers, abilities, modifiers
-│   │   ├── mount.go             # MountCriteria + Mount with Contents
-│   │   ├── part.go              # Part with Mounts, Connections
-│   │   └── unit.go              # Unit with Parts, Pilot (HasPilot flag)
-│   ├── model/combat.go          # CombatPhase, CombatModel
-│   ├── tea/                     # TEA types and Update logic
-│   │   ├── msg.go               # Msg interface + concrete messages
-│   │   ├── cmd.go               # Cmd type + None, Batch
-│   │   ├── model.go             # GamePhase, Model, Update
-│   │   ├── model_test.go        # TEA integration tests
-│   │   └── runtime.go           # Runtime with Dispatch loop (test helper)
-│   ├── event/                   # Event dispatch
-│   │   ├── context.go           # TriggerContext, TriggerOwner, CollectedTrigger
-│   │   ├── dispatch.go          # Entity traversal, condition evaluation
-│   │   └── dispatch_test.go     # 11 dispatch tests
-│   ├── effect/                  # Effect handling
-│   │   ├── result.go            # EffectResult, FollowUpEvent
-│   │   ├── handler.go           # EffectContext, 3 effect handlers
-│   │   └── handler_test.go      # 13 effect tests
-│   └── template/                # Template loading
-│       ├── registry.go          # Registry for units/items
-│       ├── loader.go            # LoadUnitsFromDir, LoadItemsFromDir
-│       ├── parse.go             # KDL parsing helpers, entity parsers
-│       └── loader_test.go       # 24 tests covering all parsers
-├── ui/renderer/
-│   ├── stub.go                  # Text-based rendering (testing)
-│   └── ebiten.go                # Ebitengine rendering
-├── data/templates/
-│   ├── units/
-│   │   ├── small_mech.kdl       # Light chassis (combat_width=1)
-│   │   ├── medium_mech.kdl      # Medium chassis (combat_width=2)
-│   │   └── large_mech.kdl       # Heavy chassis (combat_width=3)
-│   └── items/
-│       ├── medium_laser.kdl     # Energy weapon
-│       ├── autocannon.kdl       # Ballistic weapon with ammo
-│       └── lrm_rack.kdl         # Missile weapon with splash
-├── go.mod
-├── go.sum
-├── CLAUDE.md                    # TEA principles and coding rules
-└── DESIGN.md
-```
-
-### Key Type Names (as implemented)
-
-| Type | Location | Purpose |
-|------|----------|---------|
-| `Tag` | core/tag.go | String label for categorization |
-| `ValueRef` | core/valueref.go | Static int (MVP), will support refs/exprs |
-| `Attribute` | core/attribute.go | Name + Base + Min/Max |
-| `ConditionType` | core/condition.go | Typed constants for condition types |
-| `Condition` | core/condition.go | Type + Params |
-| `ModifierOp` | core/modifier.go | Add/Mult/Set/Min/Max operations |
-| `Scope` | core/modifier.go | Self/Unit/Part/Adjacent/Mount |
-| `Modifier` | core/modifier.go | Applied modifier with source |
-| `ProvidedModifier` | core/modifier.go | Modifier template from items |
-| `EventType` | core/trigger.go | Typed constants for events |
-| `Trigger` | core/trigger.go | Event + Conditions + EffectName |
-| `OnUnmet` | core/requirement.go | Disabled/CannotMount/Warning |
-| `Requirement` | core/requirement.go | Scope + Condition + OnUnmet |
-| `TargetType` | core/ability.go | None/Self/Ally/Enemy/etc. |
-| `Targeting` | core/ability.go | Type + Range + Count + Filter |
-| `Cost` | core/ability.go | Attribute + Scope + Amount |
-| `EffectRef` | core/ability.go | EffectName + Params + Delay + Conditions |
-| `Ability` | core/ability.go | Full ability definition |
-| `Pilot` | entity/pilot.go | ID + Name (stub) |
-| `Item` | entity/item.go | Full item with ProvidedModifiers, Requirements |
-| `MountCriteria` | entity/mount.go | RequiresAll/Any, Forbids |
-| `Mount` | entity/mount.go | Accepts + Capacity + Contents |
-| `Part` | entity/part.go | Mounts + Connections |
-| `Unit` | entity/unit.go | Parts + Pilot + HasPilot flag |
-| `TriggerOwner` | event/context.go | UnitID/PartID/MountID/ItemID path |
-| `TriggerContext` | event/context.go | Event + SourceUnit + AllUnits + Tick |
-| `CollectedTrigger` | event/context.go | Trigger + Owner pair |
-| `EffectContext` | effect/handler.go | Owner + SourceUnit + AllUnits + Rolls |
-| `EffectResult` | effect/result.go | ModifiedUnits + FollowUpEvents + LogEntries |
-| `FollowUpEvent` | effect/result.go | Cascading event (Event + SourceID + TargetID) |
-| `TriggersCollected` | tea/msg.go | Msg after dispatch (triggers + depth) |
-| `EffectsResolved` | tea/msg.go | Msg after effects (modifications + follow-ups) |
-
-### TEA Compliance
-
-- [x] Model is struct with no functions/channels/mutexes
-- [x] All Model methods use value receivers
-- [x] Msg types named as past-tense events
-- [x] No pointers in Model or entity types
-- [x] Value slices/maps throughout
-- [x] Cmd executed only by runtime
-- [x] Seeded RNG via Msg payloads
-- [x] Templates immutable, instances mutable
-- [x] Task Pattern for sequential effects (TriggersCollected → EffectsResolved)
-- [x] Immutable slice copies before modification
-
-### Implemented Conditions
-
-| Type | Params | Behavior |
-|------|--------|----------|
-| `has_tag` | `tag: string` | Unit has tag |
-| `attr_gte` | `attr: string, value: int` | Attribute >= value |
-| `attr_lte` | `attr: string, value: int` | Attribute <= value |
-| `attr_eq` | `attr: string, value: int` | Attribute == value |
-
-### Implemented Effects
-
-| Effect | Params | Behavior |
-|--------|--------|----------|
-| `deal_damage` | `damage: int, target: string` | Reduce health, emit on_damaged/on_destroyed |
-| `consume_ammo` | `amount: int` | Reduce owning item's ammo attribute |
-| `deal_splash_damage` | `damage: int, target: string` | MVP: same as deal_damage |
-
-**Target resolution:** `"self"` → source, `"enemy"` → first enemy (alphabetical), `"ally"` → self (MVP), or unit ID
-
----
-
 ## Universal Composition System
 
 **Everything is Tags, Attributes, and Triggers. No special types. No hardcoding.**
@@ -519,7 +385,6 @@ Full details in previous version. Key policies:
 | Target resolution | First enemy (alphabetical) | AI/priority-based selection |
 | Damage model | Unit-level health | Per-part armor/structure (BTA) |
 | Attribute merging | Last write wins | Delta accumulation |
-| Destroyed units | **DONE**: Source/target conditions filter dead units | Full implementation complete |
 | Ally targeting | Self | Proper ally selection |
 | No-target feedback | Silent no-op (correct for error handling) | Player-facing log: "laser fired but target destroyed" |
 | Model layers | Combat only | Meta/Run/Combat split |
@@ -649,27 +514,7 @@ item id="double_heatsink" {
 
 ---
 
-## Next Steps
-
-1. ~~Implement KDL loader (`template/loader.go`)~~ **DONE**
-2. ~~Add 3 chassis templates (small/medium/large)~~ **DONE**
-3. ~~Add weapon templates (laser, AC, LRM)~~ **DONE**
-4. ~~Implement event dispatch (`event/dispatch.go`)~~ **DONE**
-5. ~~Implement basic effects (`effect/handler.go`)~~ **DONE**
-6. ~~Wire up combat tick loop~~ **DONE**
-7. ~~Minimal UI rendering (Ebitengine)~~ **DONE**
-8. ~~Runtime integration (tick generation, Cmd execution)~~ **DONE**
-
-### MVP Complete — Next Phase
-
-9. ~~Load units from templates instead of hardcoded test data~~ **DONE**
-10. ~~Implement shop/event phase between fights~~ **DONE** (PhaseChoice with reward/fight selection)
-11. ~~Add win/lose conditions (health reaches 0)~~ **DONE**
-12. ~~Second fight encounter~~ **DONE** (MVP: 2 fights then game over)
-
----
-
-## Hybrid Combat System (Next Phase)
+## Hybrid Combat System
 
 Combines cooldown-based autobattler execution with Slice & Dice tactical dice rolling.
 
@@ -694,10 +539,10 @@ Combines cooldown-based autobattler execution with Slice & Dice tactical dice ro
 ### Battlefield Layout
 
 ```
-        |.|           ← Enemy command ship (off-field, behind line)
+     |.|           ← Enemy command ship (off-field, behind line, visually x-axis centered)
 |...........|         ← Enemy units (combat width 10)
 |...........|         ← Player units (combat width 10)
-        |.|           ← Player command ship (off-field, behind line)
+     |.|           ← Player command ship (off-field, behind line, visually x-axis centered)
 ```
 
 Command ships are visually present but not part of the combat width. They have rooms with HP but no position on the timeline.
