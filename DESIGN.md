@@ -49,14 +49,15 @@
 ### Structure
 
 - **Style:** Autobattler with simultaneous resolution (Bazaar-style)
-- **Positioning:** Single row, combat width constraint
+- **Positioning:** Single row (10 spaces per side)
 - **Control:** Hands-off during combat — units act via AI + loadout
 
 ### Player Agency During Combat
 
-- Pause / slow / speed controls
-- Active abilities (cooldown/resource gated)
-- Retreat/reserve units
+- **Dice phase:** Roll, lock, reroll, activate (primary agency)
+- **Execution phase:** Pause control (MVP); speed controls (post-MVP)
+- Active abilities (post-MVP)
+- Retreat/reserve units (post-MVP)
 - NO direct unit control
 
 ### Combat Flow
@@ -64,30 +65,32 @@
 ```
 Setup (between fights)
     ↓
-Combat begins (simultaneous resolution)
+Combat begins
     ↓
-Units act based on: Loadout + Pilot traits + AI
+Each round:
+    1. Enemy declaration (dice rolled, targets declared)
+    2. Player command (roll, lock, reroll, activate dice)
+    3. Enemy execution (declared dice fire, whiff if target dead)
+    4. Execution (timeline sweeps, units fire on cooldown)
     ↓
-Player can: Pause, use actives, retreat units
-    ↓
-Resolution until one side eliminated/retreated
+Round repeats until one ship destroyed
 ```
 
 ---
 
-## Positioning & Combat Width
+## Positioning
 
 ```
 YOUR TEAM (facing up)
 ┌─────────────────────────────────────────────┐
-│  Combat Width: [████████████████████]       │
+│  Board: [████████████████████] (10 spaces)  │
 │                                             │
 │   MECH A (Medium)    MECH B (Medium)        │
 │      ||      ||         ||      ||          │
 │    [W1][h][ ]         [ ][h][W2]            │
 │       [ ][ ]             [ ][ ]             │
 │                                             │
-│   (2 slots)            (2 slots)            │
+│   (2 spaces)           (2 spaces)           │
 └─────────────────────────────────────────────┘
 
 ENEMY TEAM (facing down)
@@ -99,16 +102,16 @@ ENEMY TEAM (facing down)
 │    ▄▄▄▄▄▄▄▄▄                                │
 │    |_s_s_s_|  (2H shield)                   │
 │                                             │
-│   (2 slots)      (1 slot)     (1 slot)      │
+│   (2 spaces)     (1 space)    (1 space)     │
 └─────────────────────────────────────────────┘
 ```
 
 ### Positioning Rules
 
-- Single row only (width is the spatial axis)
+- Single row only (10 spaces total per side)
 - Adjacency matters heavily (buffs/auras, splash damage, targeting)
 - No facing mechanic (abstracted away)
-- Position set between fights, possibly adjustable during
+- Position set between fights; free repositioning between fights
 
 ---
 
@@ -116,11 +119,13 @@ ENEMY TEAM (facing down)
 
 ### Size Categories
 
-| Size | Combat Width | Customization Depth |
-|------|--------------|---------------------|
-| Small | 1 slot | Limited slots, unique traits |
-| Medium | 2 slots | Balanced |
-| Large | 3 slots | Most customization depth |
+| Size | Spaces | Notes |
+|------|--------|-------|
+| Small | 1 | Limited customization, unique traits |
+| Medium | 2 | Balanced |
+| Large | 3 | Most customization depth |
+
+**Spaces** = board positions the unit occupies. Determines position on timeline and action time (more spaces = more ticks of activation).
 
 ### Unit Types
 
@@ -131,49 +136,26 @@ ENEMY TEAM (facing down)
 
 ---
 
-## Damage Model (BTA-style)
+## Damage Model
 
-### Damage Resolution
+### Simple HP
 
-1. Attack hits unit
-2. Roll hit location (random component)
-3. Armor absorbs damage
-4. Excess goes to structure
-5. Structure damage can crit
+Units and rooms have a single HP pool. Damage reduces HP. At 0 HP, the unit/room is destroyed and removed from play.
 
-### Critical Hits
-
-| Crit Type | Effect |
-|-----------|--------|
-| 0 Structure | Component destroyed |
-| Ammo Crit | Explosion (AOE) |
-| Engine Crit ×3 | Cored (mech destroyed + AOE) |
-| Other Crits | Debuffs (weapon jam, sensor damage, etc.) |
-
-### Death States
-
-| State | Cause | Effect |
-|-------|-------|--------|
-| Cored | 3 engine crits or massive damage | AOE explosion, wreckage |
-| Retreated | Successful withdrawal | Unit saved for later, no wreckage |
-| Legged | Mobility destroyed | Immobilized, blocks combat slot |
+No hit locations, armor/structure layers, critical hits, or complex death states. Death is immediate removal.
 
 ---
 
-## Pilots
+## Pilots / Crew [NOT IN MVP]
 
-### Core Design
+Pilots and crew are unified as items that modify units. They are out of scope for MVP.
 
-- Swappable between units (component-like)
-- Level up during run, gain traits
+### Full Vision
+
+- Assignable to units (battlefield) or rooms (command ship)
+- Provide stat modifiers, traits, abilities
 - Draftable resource (recruit at shops/events)
-- Compatibility bonuses/maluses with unit types
-- NO affinity building (pure stat matching)
-
-### Pilot Traits (POST-MVP)
-
-- Affect AI decisions during combat
-- Influence targeting, retreat behavior, aggression
+- Traits affect AI decisions, targeting, behavior
 - Chat bubbles explain reasoning when traits proc
 
 ---
@@ -185,16 +167,18 @@ ENEMY TEAM (facing down)
 ```
 Start (random loadout + fixed options)
     ↓
-Multi-choice event/shop phase
+Multi-choice event/shop phase (pick 2 of 3)
     ↓
-Multi-choice: select next battle
+Multi-choice: select next battle (pick difficulty from 3)
     ↓
-Combat (autobattler)
+Combat (dice + autobattler execution)
     ↓
 Salvage/results
     ↓
-Repeat until: cash out at objective OR death
+Repeat until: ~10 fights → final boss → win, OR death
 ```
+
+Full vision includes detours and optional cash-outs.
 
 ### Between-Fight Verbs
 
@@ -209,8 +193,10 @@ Repeat until: cash out at objective OR death
 ### MVP Flow
 
 ```
-Fight 1 → Shop/Event → Shop/Event → Fight 2 → Game Over/Reset
+Fight 1 → 2 events → Fight 2 → 2 events → Fight 1 → ... (loops indefinitely until death)
 ```
+
+Events: Pick 2 of 3 options. Then pick fight difficulty from 3 options. Shops and events are conceptually separate but share stubbed implementation for MVP.
 
 ---
 
@@ -252,11 +238,11 @@ This enables: full replay, turn-level undo, time-travel debugging, deterministic
 | Factions | 1 (tech), stub second |
 | Chassis | 3 (Small, Medium, Large mech) |
 | Weapon Types | 3 (Energy, Ballistic, Missile) |
-| Fights | 2 |
-| Shop/Event Phases | 2 (between fights) |
-| Pilots | Stubs (names only, assignable to mechs) |
+| Fights | 2 (alternating in infinite loop) |
+| Shop/Event Phases | 2 (between fights, pick 2 of 3) |
+| Pilots/Crew | Out of scope |
 | Unit Pools | Symmetric (player/enemy share same pool) |
-| Win Condition | Simple (survive or die) |
+| Win Condition | None (loop until death or quit) |
 
 ### Explicit Cuts (Not in MVP)
 
@@ -264,9 +250,12 @@ This enables: full replay, turn-level undo, time-travel debugging, deterministic
 - Meta-progression
 - Sound
 - Persistent returning enemies
-- Pilot objectives/cash-out system
+- Cash-out system
 - Complex win conditions
-- Pilot traits (beyond stubs)
+- Pilots/crew (entire system)
+- Active abilities (separate from dice)
+- Retreat mechanic
+- Speed controls (pause only)
 
 ---
 
@@ -383,7 +372,6 @@ Full details in previous version. Key policies:
 | Event cancellation | Not implemented | on_incoming_X + cancel_event |
 | Splash damage | Same as deal_damage | Radius affects adjacent units |
 | Target resolution | First enemy (alphabetical) | AI/priority-based selection |
-| Damage model | Unit-level health | Per-part armor/structure (BTA) |
 | Attribute merging | Last write wins | Delta accumulation |
 | Ally targeting | Self | Proper ally selection |
 | No-target feedback | Silent no-op (correct for error handling) | Player-facing log: "laser fired but target destroyed" |
@@ -398,12 +386,15 @@ Full details in previous version. Key policies:
 
 ### Content (Deferred to Implementation)
 
-1. Exact combat width numbers (how many total slots?)
-2. Specific chassis templates (part layouts, mount configs)
-3. Weapon/item balance numbers
-4. Faction subsystem designs (expansion)
-5. Event/encounter variety and writing
-6. Pilot trait list and effects
+1. Specific chassis templates (part layouts, mount configs)
+2. Weapon/item balance numbers
+3. Faction subsystem designs (expansion)
+4. Event/encounter variety and writing
+5. Pilot/crew trait list and effects
+
+### Design TBD
+
+- **Weapon balance on different unit sizes:** Large units get 3x the ticks of action compared to small units. How should weapon cooldowns/damage scale to balance this? Options include: proportionally slower cooldowns on large units, smaller units have higher per-tick damage, explicit balance via weapon availability, or intentionally unbalanced (large = more actions = stronger).
 
 ### UI (Post-MVP)
 
@@ -445,7 +436,7 @@ Currently acceptable for single-platform MVP; would matter if adding TUI/web bac
 unit id="medium_mech" {
     tags "mech" "medium"
     attributes {
-        attribute name="combat_width" base=2
+        attribute name="spaces" base=2
         attribute name="health" base=100 min=0
     }
     parts {
@@ -540,12 +531,12 @@ Combines cooldown-based autobattler execution with Slice & Dice tactical dice ro
 
 ```
      |.|           ← Enemy command ship (off-field, behind line, visually x-axis centered)
-|...........|         ← Enemy units (combat width 10)
-|...........|         ← Player units (combat width 10)
+|...........|         ← Enemy units (10 spaces)
+|...........|         ← Player units (10 spaces)
      |.|           ← Player command ship (off-field, behind line, visually x-axis centered)
 ```
 
-Command ships are visually present but not part of the combat width. They have rooms with HP but no position on the timeline.
+Command ships are visually present but not part of the board. They have rooms with HP but no position on the timeline.
 
 ### Round Flow
 
@@ -588,21 +579,21 @@ Command ships are visually present but not part of the combat width. They have r
 The execution phase uses the existing tick system internally.
 
 **Timeline gates activation:**
-- A vertical line sweeps left-to-right across the combat width
+- A vertical line sweeps left-to-right across the board (10 spaces)
 - Units are only active while the timeline is within their bounds
 - Unit size directly determines action time:
-  - Small (1 width): active for 1 slot's worth of ticks
-  - Medium (2 width): active for 2 slots' worth of ticks
-  - Large (3 width): active for 3 slots' worth of ticks
+  - Small (1 space): active for 1 space's worth of ticks
+  - Medium (2 spaces): active for 2 spaces' worth of ticks
+  - Large (3 spaces): active for 3 spaces' worth of ticks
 
 **One shared timeline:** Both sides use the same timeline. Position determines when units activate—position 0 acts first, position 9 acts last.
 
 **Dead units leave gaps:** If a unit dies mid-round, it leaves empty space. Timeline keeps sweeping. No repositioning mid-round.
 
-**Ticks per slot:** 8 ticks per slot (placeholder, tune later). Combat width 10 = 80 ticks per full sweep.
-- Small unit (1 width): 8 ticks of action
-- Medium unit (2 width): 16 ticks of action
-- Large unit (3 width): 24 ticks of action
+**Ticks per space:** 8 ticks per space (placeholder, tune later). 10 spaces = 80 ticks per full sweep.
+- Small unit (1 space): 8 ticks of action
+- Medium unit (2 spaces): 16 ticks of action
+- Large unit (3 spaces): 24 ticks of action
 
 **Cooldown behavior:**
 - Cooldowns don't tick until timeline reaches the unit
@@ -804,7 +795,7 @@ Players construct two separate builds:
 **1. Squad Loadout (Units)**
 - Which units to field
 - What gear/weapons each unit carries
-- Positioning in combat width (affects timing via timeline)
+- Positioning on board (affects timing via timeline)
 - Determines automatic combat behavior
 
 **2. Command Ship**
@@ -820,7 +811,7 @@ Players construct two separate builds:
 
 **Destroyed units:** Gone forever for MVP. Permadeath.
 
-**Repositioning:** Free repositioning of units between fights. Change unit positions in combat width at will.
+**Repositioning:** Free repositioning of units between fights. Change unit positions on board at will.
 
 **Dice types:** Fixed for MVP (Damage, Shield, Heal). Future: acquire/swap dice types.
 
@@ -861,7 +852,7 @@ Players construct two separate builds:
 | Rerolls per round | 2 |
 | Unit targeting | Nearest enemy (all weapons same target) |
 | Unit-to-ship damage | Random room |
-| Ticks per slot | 8 (placeholder) |
+| Ticks per space | 8 (placeholder) |
 | Cooldown behavior | Reset each round, countdown before first fire |
 | Damage persistence | Carries forward between fights |
 | Destroyed rooms/units | Gone forever (permadeath) |
