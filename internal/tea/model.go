@@ -875,9 +875,7 @@ func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
 	dice := combat.RolledDice[msg.UnitID]
 	for i := range dice {
 		if !dice[i].Locked && i < len(msg.Results) {
-			faceIdx := msg.Results[i]
-			dice[i].FaceIndex = faceIdx
-			// Result is now computed dynamically via Value() method
+			dice[i].FaceIndex = msg.Results[i]
 		}
 	}
 

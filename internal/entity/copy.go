@@ -136,16 +136,6 @@ func CopyDice(dice []Die) []Die {
 	return result
 }
 
-// CopyIntSlice copies a slice of ints (helper).
-func CopyIntSlice(s []int) []int {
-	if s == nil {
-		return nil
-	}
-	result := make([]int, len(s))
-	copy(result, s)
-	return result
-}
-
 // CopyRolledDie creates a deep copy of a RolledDie.
 func CopyRolledDie(rd RolledDie) RolledDie {
 	var faces []DieFace
