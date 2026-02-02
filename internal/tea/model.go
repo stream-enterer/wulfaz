@@ -827,6 +827,9 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 	combat.SelectedDieIndex = -1
 	combat.FloatingTexts = nil
 
+	// Announce new round in combat log
+	combat.Log = appendLogEntry(combat.Log, fmt.Sprintf("--- Round %d ---", msg.Round))
+
 	// Convert roll indices to RolledDie for all units
 	allUnits := getAllUnits(combat)
 	for _, unit := range allUnits {
@@ -1368,12 +1371,11 @@ func (m Model) handleTimerFired(msg TimerFired) (Model, Cmd) {
 		if victor := m.checkCombatEnd(); victor != VictorNone {
 			return m.applyCombatEnd()
 		}
-		// Start next round
+		// Trigger round end flow (clears shields, removes dead, starts next round)
 		combat := m.Combat
 		combat.FloatingTexts = nil // Clear texts for new round
 		m.Combat = combat
-		allUnits := append(combat.PlayerUnits, combat.EnemyUnits...)
-		return m, StartNextRound(m.Seed, combat.Round+1, allUnits)
+		return m, func() Msg { return ExecutionComplete{} }
 	}
 
 	return m, nil
