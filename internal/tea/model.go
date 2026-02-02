@@ -1254,8 +1254,7 @@ func (m Model) handleExecutionStarted(msg ExecutionStarted) (Model, Cmd) {
 	combat.FiringOrder = msg.FiringOrder
 	combat.CurrentFiringIndex = 0
 	combat.DicePhase = model.DicePhaseExecution
-	combat.ActiveArrows = nil  // No arrows during execution
-	combat.FloatingTexts = nil // Clear any stale texts
+	combat.ActiveArrows = nil // No arrows during execution
 	m.Combat = combat
 
 	if len(msg.FiringOrder) == 0 {
