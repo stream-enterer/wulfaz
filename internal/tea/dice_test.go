@@ -214,7 +214,9 @@ func TestHandleDieSelected_BoundsCheck(t *testing.T) {
 func TestHandlePreviewDone(t *testing.T) {
 	m := Model{
 		Version: 1,
+		Phase:   PhaseCombat,
 		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
 			DicePhase: model.DicePhasePreview,
 		},
 	}
@@ -288,5 +290,100 @@ func TestDieLockToggled_RequiresPhaseCombat(t *testing.T) {
 	// Should be no-op - not in combat phase
 	if newM.Combat.RolledDice != nil {
 		t.Error("should not modify dice when not in PhaseCombat")
+	}
+}
+
+func TestDieDeselected_RequiresPhaseCombat(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseChoice, // Wrong phase
+		Combat: model.CombatModel{
+			Phase:            model.CombatActive,
+			DicePhase:        model.DicePhasePlayerCommand,
+			SelectedUnitID:   "player_cmd",
+			SelectedDieIndex: 1,
+		},
+	}
+
+	newM, _ := m.Update(DieDeselected{})
+
+	// Should be no-op - not in combat phase
+	if newM.Combat.SelectedDieIndex != 1 {
+		t.Error("should not deselect when not in PhaseCombat")
+	}
+}
+
+func TestDieDeselected_RequiresCombatActive(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:            model.CombatPaused, // Paused
+			DicePhase:        model.DicePhasePlayerCommand,
+			SelectedUnitID:   "player_cmd",
+			SelectedDieIndex: 1,
+		},
+	}
+
+	newM, _ := m.Update(DieDeselected{})
+
+	// Should be no-op - combat is paused
+	if newM.Combat.SelectedDieIndex != 1 {
+		t.Error("should not deselect when combat is paused")
+	}
+}
+
+func TestPreviewDone_RequiresPhaseCombat(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseChoice, // Wrong phase
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhasePreview,
+		},
+	}
+
+	newM, _ := m.Update(PreviewDone{})
+
+	// Should be no-op - not in combat phase
+	if newM.Combat.DicePhase != model.DicePhasePreview {
+		t.Error("should not advance from preview when not in PhaseCombat")
+	}
+}
+
+func TestPreviewDone_RequiresCombatActive(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:     model.CombatPaused, // Paused
+			DicePhase: model.DicePhasePreview,
+		},
+	}
+
+	newM, _ := m.Update(PreviewDone{})
+
+	// Should be no-op - combat is paused
+	if newM.Combat.DicePhase != model.DicePhasePreview {
+		t.Error("should not advance from preview when combat is paused")
+	}
+}
+
+func TestUnlockAllDice_RequiresPhaseCombat(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseChoice, // Wrong phase
+		Combat: model.CombatModel{
+			Phase:            model.CombatActive,
+			DicePhase:        model.DicePhasePlayerCommand,
+			RerollsRemaining: 1,
+		},
+	}
+
+	newM, _ := m.Update(UnlockAllDice{})
+
+	// Should be no-op - not in combat phase
+	if newM.Combat.RerollsRemaining != 1 {
+		t.Error("should not process unlock when not in PhaseCombat")
 	}
 }

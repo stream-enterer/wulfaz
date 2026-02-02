@@ -66,7 +66,7 @@ const (
 	unitIDTruncateWidth = 80
 	unitIDTruncateLen   = 6
 	unitStatTextYOffset = 16
-	textPaddingX        = 4 // Common X padding for text in cards
+	textPadding         = 4 // Common padding for text in cards
 
 	// Overlay
 	pausedOverlayAlpha = 128
@@ -322,7 +322,7 @@ func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y 
 	vector.StrokeRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, FrameStroke, color.White, false)
 
 	// Unit ID at top
-	ebitenutil.DebugPrintAt(screen, unit.ID, int(x)+textPaddingX, int(y)+textPaddingX)
+	ebitenutil.DebugPrintAt(screen, unit.ID, int(x)+textPadding, int(y)+textPadding)
 
 	// HP + Shields at bottom
 	hp := getAttr(unit, "health")
@@ -331,7 +331,7 @@ func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y 
 	if shields > 0 {
 		statText += fmt.Sprintf(" SH:%d", shields)
 	}
-	ebitenutil.DebugPrintAt(screen, statText, int(x)+textPaddingX, int(y)+CommandUnitHeight-unitStatTextYOffset)
+	ebitenutil.DebugPrintAt(screen, statText, int(x)+textPadding, int(y)+CommandUnitHeight-unitStatTextYOffset)
 
 	return image.Rect(int(x), int(y), int(x)+CommandUnitWidth, int(y)+CommandUnitHeight)
 }
@@ -488,7 +488,7 @@ func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width 
 	if width < unitIDTruncateWidth && len(unit.ID) > unitIDTruncateLen {
 		displayID = unit.ID[:unitIDTruncateLen]
 	}
-	ebitenutil.DebugPrintAt(screen, displayID, int(x)+textPaddingX, int(y)+textPaddingX)
+	ebitenutil.DebugPrintAt(screen, displayID, int(x)+textPadding, int(y)+textPadding)
 
 	// HP + Shields at bottom (F-223)
 	hp := getAttr(unit, "health")
@@ -497,7 +497,7 @@ func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width 
 	if shields > 0 {
 		statText += fmt.Sprintf(" SH:%d", shields)
 	}
-	ebitenutil.DebugPrintAt(screen, statText, int(x)+textPaddingX, int(y)+SlotHeight-unitStatTextYOffset)
+	ebitenutil.DebugPrintAt(screen, statText, int(x)+textPadding, int(y)+SlotHeight-unitStatTextYOffset)
 }
 
 func renderLog(screen *ebiten.Image, log []string) {

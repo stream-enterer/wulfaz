@@ -830,6 +830,13 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 }
 
 func (m Model) handlePreviewDone(_ PreviewDone) (Model, Cmd) {
+	// Validate game and combat state
+	if m.Phase != PhaseCombat {
+		return m, nil
+	}
+	if m.Combat.Phase != model.CombatActive {
+		return m, nil
+	}
 	if m.Combat.DicePhase != model.DicePhasePreview {
 		return m, nil
 	}
@@ -909,6 +916,14 @@ func (m Model) handleDieSelected(msg DieSelected) (Model, Cmd) {
 }
 
 func (m Model) handleDieDeselected(_ DieDeselected) (Model, Cmd) {
+	// Validate game and combat state
+	if m.Phase != PhaseCombat {
+		return m, nil
+	}
+	if m.Combat.Phase != model.CombatActive {
+		return m, nil
+	}
+
 	combat := m.Combat
 	combat.SelectedUnitID = ""
 	combat.SelectedDieIndex = -1
@@ -1173,6 +1188,10 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 }
 
 func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
+	// Check game-level phase
+	if m.Phase != PhaseCombat {
+		return m, nil
+	}
 	// Only valid during PlayerCommand phase
 	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
 		return m, nil
