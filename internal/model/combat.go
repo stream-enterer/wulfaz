@@ -53,3 +53,23 @@ type FiringPosition struct {
 	PlayerUnits []string // Unit IDs of player units at this position
 	EnemyUnits  []string // Unit IDs of enemy units at this position
 }
+
+// IsPlayerUnit returns true if unitID belongs to player side.
+func (c CombatModel) IsPlayerUnit(unitID string) bool {
+	for _, u := range c.PlayerUnits {
+		if u.ID == unitID {
+			return true
+		}
+	}
+	return false
+}
+
+// IsEnemyUnit returns true if unitID belongs to enemy side.
+func (c CombatModel) IsEnemyUnit(unitID string) bool {
+	for _, u := range c.EnemyUnits {
+		if u.ID == unitID {
+			return true
+		}
+	}
+	return false
+}

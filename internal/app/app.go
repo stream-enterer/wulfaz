@@ -229,6 +229,17 @@ func (a *App) handleLeftClick(mx, my int) {
 			rolled := combat.RolledDice[combat.SelectedUnitID]
 			if combat.SelectedDieIndex < len(rolled) {
 				die := rolled[combat.SelectedDieIndex]
+				// Validate target based on die type
+				switch die.Type() {
+				case entity.DieDamage:
+					if !combat.IsEnemyUnit(region.UnitID) {
+						continue // Damage must target enemy
+					}
+				case entity.DieShield, entity.DieHeal:
+					if !combat.IsPlayerUnit(region.UnitID) {
+						continue // Shield/Heal must target friendly
+					}
+				}
 				a.dispatch(tea.DiceActivated{
 					SourceUnitID: combat.SelectedUnitID,
 					DieIndex:     combat.SelectedDieIndex,

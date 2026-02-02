@@ -532,26 +532,6 @@ func applyModifications(unit entity.Unit, mods ModifiedUnit) entity.Unit {
 
 // ===== Dice Phase Helpers (Wave 2) =====
 
-// isPlayerUnit checks if unit ID belongs to player side.
-func isPlayerUnit(combat model.CombatModel, unitID string) bool {
-	for _, u := range combat.PlayerUnits {
-		if u.ID == unitID {
-			return true
-		}
-	}
-	return false
-}
-
-// isEnemyUnit checks if unit ID belongs to enemy side.
-func isEnemyUnit(combat model.CombatModel, unitID string) bool {
-	for _, u := range combat.EnemyUnits {
-		if u.ID == unitID {
-			return true
-		}
-	}
-	return false
-}
-
 // findPlayerCommandUnit returns the player's command unit (or nil).
 func findPlayerCommandUnit(combat model.CombatModel) *entity.Unit {
 	for i := range combat.PlayerUnits {
@@ -946,8 +926,8 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 	// Targeting validation per DESIGN.md:
 	// - damage: enemy only
 	// - shield/heal: friendly only
-	targetIsEnemy := isEnemyUnit(m.Combat, msg.TargetUnitID)
-	targetIsPlayer := isPlayerUnit(m.Combat, msg.TargetUnitID)
+	targetIsEnemy := m.Combat.IsEnemyUnit(msg.TargetUnitID)
+	targetIsPlayer := m.Combat.IsPlayerUnit(msg.TargetUnitID)
 
 	if die.Type() == entity.DieDamage && !targetIsEnemy {
 		return m, nil // Invalid: damage must target enemy
