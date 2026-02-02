@@ -815,21 +815,6 @@ func renderInterCombat(screen *ebiten.Image, m tea.Model) []HitRegion {
 			SlotHeight+10, colorInsertionIndicator, false)
 	}
 
-	// Draw dragged unit at cursor
-	if m.DragState.IsDragging {
-		for _, unit := range boardUnits {
-			if unit.ID == m.DragState.DraggedUnitID {
-				cw := GetCombatWidth(unit)
-				unitW := CalcUnitWidth(cw)
-				dragX := float32(m.DragState.CurrentX) - unitW/2
-				dragY := float32(m.DragState.CurrentY) - SlotHeight/2
-				drawUnit(screen, unit, colorPlayer, dragX, dragY, unitW)
-				vector.StrokeRect(screen, dragX, dragY, unitW, SlotHeight, 3, colorDragHighlight, false)
-				break
-			}
-		}
-	}
-
 	// Draw player command unit below board (not draggable)
 	if playerCmd != nil {
 		cmdX := boardX + (BoardWidth+2*BoardMargin-CommandUnitWidth)/2
@@ -848,6 +833,21 @@ func renderInterCombat(screen *ebiten.Image, m tea.Model) []HitRegion {
 			uiLeftMargin, overlayTextY1)
 	}
 	DrawText(screen, "Drag units to reposition", uiLeftMargin, overlayTextY3)
+
+	// Draw dragged unit at cursor (topmost layer)
+	if m.DragState.IsDragging {
+		for _, unit := range boardUnits {
+			if unit.ID == m.DragState.DraggedUnitID {
+				cw := GetCombatWidth(unit)
+				unitW := CalcUnitWidth(cw)
+				dragX := float32(m.DragState.CurrentX) - unitW/2
+				dragY := float32(m.DragState.CurrentY) - SlotHeight/2
+				drawUnit(screen, unit, colorPlayer, dragX, dragY, unitW)
+				vector.StrokeRect(screen, dragX, dragY, unitW, SlotHeight, 3, colorDragHighlight, false)
+				break
+			}
+		}
+	}
 
 	return regions
 }
