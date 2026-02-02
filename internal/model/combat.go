@@ -25,6 +25,9 @@ const (
 // DefaultRerollsPerRound is the number of rerolls the player gets per round.
 const DefaultRerollsPerRound = 2
 
+// MaxLogEntries bounds combat log size. Display shows last 20 lines.
+const MaxLogEntries = 500
+
 type CombatModel struct {
 	// Existing fields
 	PlayerUnits []entity.Unit

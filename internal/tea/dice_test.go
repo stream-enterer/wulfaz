@@ -138,8 +138,10 @@ func TestHandleDieLockToggled(t *testing.T) {
 
 	m := Model{
 		Version: 1,
+		Phase:   PhaseCombat,
 		Combat: model.CombatModel{
 			PlayerUnits: []entity.Unit{playerCmd},
+			Phase:       model.CombatActive,
 			DicePhase:   model.DicePhasePlayerCommand,
 			RolledDice: map[string][]entity.RolledDie{
 				"player_cmd": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0, Locked: false}},
@@ -170,8 +172,10 @@ func TestHandleDieSelected_BoundsCheck(t *testing.T) {
 
 	m := Model{
 		Version: 1,
+		Phase:   PhaseCombat,
 		Combat: model.CombatModel{
 			PlayerUnits:      []entity.Unit{playerCmd},
+			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
 			SelectedUnitID:   "",
 			SelectedDieIndex: -1,
@@ -237,5 +241,52 @@ func TestHandlePlayerCommandDone(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("expected cmd to advance phase")
+	}
+}
+
+func TestDieLockToggled_RequiresCombatActive(t *testing.T) {
+	playerCmd := entity.Unit{
+		ID:   "player_cmd",
+		Tags: []core.Tag{"command"},
+		Dice: []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
+	}
+
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			PlayerUnits: []entity.Unit{playerCmd},
+			Phase:       model.CombatPaused, // PAUSED
+			DicePhase:   model.DicePhasePlayerCommand,
+			RolledDice: map[string][]entity.RolledDie{
+				"player_cmd": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0, Locked: false}},
+			},
+		},
+	}
+
+	msg := DieLockToggled{UnitID: "player_cmd", DieIndex: 0}
+	newM, _ := m.Update(msg)
+
+	// Should NOT toggle - combat is paused
+	if newM.Combat.RolledDice["player_cmd"][0].Locked {
+		t.Error("die should NOT be locked when combat is paused")
+	}
+}
+
+func TestDieLockToggled_RequiresPhaseCombat(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseChoice, // Wrong phase
+		Combat: model.CombatModel{
+			DicePhase: model.DicePhasePlayerCommand,
+		},
+	}
+
+	msg := DieLockToggled{UnitID: "player_cmd", DieIndex: 0}
+	newM, _ := m.Update(msg)
+
+	// Should be no-op - not in combat phase
+	if newM.Combat.RolledDice != nil {
+		t.Error("should not modify dice when not in PhaseCombat")
 	}
 }

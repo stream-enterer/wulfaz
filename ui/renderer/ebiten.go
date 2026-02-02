@@ -43,17 +43,45 @@ const (
 	logMaxLines = 20
 	charWidth   = 7  // approx width of debug font char
 	lineHeight  = 15
+
+	// Die detail rendering
+	dieContentPadding         = 4  // Used in drawRedX for X positioning
+	commandDiceAreaYOffset    = 16
+	commandDiceTopYOffset     = 14
+	diagonalDiceMargin        = 15
+	diagonalDiceTopYOffset    = 20
+	diagonalDiceBottomYOffset = 20
+
+	// UI layout
+	unlockButtonWidth   = 80
+	unlockButtonHeight  = 20
+	unlockButtonTextX   = 8
+	unlockButtonTextY   = 2
+	uiLeftMargin        = 10
+	uiHintY1            = 50
+	uiHintY2            = 70
+	uiUnlockButtonY     = 90
+
+	// Text rendering
+	unitIDTruncateWidth = 80
+	unitIDTruncateLen   = 6
+	unitStatTextYOffset = 16
+	textPaddingX        = 4 // Common X padding for text in cards
+
+	// Overlay
+	pausedOverlayAlpha = 128
 )
 
 var (
-	colorBackground  = color.RGBA{30, 30, 50, 255}
-	colorPlayer      = color.RGBA{60, 100, 200, 255}
-	colorEnemy       = color.RGBA{200, 60, 60, 255}
-	colorOrangeLock  = color.RGBA{255, 165, 0, 255}  // Locked die
-	colorGreenSelect = color.RGBA{0, 255, 0, 255}    // Selected die
-	colorRedUsed     = color.RGBA{255, 0, 0, 255}    // Activated/used die
-	colorDieBox      = color.RGBA{40, 40, 40, 255}   // Die background
-	colorGrayBlank   = color.RGBA{80, 80, 80, 255}   // Blank die (grayed out)
+	colorBackground   = color.RGBA{30, 30, 50, 255}
+	colorPlayer       = color.RGBA{60, 100, 200, 255}
+	colorEnemy        = color.RGBA{200, 60, 60, 255}
+	colorOrangeLock   = color.RGBA{255, 165, 0, 255}  // Locked die
+	colorGreenSelect  = color.RGBA{0, 255, 0, 255}    // Selected die
+	colorRedUsed      = color.RGBA{255, 0, 0, 255}    // Activated/used die
+	colorDieBox       = color.RGBA{40, 40, 40, 255}   // Die background
+	colorGrayBlank    = color.RGBA{80, 80, 80, 255}   // Blank die (grayed out)
+	colorUnlockButton = color.RGBA{60, 60, 80, 255}
 )
 
 // HitRegion represents a clickable area on screen for input handling.
@@ -173,8 +201,8 @@ func drawPips(screen *ebiten.Image, x, y float32, count int) {
 
 // drawRedX draws an X for blank (0) die faces.
 func drawRedX(screen *ebiten.Image, x, y float32) {
-	vector.StrokeLine(screen, x+4, y+4, x+DieBoxSize-4, y+DieBoxSize-4, 2, colorRedUsed, false)
-	vector.StrokeLine(screen, x+DieBoxSize-4, y+4, x+4, y+DieBoxSize-4, 2, colorRedUsed, false)
+	vector.StrokeLine(screen, x+dieContentPadding, y+dieContentPadding, x+DieBoxSize-dieContentPadding, y+DieBoxSize-dieContentPadding, 2, colorRedUsed, false)
+	vector.StrokeLine(screen, x+DieBoxSize-dieContentPadding, y+dieContentPadding, x+dieContentPadding, y+DieBoxSize-dieContentPadding, 2, colorRedUsed, false)
 }
 
 // drawCommandDice draws 3-die pyramid for command unit, returns hit regions.
@@ -186,9 +214,9 @@ func drawCommandDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY float3
 	}
 
 	// Pyramid layout centered in 128x112 card
-	diceAreaY := cardY + 16
+	diceAreaY := cardY + commandDiceAreaYOffset
 	topDieX := cardX + (CommandUnitWidth-DieBoxSize)/2
-	topDieY := diceAreaY + 14
+	topDieY := diceAreaY + commandDiceTopYOffset
 	bottomLeftX := cardX + (CommandUnitWidth-2*DieBoxSize-DieBoxMargin)/2
 	bottomRightX := bottomLeftX + DieBoxSize + DieBoxMargin
 	bottomY := topDieY + DieBoxSize + DieBoxMargin
@@ -230,11 +258,11 @@ func drawUnitDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY, cardW fl
 		regions = append(regions, HitRegion{Rect: rect, Type: "die", UnitID: unit.ID, DieIndex: 0})
 	} else if cw >= 2 && len(rolled) >= 2 {
 		// Medium+ unit: 2 dice diagonal
-		margin := float32(15)
+		margin := float32(diagonalDiceMargin)
 		die1X := cardX + margin
-		die1Y := cardY + 20
+		die1Y := cardY + diagonalDiceTopYOffset
 		die2X := cardX + cardW - margin - DieBoxSize
-		die2Y := cardY + SlotHeight - 20 - DieBoxSize
+		die2Y := cardY + SlotHeight - diagonalDiceBottomYOffset - DieBoxSize
 
 		state0 := getDieState(unit.ID, 0, combat, false)
 		rect0 := drawDieBox(screen, die1X, die1Y, rolled[0].CurrentFace(), state0)
@@ -274,15 +302,15 @@ func allCommandDiceLockedRenderer(combat model.CombatModel) bool {
 
 // drawUnlockButton draws the ↰ unlock all button and returns its hit rectangle.
 func drawUnlockButton(screen *ebiten.Image, x, y int) image.Rectangle {
-	btnW, btnH := 80, 20
+	btnW, btnH := unlockButtonWidth, unlockButtonHeight
 	fx, fy := float32(x), float32(y)
 
 	// Button background
-	vector.FillRect(screen, fx, fy, float32(btnW), float32(btnH), color.RGBA{60, 60, 80, 255}, false)
+	vector.FillRect(screen, fx, fy, float32(btnW), float32(btnH), colorUnlockButton, false)
 	vector.StrokeRect(screen, fx, fy, float32(btnW), float32(btnH), 1, color.White, false)
 
 	// Button text
-	ebitenutil.DebugPrintAt(screen, "↰ Unlock", x+8, y+2)
+	ebitenutil.DebugPrintAt(screen, "↰ Unlock", x+unlockButtonTextX, y+unlockButtonTextY)
 
 	return image.Rect(x, y, x+btnW, y+btnH)
 }
@@ -294,7 +322,7 @@ func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y 
 	vector.StrokeRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, FrameStroke, color.White, false)
 
 	// Unit ID at top
-	ebitenutil.DebugPrintAt(screen, unit.ID, int(x)+4, int(y)+4)
+	ebitenutil.DebugPrintAt(screen, unit.ID, int(x)+textPaddingX, int(y)+textPaddingX)
 
 	// HP + Shields at bottom
 	hp := getAttr(unit, "health")
@@ -303,7 +331,7 @@ func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y 
 	if shields > 0 {
 		statText += fmt.Sprintf(" SH:%d", shields)
 	}
-	ebitenutil.DebugPrintAt(screen, statText, int(x)+4, int(y)+CommandUnitHeight-16)
+	ebitenutil.DebugPrintAt(screen, statText, int(x)+textPaddingX, int(y)+CommandUnitHeight-unitStatTextYOffset)
 
 	return image.Rect(int(x), int(y), int(x)+CommandUnitWidth, int(y)+CommandUnitHeight)
 }
@@ -423,22 +451,22 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 
 		if !allLocked {
 			// Lock phase hints
-			ebitenutil.DebugPrintAt(screen, "LClick die to lock/unlock", 10, 50)
-			ebitenutil.DebugPrintAt(screen, fmt.Sprintf("R - Reroll unlocked (%d/2)", combat.RerollsRemaining), 10, 70)
+			ebitenutil.DebugPrintAt(screen, "LClick die to lock/unlock", uiLeftMargin, uiHintY1)
+			ebitenutil.DebugPrintAt(screen, fmt.Sprintf("R - Reroll unlocked (%d/2)", combat.RerollsRemaining), uiLeftMargin, uiHintY2)
 		} else {
 			// Activation phase hints
-			ebitenutil.DebugPrintAt(screen, "LClick die to select, LClick target to activate", 10, 50)
-			ebitenutil.DebugPrintAt(screen, "RClick to cancel selection", 10, 70)
+			ebitenutil.DebugPrintAt(screen, "LClick die to select, LClick target to activate", uiLeftMargin, uiHintY1)
+			ebitenutil.DebugPrintAt(screen, "RClick to cancel selection", uiLeftMargin, uiHintY2)
 
 			// ↰ Unlock button (only if rerolls > 0)
 			if combat.RerollsRemaining > 0 {
-				btnRect := drawUnlockButton(screen, 10, 90)
+				btnRect := drawUnlockButton(screen, uiLeftMargin, uiUnlockButtonY)
 				regions = append(regions, HitRegion{Rect: btnRect, Type: "unlock_button", UnitID: "", DieIndex: -1})
 			}
 		}
 	}
 	if combat.DicePhase == model.DicePhasePreview {
-		ebitenutil.DebugPrintAt(screen, "Click to continue...", 10, 50)
+		ebitenutil.DebugPrintAt(screen, "Click to continue...", uiLeftMargin, uiHintY1)
 	}
 
 	renderLog(screen, combat.Log)
@@ -457,10 +485,10 @@ func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width 
 
 	// Unit ID (truncated for narrow units)
 	displayID := unit.ID
-	if width < 80 && len(unit.ID) > 6 {
-		displayID = unit.ID[:6]
+	if width < unitIDTruncateWidth && len(unit.ID) > unitIDTruncateLen {
+		displayID = unit.ID[:unitIDTruncateLen]
 	}
-	ebitenutil.DebugPrintAt(screen, displayID, int(x)+4, int(y)+4)
+	ebitenutil.DebugPrintAt(screen, displayID, int(x)+textPaddingX, int(y)+textPaddingX)
 
 	// HP + Shields at bottom (F-223)
 	hp := getAttr(unit, "health")
@@ -469,7 +497,7 @@ func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width 
 	if shields > 0 {
 		statText += fmt.Sprintf(" SH:%d", shields)
 	}
-	ebitenutil.DebugPrintAt(screen, statText, int(x)+4, int(y)+SlotHeight-16)
+	ebitenutil.DebugPrintAt(screen, statText, int(x)+textPaddingX, int(y)+SlotHeight-unitStatTextYOffset)
 }
 
 func renderLog(screen *ebiten.Image, log []string) {
@@ -523,7 +551,7 @@ func renderPausedOverlay(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
 	// Semi-transparent overlay
-	overlay := color.RGBA{0, 0, 0, 128}
+	overlay := color.RGBA{0, 0, 0, pausedOverlayAlpha}
 	vector.FillRect(screen, 0, 0, float32(w), float32(h), overlay, false)
 
 	// PAUSED text

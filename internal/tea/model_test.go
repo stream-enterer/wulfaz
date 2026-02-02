@@ -1,6 +1,7 @@
 package tea
 
 import (
+	"fmt"
 	"testing"
 
 	"wulfaz/internal/core"
@@ -429,5 +430,105 @@ func TestUpdate_CombatStarted(t *testing.T) {
 	// Wave 3: CombatStarted now returns StartNextRound cmd
 	if cmd == nil {
 		t.Error("expected StartNextRound command (Wave 3)")
+	}
+}
+
+func TestChoiceSelected_ValidatesIndex(t *testing.T) {
+	m := Model{
+		Version:    1,
+		Phase:      PhaseChoice,
+		ChoiceType: ChoiceReward,
+		Choices:    []string{"A", "B", "C"},
+	}
+
+	// Out of bounds - should be no-op
+	newM, _ := m.Update(ChoiceSelected{Index: 99})
+	if newM.Choices[0] != "A" {
+		t.Error("out-of-bounds index should not change state")
+	}
+
+	// Negative - should be no-op
+	newM2, _ := m.Update(ChoiceSelected{Index: -1})
+	if newM2.Choices[0] != "A" {
+		t.Error("negative index should not change state")
+	}
+}
+
+func TestChoiceSelected_RequiresChoicePhase(t *testing.T) {
+	m := Model{
+		Version:    1,
+		Phase:      PhaseCombat, // Wrong phase
+		ChoiceType: ChoiceReward,
+		Choices:    []string{"A", "B", "C"},
+	}
+
+	newM, _ := m.Update(ChoiceSelected{Index: 0})
+
+	// Should be no-op - not in choice phase
+	if newM.Phase != PhaseCombat {
+		t.Error("should not change phase when not in PhaseChoice")
+	}
+}
+
+func TestAppendLogEntry_Bounded(t *testing.T) {
+	// Create log at max capacity
+	log := make([]string, model.MaxLogEntries)
+	for i := range log {
+		log[i] = fmt.Sprintf("entry %d", i)
+	}
+
+	newLog := appendLogEntry(log, "new entry")
+
+	if len(newLog) != model.MaxLogEntries {
+		t.Errorf("expected %d entries, got %d", model.MaxLogEntries, len(newLog))
+	}
+	// First entry should be pruned, last entry should be new
+	if newLog[0] == "entry 0" {
+		t.Error("oldest entry should have been pruned")
+	}
+	if newLog[len(newLog)-1] != "new entry" {
+		t.Error("new entry should be at end")
+	}
+}
+
+func TestAppendLogEntries_Bounded(t *testing.T) {
+	log := make([]string, model.MaxLogEntries-2)
+	for i := range log {
+		log[i] = fmt.Sprintf("entry %d", i)
+	}
+
+	// Add 5 entries when only 2 slots available
+	newLog := appendLogEntries(log, []string{"a", "b", "c", "d", "e"})
+
+	if len(newLog) != model.MaxLogEntries {
+		t.Errorf("expected %d entries, got %d", model.MaxLogEntries, len(newLog))
+	}
+	// Should keep most recent entries
+	if newLog[len(newLog)-1] != "e" {
+		t.Error("most recent entry should be 'e'")
+	}
+}
+
+func TestAppendLogEntry_Immutable(t *testing.T) {
+	original := []string{"a", "b", "c"}
+	originalLen := len(original)
+
+	newLog := appendLogEntry(original, "d")
+
+	if len(original) != originalLen {
+		t.Error("original slice should not be modified")
+	}
+	if len(newLog) != 4 {
+		t.Errorf("new log should have 4 entries, got %d", len(newLog))
+	}
+}
+
+func TestAppendLogEntries_Empty(t *testing.T) {
+	original := []string{"a", "b"}
+	newLog := appendLogEntries(original, []string{})
+
+	// Should return same slice (optimization)
+	if &original[0] != &newLog[0] {
+		t.Error("empty entries should return original slice")
 	}
 }

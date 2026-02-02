@@ -73,30 +73,10 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m, nil
 
 	case CombatEnded:
-		if msg.Victor == VictorPlayer {
-			// F-155/F-156: Persist surviving units (syncRosterFromCombat filters dead)
-			m.PlayerRoster = syncRosterFromCombat(m.Combat.PlayerUnits)
-
-			m.Phase = PhaseChoice
-			m.ChoiceType = ChoiceReward
-			m.RewardChoicesLeft = 2
-			m.Choices = []string{"Reward A", "Reward B", "Reward C"}
-		} else {
-			m.Phase = PhaseGameOver
-		}
-		return m, nil
+		return m.handleCombatEnded(msg)
 
 	case ChoiceSelected:
-		if m.ChoiceType == ChoiceReward {
-			m.RewardChoicesLeft--
-			if m.RewardChoicesLeft > 0 {
-				m.Choices = []string{"Reward D", "Reward E", "Reward F"}
-			} else {
-				m.ChoiceType = ChoiceFight
-				m.Choices = []string{"Fight: Easy", "Fight: Medium", "Fight: Hard"}
-			}
-		}
-		return m, nil
+		return m.handleChoiceSelected(msg)
 
 	case CombatStarted:
 		m.Phase = PhaseCombat
@@ -174,7 +154,7 @@ func (m Model) handleTriggersCollected(msg TriggersCollected) (Model, Cmd) {
 	// Check cascade depth limit
 	if msg.Depth >= core.MaxCascadeDepth {
 		combat := m.Combat
-		combat.Log = append(combat.Log, "cascade depth limit reached")
+		combat.Log = appendLogEntry(combat.Log, "cascade depth limit reached")
 		m.Combat = combat
 		return m, nil
 	}
@@ -256,10 +236,8 @@ func (m Model) handleTriggersCollected(msg TriggersCollected) (Model, Cmd) {
 func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 	combat := m.Combat
 
-	// Copy log slice before appending (TEA immutability)
-	newLog := make([]string, len(combat.Log), len(combat.Log)+len(msg.LogEntries))
-	copy(newLog, combat.Log)
-	combat.Log = append(newLog, msg.LogEntries...)
+	// Add log entries (bounded for safety)
+	combat.Log = appendLogEntries(combat.Log, msg.LogEntries)
 
 	// Copy unit slices before modification (TEA immutability)
 	if len(msg.ModifiedUnits) > 0 {
@@ -373,13 +351,13 @@ func (m Model) applyCombatEnd() (Model, Cmd) {
 	combat := m.Combat
 	combat.Phase = model.CombatResolved
 	combat.Victor = victor.String()
-	newLog := make([]string, len(combat.Log), len(combat.Log)+1)
-	copy(newLog, combat.Log)
+	var logMsg string
 	if victor == VictorDraw {
-		combat.Log = append(newLog, "combat ended: draw")
+		logMsg = "combat ended: draw"
 	} else {
-		combat.Log = append(newLog, "combat ended: "+victor.String()+" wins")
+		logMsg = "combat ended: " + victor.String() + " wins"
 	}
+	combat.Log = appendLogEntry(combat.Log, logMsg)
 	m.Combat = combat
 	return m, func() Msg { return CombatEnded{Victor: victor} }
 }
@@ -457,6 +435,37 @@ func buildEffectsResolvedCmd(modifiedUnits ModifiedUnitsMap, followUps []FollowU
 			Depth:          depth,
 		}
 	}
+}
+
+// appendLogEntry adds an entry, pruning oldest if over MaxLogEntries.
+// Returns new slice (TEA immutability).
+func appendLogEntry(log []string, entry string) []string {
+	newLog := make([]string, len(log), len(log)+1)
+	copy(newLog, log)
+	newLog = append(newLog, entry)
+	if len(newLog) > model.MaxLogEntries {
+		pruned := make([]string, model.MaxLogEntries)
+		copy(pruned, newLog[len(newLog)-model.MaxLogEntries:])
+		return pruned
+	}
+	return newLog
+}
+
+// appendLogEntries adds multiple entries with bounded size.
+// Returns new slice (TEA immutability).
+func appendLogEntries(log []string, entries []string) []string {
+	if len(entries) == 0 {
+		return log
+	}
+	newLog := make([]string, len(log), len(log)+len(entries))
+	copy(newLog, log)
+	newLog = append(newLog, entries...)
+	if len(newLog) > model.MaxLogEntries {
+		pruned := make([]string, model.MaxLogEntries)
+		copy(pruned, newLog[len(newLog)-model.MaxLogEntries:])
+		return pruned
+	}
+	return newLog
 }
 
 func copyUnitSlice(units []entity.Unit) []entity.Unit {
@@ -550,6 +559,26 @@ func findEnemyCommandUnit(combat model.CombatModel) *entity.Unit {
 		}
 	}
 	return nil
+}
+
+// isValidDiceInteraction validates dice interaction prerequisites.
+// Rejects interactions when: not in combat phase, combat is paused, or wrong dice phase.
+func (m Model) isValidDiceInteraction(unitID string, requiredPhase model.DicePhase) bool {
+	// Check game-level phase
+	if m.Phase != PhaseCombat {
+		return false
+	}
+	// Reject when paused
+	if m.Combat.Phase != model.CombatActive {
+		return false
+	}
+	// Check dice phase
+	if m.Combat.DicePhase != requiredPhase {
+		return false
+	}
+	// Validate unit is player's command unit
+	cmd := findPlayerCommandUnit(m.Combat)
+	return cmd != nil && cmd.ID == unitID
 }
 
 // findLowestHPAliveUnit returns ID of alive unit with lowest HP (or "").
@@ -811,13 +840,7 @@ func (m Model) handlePreviewDone(_ PreviewDone) (Model, Cmd) {
 }
 
 func (m Model) handleDieLockToggled(msg DieLockToggled) (Model, Cmd) {
-	// Only in PlayerCommand phase
-	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
-		return m, nil
-	}
-	// Only for player's command unit
-	cmd := findPlayerCommandUnit(m.Combat)
-	if cmd == nil || msg.UnitID != cmd.ID {
+	if !m.isValidDiceInteraction(msg.UnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
 
@@ -833,16 +856,11 @@ func (m Model) handleDieLockToggled(msg DieLockToggled) (Model, Cmd) {
 }
 
 func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
-	// Only in PlayerCommand phase with rerolls remaining
-	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+	if !m.isValidDiceInteraction(msg.UnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
+	// Keep reroll count check (not part of isValidDiceInteraction)
 	if m.Combat.RerollsRemaining <= 0 {
-		return m, nil
-	}
-	// Only for player's command unit
-	cmd := findPlayerCommandUnit(m.Combat)
-	if cmd == nil || msg.UnitID != cmd.ID {
 		return m, nil
 	}
 
@@ -869,12 +887,7 @@ func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
 }
 
 func (m Model) handleDieSelected(msg DieSelected) (Model, Cmd) {
-	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
-		return m, nil
-	}
-	// Only player's command unit dice can be selected
-	cmd := findPlayerCommandUnit(m.Combat)
-	if cmd == nil || msg.UnitID != cmd.ID {
+	if !m.isValidDiceInteraction(msg.UnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
 	// Validate die index is within bounds
@@ -904,7 +917,7 @@ func (m Model) handleDieDeselected(_ DieDeselected) (Model, Cmd) {
 }
 
 func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
-	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+	if !m.isValidDiceInteraction(msg.SourceUnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
 	// Validate source is selected die
@@ -989,10 +1002,8 @@ func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
 	updateUnit(combat.PlayerUnits)
 	updateUnit(combat.EnemyUnits)
 
-	// Add to combat log (copy slice before appending per TEA immutability)
-	newLog := make([]string, len(combat.Log), len(combat.Log)+1)
-	copy(newLog, combat.Log)
-	combat.Log = append(newLog, fmt.Sprintf("%s -> %s: %s %d",
+	// Add to combat log (bounded for safety)
+	combat.Log = appendLogEntry(combat.Log, fmt.Sprintf("%s -> %s: %s %d",
 		msg.SourceUnitID, msg.TargetUnitID, msg.Effect, msg.Value))
 
 	m.Combat = combat
@@ -1040,13 +1051,13 @@ func (m Model) handleEnemyCommandResolved(msg EnemyCommandResolved) (Model, Cmd)
 			action.Effect, action.Value)
 	}
 
-	// Add to combat log
+	// Add to combat log (batch for efficiency)
+	var logEntries []string
 	for _, action := range msg.Actions {
-		newLog := make([]string, len(combat.Log), len(combat.Log)+1)
-		copy(newLog, combat.Log)
-		combat.Log = append(newLog, fmt.Sprintf("Enemy: %s -> %s: %s %d",
+		logEntries = append(logEntries, fmt.Sprintf("Enemy: %s -> %s: %s %d",
 			action.SourceUnitID, action.TargetUnitID, action.Effect, action.Value))
 	}
+	combat.Log = appendLogEntries(combat.Log, logEntries)
 
 	combat.DicePhase = model.DicePhaseExecution
 	m.Combat = combat
@@ -1083,17 +1094,17 @@ func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
 		updateUnitHP(combat.EnemyUnits, atk.TargetID, atk.NewHealth, atk.NewShields)
 	}
 
-	// Log attacks
+	// Log attacks (batch for efficiency)
+	var logEntries []string
 	for _, atk := range msg.Attacks {
-		newLog := make([]string, len(combat.Log), len(combat.Log)+1)
-		copy(newLog, combat.Log)
 		status := ""
 		if atk.TargetDead {
 			status = " [DESTROYED]"
 		}
-		combat.Log = append(newLog, fmt.Sprintf("Pos %d: %s -> %s: %d dmg%s",
+		logEntries = append(logEntries, fmt.Sprintf("Pos %d: %s -> %s: %d dmg%s",
 			msg.Position, atk.AttackerID, atk.TargetID, atk.Damage, status))
 	}
+	combat.Log = appendLogEntries(combat.Log, logEntries)
 
 	m.Combat = combat
 
@@ -1162,8 +1173,12 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 }
 
 func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
-	// Only valid during PlayerCommand phase with rerolls remaining
+	// Only valid during PlayerCommand phase
 	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
+	// Reject when paused
+	if m.Combat.Phase != model.CombatActive {
 		return m, nil
 	}
 	if m.Combat.RerollsRemaining <= 0 {
@@ -1188,5 +1203,41 @@ func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
 	}
 
 	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleCombatEnded(msg CombatEnded) (Model, Cmd) {
+	if msg.Victor == VictorPlayer {
+		// F-155/F-156: Persist surviving units (syncRosterFromCombat filters dead)
+		m.PlayerRoster = syncRosterFromCombat(m.Combat.PlayerUnits)
+
+		m.Phase = PhaseChoice
+		m.ChoiceType = ChoiceReward
+		m.RewardChoicesLeft = 2
+		m.Choices = []string{"Reward A", "Reward B", "Reward C"}
+	} else {
+		m.Phase = PhaseGameOver
+	}
+	return m, nil
+}
+
+func (m Model) handleChoiceSelected(msg ChoiceSelected) (Model, Cmd) {
+	// Phase guard - only process during choice phase
+	if m.Phase != PhaseChoice {
+		return m, nil
+	}
+	// Bounds validation - reject invalid indices
+	if msg.Index < 0 || msg.Index >= len(m.Choices) {
+		return m, nil
+	}
+	if m.ChoiceType == ChoiceReward {
+		m.RewardChoicesLeft--
+		if m.RewardChoicesLeft > 0 {
+			m.Choices = []string{"Reward D", "Reward E", "Reward F"}
+		} else {
+			m.ChoiceType = ChoiceFight
+			m.Choices = []string{"Fight: Easy", "Fight: Medium", "Fight: Hard"}
+		}
+	}
 	return m, nil
 }
