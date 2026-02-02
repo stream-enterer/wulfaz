@@ -170,18 +170,21 @@ type DiceActivated struct {
 	TargetUnitID string
 	Value        int            // The die's result value
 	Effect       entity.DieType // damage/shield/heal
+	Timestamp    int64          // Unix nanoseconds from App layer
 }
 
 func (DiceActivated) isMsg() {}
 
 // DiceEffectApplied signals effect resolution completed.
 type DiceEffectApplied struct {
-	SourceUnitID string
-	TargetUnitID string
-	Effect       entity.DieType
-	Value        int
-	NewHealth    int
-	NewShields   int
+	SourceUnitID   string
+	TargetUnitID   string
+	Effect         entity.DieType
+	Value          int
+	NewHealth      int
+	NewShields     int
+	ShieldAbsorbed int   // How much damage was absorbed by shields
+	Timestamp      int64 // Unix nanoseconds for floating text
 }
 
 func (DiceEffectApplied) isMsg() {}
@@ -225,21 +228,23 @@ func (ExecutionStarted) isMsg() {}
 
 // PositionResolved signals one position's attacks calculated.
 type PositionResolved struct {
-	Position int
-	Attacks  []AttackResult
+	Position  int
+	Attacks   []AttackResult
+	Timestamp int64 // Unix nanoseconds for floating text
 }
 
 func (PositionResolved) isMsg() {}
 
 // AttackResult records one attack's outcome.
 type AttackResult struct {
-	AttackerID string
-	TargetID   string
-	DieIndex   int
-	Damage     int
-	NewHealth  int
-	NewShields int
-	TargetDead bool
+	AttackerID     string
+	TargetID       string
+	DieIndex       int
+	Damage         int
+	ShieldAbsorbed int // How much was absorbed by shields
+	NewHealth      int
+	NewShields     int
+	TargetDead     bool
 }
 
 // ExecutionComplete signals all positions resolved.
@@ -274,3 +279,11 @@ type TimerFired struct {
 }
 
 func (TimerFired) isMsg() {}
+
+// ExecutionAdvanceClicked signals player clicked to advance execution.
+// Timestamp is set by runtime (App layer) to maintain Update purity.
+type ExecutionAdvanceClicked struct {
+	Timestamp int64 // Unix nanoseconds
+}
+
+func (ExecutionAdvanceClicked) isMsg() {}

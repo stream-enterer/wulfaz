@@ -28,6 +28,16 @@ const DefaultRerollsPerRound = 2
 // MaxLogEntries bounds combat log size. Display shows last 20 lines.
 const MaxLogEntries = 500
 
+// FloatingText represents scrolling combat text above a unit.
+// Color is stored as 0xRRGGBBAA to avoid image/color dependency.
+type FloatingText struct {
+	UnitID    string
+	Text      string // "+5", "-3", etc.
+	ColorRGBA uint32 // 0xRRGGBBAA format
+	StartedAt int64  // Unix nanoseconds (from Msg, not time.Now)
+	YOffset   int    // Stack position (0, 1, 2, max 3)
+}
+
 type CombatModel struct {
 	// Existing fields
 	PlayerUnits []entity.Unit
@@ -50,9 +60,8 @@ type CombatModel struct {
 	CurrentFiringIndex int              // Index into FiringOrder
 
 	// Visualization state (Wave 7)
-	ActiveArrows  []TargetingArrow          // Arrows to render
-	FlashTargets  map[string]entity.DieType // UnitID -> effect type (for flash color)
-	ExecutionAnim ExecutionAnimState        // Current animation state
+	ActiveArrows  []TargetingArrow // Arrows to render
+	FloatingTexts []FloatingText   // Combat text to render
 }
 
 // FiringPosition groups units at same board position for simultaneous resolution
@@ -61,15 +70,6 @@ type FiringPosition struct {
 	PlayerUnits []string // Unit IDs of player units at this position
 	EnemyUnits  []string // Unit IDs of enemy units at this position
 }
-
-// ExecutionAnimState tracks execution animation progress
-type ExecutionAnimState int
-
-const (
-	ExecAnimNone      ExecutionAnimState = iota
-	ExecAnimShowArrows                   // Arrows visible, waiting to resolve
-	ExecAnimResolving                    // Damage applied, targets flashing
-)
 
 // TargetingArrow represents a line from attacker to target
 type TargetingArrow struct {

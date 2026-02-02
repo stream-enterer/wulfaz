@@ -386,15 +386,10 @@ func TestPositionResolved_VictoryCheck(t *testing.T) {
 		},
 	}
 
-	// Step 1: PositionResolved starts flash timer (Wave 7)
+	// Step 1: PositionResolved applies damage and creates floating texts
 	newM, cmd := m.Update(msg)
 
-	// Flash targets should be set
-	if newM.Combat.FlashTargets == nil || len(newM.Combat.FlashTargets) == 0 {
-		t.Errorf("FlashTargets should be set after PositionResolved")
-	}
-
-	// Should return timer request for flash display
+	// Should return timer request for round end pause on victory
 	if cmd == nil {
 		t.Fatal("expected timer cmd, got nil")
 	}
@@ -402,12 +397,12 @@ func TestPositionResolved_VictoryCheck(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected StartTimerRequested, got %T", cmd())
 	}
-	if timerReq.ID != TimerExecAdvance {
-		t.Errorf("timer ID = %s, want %s", timerReq.ID, TimerExecAdvance)
+	if timerReq.ID != TimerRoundEnd {
+		t.Errorf("timer ID = %s, want %s", timerReq.ID, TimerRoundEnd)
 	}
 
 	// Step 2: TimerFired triggers victory check
-	newM, cmd = newM.Update(TimerFired{ID: TimerExecAdvance})
+	newM, cmd = newM.Update(TimerFired{ID: TimerRoundEnd})
 
 	// Combat should end
 	if newM.Combat.Phase != model.CombatResolved {
@@ -891,7 +886,7 @@ func TestResolvePosition_OverflowDamage(t *testing.T) {
 		CurrentFiringIndex: 0,
 	}
 
-	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"attacker"}}, combat)
+	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"attacker"}}, combat, 0)
 	msg := cmd()
 
 	resolved, ok := msg.(PositionResolved)
@@ -975,7 +970,7 @@ func TestResolvePosition_GapToCommand(t *testing.T) {
 		CurrentFiringIndex: 0,
 	}
 
-	cmd := ResolvePosition(model.FiringPosition{Position: 9, PlayerUnits: []string{"attacker"}}, combat)
+	cmd := ResolvePosition(model.FiringPosition{Position: 9, PlayerUnits: []string{"attacker"}}, combat, 0)
 	msg := cmd()
 
 	resolved, ok := msg.(PositionResolved)
@@ -1043,7 +1038,7 @@ func TestResolvePosition_GapWithLiveUnits_DamageWasted(t *testing.T) {
 		CurrentFiringIndex: 0,
 	}
 
-	cmd := ResolvePosition(model.FiringPosition{Position: 9, PlayerUnits: []string{"attacker"}}, combat)
+	cmd := ResolvePosition(model.FiringPosition{Position: 9, PlayerUnits: []string{"attacker"}}, combat, 0)
 	msg := cmd()
 
 	resolved, ok := msg.(PositionResolved)
@@ -1121,7 +1116,7 @@ func TestResolvePosition_MultiDieSeparateTargets(t *testing.T) {
 		CurrentFiringIndex: 0,
 	}
 
-	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"attacker"}}, combat)
+	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"attacker"}}, combat, 0)
 	msg := cmd()
 
 	resolved, ok := msg.(PositionResolved)
@@ -1207,7 +1202,7 @@ func TestResolvePosition_OverflowStopsAtCommand(t *testing.T) {
 		CurrentFiringIndex: 0,
 	}
 
-	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"attacker"}}, combat)
+	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"attacker"}}, combat, 0)
 	msg := cmd()
 
 	resolved, ok := msg.(PositionResolved)

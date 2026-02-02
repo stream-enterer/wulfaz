@@ -14,10 +14,18 @@ import (
 	"wulfaz/internal/model"
 )
 
-// Animation timing constants (Wave 7)
+// Wave 7: Constants for floating text and timing
 const (
-	ArrowDisplayDuration = 750 * time.Millisecond
-	FlashDisplayDuration = 750 * time.Millisecond
+	CombatTextDuration = 1500 * time.Millisecond
+	RoundEndPause      = 2 * time.Second
+	MaxTextStack       = 3 // Cap stacking to prevent overflow
+)
+
+// Color constants as uint32 (0xRRGGBBAA)
+const (
+	ColorTextDamage = 0xFF5050FF // Red
+	ColorTextHeal   = 0x50FF50FF // Green
+	ColorTextShield = 0xAAAAAAFF // Grey
 )
 
 type GamePhase int
@@ -154,6 +162,10 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 	// Wave 7: Timer messages
 	case TimerFired:
 		return m.handleTimerFired(msg)
+
+	// Wave 7: Click-through execution
+	case ExecutionAdvanceClicked:
+		return m.handleExecutionAdvanceClicked(msg)
 
 	default:
 		return m, nil
@@ -812,8 +824,7 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 	combat.ActivatedDice = make(map[string][]bool)
 	combat.SelectedUnitID = ""
 	combat.SelectedDieIndex = -1
-	combat.FlashTargets = nil
-	combat.ExecutionAnim = model.ExecAnimNone
+	combat.FloatingTexts = nil
 
 	// Convert roll indices to RolledDie for all units
 	allUnits := getAllUnits(combat)
@@ -838,8 +849,8 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 		combat.ActivatedDice[unit.ID] = make([]bool, len(unit.Dice))
 	}
 
-	// Compute enemy preview arrows (Wave 7)
-	combat.ActiveArrows = computeEnemyPreviewArrows(combat)
+	// Compute all preview arrows: player (solid) and enemy (dashed)
+	combat.ActiveArrows = computeAllPreviewArrows(combat)
 
 	m.Combat = combat
 	return m, nil
@@ -993,7 +1004,7 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 	m.Combat = combat
 
 	// Return Cmd to apply effect
-	return m, ApplyDiceEffect(msg.SourceUnitID, msg.TargetUnitID, die.Type(), die.Value(), m.Combat)
+	return m, ApplyDiceEffect(msg.SourceUnitID, msg.TargetUnitID, die.Type(), die.Value(), m.Combat, msg.Timestamp)
 }
 
 func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
@@ -1034,6 +1045,53 @@ func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
 	updateUnit(combat.PlayerUnits)
 	updateUnit(combat.EnemyUnits)
 
+	// Create floating text for the effect
+	if msg.Timestamp > 0 {
+		offset := countTextsForUnit(combat.FloatingTexts, msg.TargetUnitID)
+
+		switch msg.Effect {
+		case entity.DieDamage:
+			// Shield absorbed text
+			if msg.ShieldAbsorbed > 0 {
+				combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
+					UnitID:    msg.TargetUnitID,
+					Text:      fmt.Sprintf("-%d", msg.ShieldAbsorbed),
+					ColorRGBA: ColorTextShield,
+					StartedAt: msg.Timestamp,
+					YOffset:   offset,
+				})
+				offset = min(offset+1, MaxTextStack)
+			}
+			// Health damage text
+			healthDamage := msg.Value - msg.ShieldAbsorbed
+			if healthDamage > 0 {
+				combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
+					UnitID:    msg.TargetUnitID,
+					Text:      fmt.Sprintf("-%d", healthDamage),
+					ColorRGBA: ColorTextDamage,
+					StartedAt: msg.Timestamp,
+					YOffset:   offset,
+				})
+			}
+		case entity.DieHeal:
+			combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
+				UnitID:    msg.TargetUnitID,
+				Text:      fmt.Sprintf("+%d", msg.Value),
+				ColorRGBA: ColorTextHeal,
+				StartedAt: msg.Timestamp,
+				YOffset:   offset,
+			})
+		case entity.DieShield:
+			combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
+				UnitID:    msg.TargetUnitID,
+				Text:      fmt.Sprintf("+%d", msg.Value),
+				ColorRGBA: ColorTextShield,
+				StartedAt: msg.Timestamp,
+				YOffset:   offset,
+			})
+		}
+	}
+
 	// Add to combat log (bounded for safety)
 	combat.Log = appendLogEntry(combat.Log, fmt.Sprintf("%s -> %s: %s %d",
 		msg.SourceUnitID, msg.TargetUnitID, msg.Effect, msg.Value))
@@ -1046,6 +1104,17 @@ func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
 	}
 
 	return m, nil
+}
+
+// countTextsForUnit returns the number of floating texts for a unit (capped).
+func countTextsForUnit(texts []model.FloatingText, unitID string) int {
+	count := 0
+	for _, t := range texts {
+		if t.UnitID == unitID {
+			count++
+		}
+	}
+	return min(count, MaxTextStack)
 }
 
 func (m Model) handlePlayerCommandDone(_ PlayerCommandDone) (Model, Cmd) {
@@ -1106,20 +1175,17 @@ func (m Model) handleExecutionStarted(msg ExecutionStarted) (Model, Cmd) {
 	combat := m.Combat
 	combat.FiringOrder = msg.FiringOrder
 	combat.CurrentFiringIndex = 0
-	combat.FlashTargets = nil
+	combat.DicePhase = model.DicePhaseExecution
+	combat.ActiveArrows = nil    // No arrows during execution
+	combat.FloatingTexts = nil   // Clear any stale texts
+	m.Combat = combat
 
 	if len(msg.FiringOrder) == 0 {
-		combat.ExecutionAnim = model.ExecAnimNone
-		m.Combat = combat
 		return m, func() Msg { return ExecutionComplete{} }
 	}
 
-	// Build arrows for first position
-	combat.ActiveArrows = buildPositionArrows(msg.FiringOrder[0], combat)
-	combat.ExecutionAnim = model.ExecAnimShowArrows
-	m.Combat = combat
-
-	return m, StartTimer(TimerExecResolve, ArrowDisplayDuration)
+	// Wait for player click to advance
+	return m, nil
 }
 
 func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
@@ -1127,17 +1193,17 @@ func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
 	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
 	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
 
-	// Apply all attacks and build flash targets
-	combat.FlashTargets = make(map[string]entity.DieType)
+	// Apply all attacks and create floating texts
 	for _, atk := range msg.Attacks {
 		updateUnitHP(combat.PlayerUnits, atk.TargetID, atk.NewHealth, atk.NewShields)
 		updateUnitHP(combat.EnemyUnits, atk.TargetID, atk.NewHealth, atk.NewShields)
-		// Flash ALL hit targets
-		combat.FlashTargets[atk.TargetID] = entity.DieDamage
+
+		// Create floating text(s)
+		texts := formatAttackTexts(atk, msg.Timestamp, combat.FloatingTexts)
+		combat.FloatingTexts = append(combat.FloatingTexts, texts...)
 	}
 
-	combat.ExecutionAnim = model.ExecAnimResolving
-	combat.ActiveArrows = nil
+	combat.CurrentFiringIndex++
 
 	// Log attacks (batch for efficiency)
 	var logEntries []string
@@ -1153,8 +1219,57 @@ func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
 
 	m.Combat = combat
 
-	// Always show the flash, even on victory - check for end after flash completes
-	return m, StartTimer(TimerExecAdvance, FlashDisplayDuration)
+	// Check victory immediately (will show texts during pause)
+	if victor := m.checkCombatEnd(); victor != VictorNone {
+		return m, StartTimer(TimerRoundEnd, RoundEndPause)
+	}
+
+	// Wait for next click
+	return m, nil
+}
+
+// formatAttackTexts creates FloatingText entries for an attack.
+// Shield absorption + overflow creates two stacked entries.
+func formatAttackTexts(atk AttackResult, timestamp int64, existing []model.FloatingText) []model.FloatingText {
+	// Count existing texts for this unit to determine stack offset
+	offset := 0
+	for _, t := range existing {
+		if t.UnitID == atk.TargetID {
+			offset++
+		}
+	}
+	if offset > MaxTextStack {
+		offset = MaxTextStack
+	}
+
+	var texts []model.FloatingText
+
+	// Determine if this was shield absorption + overflow
+	shieldDamage := atk.ShieldAbsorbed
+	healthDamage := atk.Damage - shieldDamage
+
+	if shieldDamage > 0 {
+		texts = append(texts, model.FloatingText{
+			UnitID:    atk.TargetID,
+			Text:      fmt.Sprintf("-%d", shieldDamage),
+			ColorRGBA: ColorTextShield,
+			StartedAt: timestamp,
+			YOffset:   min(offset, MaxTextStack),
+		})
+		offset++
+	}
+
+	if healthDamage > 0 {
+		texts = append(texts, model.FloatingText{
+			UnitID:    atk.TargetID,
+			Text:      fmt.Sprintf("-%d", healthDamage),
+			ColorRGBA: ColorTextDamage,
+			StartedAt: timestamp,
+			YOffset:   min(offset, MaxTextStack),
+		})
+	}
+
+	return texts
 }
 
 func (m Model) handleExecutionComplete(_ ExecutionComplete) (Model, Cmd) {
@@ -1246,44 +1361,55 @@ func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
 // ===== Wave 7: Timer Handlers =====
 
 func (m Model) handleTimerFired(msg TimerFired) (Model, Cmd) {
-	combat := m.Combat
-
 	switch msg.ID {
-	case TimerExecResolve:
-		// Clear arrows, resolve the position
-		combat.ActiveArrows = nil
-		m.Combat = combat
-		pos := combat.FiringOrder[combat.CurrentFiringIndex]
-		return m, ResolvePosition(pos, combat)
-
-	case TimerExecAdvance:
-		// Clear flash
-		combat.FlashTargets = nil
-		m.Combat = combat
-
-		// Check victory AFTER flash was shown (so player sees the killing blow)
+	case TimerRoundEnd:
+		// Check victory after pause
 		if victor := m.checkCombatEnd(); victor != VictorNone {
 			return m.applyCombatEnd()
 		}
-
-		// Advance to next position
-		combat.CurrentFiringIndex++
-
-		if combat.CurrentFiringIndex >= len(combat.FiringOrder) {
-			combat.ExecutionAnim = model.ExecAnimNone
-			m.Combat = combat
-			return m, func() Msg { return ExecutionComplete{} }
-		}
-
-		// Build arrows for next position
-		pos := combat.FiringOrder[combat.CurrentFiringIndex]
-		combat.ActiveArrows = buildPositionArrows(pos, combat)
-		combat.ExecutionAnim = model.ExecAnimShowArrows
+		// Start next round
+		combat := m.Combat
+		combat.FloatingTexts = nil // Clear texts for new round
 		m.Combat = combat
-		return m, StartTimer(TimerExecResolve, ArrowDisplayDuration)
+		allUnits := append(combat.PlayerUnits, combat.EnemyUnits...)
+		return m, StartNextRound(m.Seed, combat.Round+1, allUnits)
 	}
 
 	return m, nil
+}
+
+// handleExecutionAdvanceClicked advances execution by one position on click.
+func (m Model) handleExecutionAdvanceClicked(msg ExecutionAdvanceClicked) (Model, Cmd) {
+	if m.Combat.DicePhase != model.DicePhaseExecution {
+		return m, nil
+	}
+	combat := m.Combat
+
+	// Prune expired floating texts
+	combat.FloatingTexts = pruneExpiredTexts(combat.FloatingTexts, msg.Timestamp)
+
+	// Check if all positions resolved
+	if combat.CurrentFiringIndex >= len(combat.FiringOrder) {
+		m.Combat = combat
+		return m, StartTimer(TimerRoundEnd, RoundEndPause)
+	}
+
+	// Resolve current position
+	pos := combat.FiringOrder[combat.CurrentFiringIndex]
+	m.Combat = combat
+	return m, ResolvePosition(pos, combat, msg.Timestamp)
+}
+
+// pruneExpiredTexts removes floating texts older than CombatTextDuration.
+func pruneExpiredTexts(texts []model.FloatingText, nowNano int64) []model.FloatingText {
+	cutoff := nowNano - int64(CombatTextDuration)
+	result := texts[:0] // Reuse backing array
+	for _, t := range texts {
+		if t.StartedAt > cutoff {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 // buildPositionArrows creates arrows for all attackers at a firing position
@@ -1324,6 +1450,38 @@ func buildPositionArrows(pos model.FiringPosition, combat model.CombatModel) []m
 		}
 	}
 
+	return arrows
+}
+
+// computeAllPreviewArrows shows both player (solid) and enemy (dashed) arrows.
+func computeAllPreviewArrows(combat model.CombatModel) []model.TargetingArrow {
+	arrows := computeEnemyPreviewArrows(combat) // Dashed
+	arrows = append(arrows, computePlayerPreviewArrows(combat)...)
+	return arrows
+}
+
+// computePlayerPreviewArrows shows where player BOARD units will attack.
+// NOTE: Player command dice are NOT shown because the player manually
+// chooses targets during PlayerCommand phase - showing auto-targeted arrows
+// would be misleading.
+func computePlayerPreviewArrows(combat model.CombatModel) []model.TargetingArrow {
+	var arrows []model.TargetingArrow
+
+	// Player board units only (not command) → position-based targeting
+	for _, u := range combat.PlayerUnits {
+		if u.IsCommand() || !u.IsAlive() {
+			continue
+		}
+		targetID := SelectTargetUnit(u, combat.EnemyUnits)
+		if targetID != "" {
+			arrows = append(arrows, model.TargetingArrow{
+				SourceUnitID: u.ID,
+				TargetUnitID: targetID,
+				EffectType:   entity.DieDamage,
+				IsDashed:     false, // Player = solid
+			})
+		}
+	}
 	return arrows
 }
 

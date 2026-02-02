@@ -8,10 +8,9 @@ import (
 	"wulfaz/internal/model"
 )
 
-// Timer IDs for execution phase animation
+// Timer IDs
 const (
-	TimerExecResolve = "exec_resolve"
-	TimerExecAdvance = "exec_advance"
+	TimerRoundEnd = "round_end" // 2 second end-of-round pause
 )
 
 // StartTimer creates a Cmd that requests a timer from the runtime.
@@ -96,7 +95,7 @@ func RerollUnlockedDice(seed int64, unitID string, current []entity.RolledDie) C
 }
 
 // ApplyDiceEffect creates a Cmd that computes effect result.
-func ApplyDiceEffect(sourceID, targetID string, effect entity.DieType, value int, combat model.CombatModel) Cmd {
+func ApplyDiceEffect(sourceID, targetID string, effect entity.DieType, value int, combat model.CombatModel, timestamp int64) Cmd {
 	return func() Msg {
 		// Find target unit
 		var target entity.Unit
@@ -131,15 +130,16 @@ func ApplyDiceEffect(sourceID, targetID string, effect entity.DieType, value int
 		}
 
 		newHealth, newShields := health, shields
+		shieldAbsorbed := 0
 
 		switch effect {
 		case entity.DieDamage:
 			remaining := value
 			// Shields absorb first
 			if remaining > 0 && newShields > 0 {
-				absorbed := min(remaining, newShields)
-				remaining -= absorbed
-				newShields -= absorbed
+				shieldAbsorbed = min(remaining, newShields)
+				remaining -= shieldAbsorbed
+				newShields -= shieldAbsorbed
 			}
 			newHealth = max(0, health-remaining)
 
@@ -151,12 +151,14 @@ func ApplyDiceEffect(sourceID, targetID string, effect entity.DieType, value int
 		}
 
 		return DiceEffectApplied{
-			SourceUnitID: sourceID,
-			TargetUnitID: targetID,
-			Effect:       effect,
-			Value:        value,
-			NewHealth:    newHealth,
-			NewShields:   newShields,
+			SourceUnitID:   sourceID,
+			TargetUnitID:   targetID,
+			Effect:         effect,
+			Value:          value,
+			NewHealth:      newHealth,
+			NewShields:     newShields,
+			ShieldAbsorbed: shieldAbsorbed,
+			Timestamp:      timestamp,
 		}
 	}
 }
@@ -221,7 +223,7 @@ func ExecuteExecution(combat model.CombatModel) Cmd {
 
 // ResolvePosition calculates attacks for units at one position.
 // Key: Collect ALL attacks first, THEN calculate final HP (simultaneous).
-func ResolvePosition(pos model.FiringPosition, combat model.CombatModel) Cmd {
+func ResolvePosition(pos model.FiringPosition, combat model.CombatModel, timestamp int64) Cmd {
 	return func() Msg {
 		var attacks []AttackResult
 		unitMap := buildUnitMap(combat)
@@ -238,7 +240,7 @@ func ResolvePosition(pos model.FiringPosition, combat model.CombatModel) Cmd {
 		attacks = resolveAttacks(attacks, pos.EnemyUnits, combat.PlayerUnits, playerCmd,
 			unitMap, combat.RolledDice, hpSnapshot)
 
-		return PositionResolved{Position: pos.Position, Attacks: attacks}
+		return PositionResolved{Position: pos.Position, Attacks: attacks, Timestamp: timestamp}
 	}
 }
 
@@ -274,13 +276,14 @@ func resolveAttacks(
 				// Convert overflow results to AttackResults
 				for _, r := range results {
 					attacks = append(attacks, AttackResult{
-						AttackerID: uid,
-						TargetID:   r.TargetID,
-						DieIndex:   dieIdx,
-						Damage:     r.Damage,
-						NewHealth:  r.NewHP,
-						NewShields: r.NewShields,
-						TargetDead: r.Killed,
+						AttackerID:     uid,
+						TargetID:       r.TargetID,
+						DieIndex:       dieIdx,
+						Damage:         r.Damage,
+						ShieldAbsorbed: r.ShieldAbsorbed,
+						NewHealth:      r.NewHP,
+						NewShields:     r.NewShields,
+						TargetDead:     r.Killed,
 					})
 				}
 			} else {
@@ -295,13 +298,14 @@ func resolveAttacks(
 					hp = max(0, hp-remaining)
 
 					attacks = append(attacks, AttackResult{
-						AttackerID: uid,
-						TargetID:   targetCmd.ID,
-						DieIndex:   dieIdx,
-						Damage:     rd.Value(),
-						NewHealth:  hp,
-						NewShields: shields,
-						TargetDead: hp <= 0,
+						AttackerID:     uid,
+						TargetID:       targetCmd.ID,
+						DieIndex:       dieIdx,
+						Damage:         rd.Value(),
+						ShieldAbsorbed: absorbed,
+						NewHealth:      hp,
+						NewShields:     shields,
+						TargetDead:     hp <= 0,
 					})
 					hpSnapshot[targetCmd.ID] = [2]int{hp, shields}
 				}

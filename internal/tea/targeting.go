@@ -88,11 +88,12 @@ func AnyAliveUnits(units []entity.Unit) bool {
 
 // OverflowResult tracks damage to one unit in overflow chain.
 type OverflowResult struct {
-	TargetID   string
-	Damage     int
-	NewHP      int
-	NewShields int
-	Killed     bool
+	TargetID       string
+	Damage         int
+	ShieldAbsorbed int // How much damage shields absorbed
+	NewHP          int
+	NewShields     int
+	Killed         bool
 }
 
 // ApplyDamageWithOverflow applies damage with MTG-style overflow.
@@ -144,11 +145,12 @@ func ApplyDamageWithOverflow(
 		hp -= hpDamage
 
 		results = append(results, OverflowResult{
-			TargetID:   target.ID,
-			Damage:     absorbed + hpDamage,
-			NewHP:      hp,
-			NewShields: shields,
-			Killed:     hp <= 0,
+			TargetID:       target.ID,
+			Damage:         absorbed + hpDamage,
+			ShieldAbsorbed: absorbed,
+			NewHP:          hp,
+			NewShields:     shields,
+			Killed:         hp <= 0,
 		})
 
 		hpSnapshot[target.ID] = [2]int{hp, shields}

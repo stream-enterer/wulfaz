@@ -163,6 +163,14 @@ func (a *App) pollCombatInput() {
 		return
 	}
 
+	// EXECUTION PHASE: click to advance
+	if combat.DicePhase == model.DicePhaseExecution {
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			a.dispatch(tea.ExecutionAdvanceClicked{Timestamp: time.Now().UnixNano()})
+		}
+		return
+	}
+
 	// PLAYER COMMAND PHASE
 	if combat.DicePhase == model.DicePhasePlayerCommand {
 		// R key = reroll unlocked dice
@@ -264,6 +272,7 @@ func (a *App) handleLeftClick(mx, my int) {
 					TargetUnitID: region.UnitID,
 					Value:        die.Value(),
 					Effect:       die.Type(),
+					Timestamp:    time.Now().UnixNano(),
 				})
 			}
 			return

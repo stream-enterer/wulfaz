@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -322,19 +323,6 @@ func arrowColor(effectType entity.DieType) color.RGBA {
 	}
 }
 
-// flashColor returns the bright flash color for an effect type
-func flashColor(effectType entity.DieType) color.RGBA {
-	switch effectType {
-	case entity.DieDamage:
-		return color.RGBA{255, 120, 120, 255} // Bright red
-	case entity.DieShield:
-		return color.RGBA{120, 160, 255, 255} // Bright blue
-	case entity.DieHeal:
-		return color.RGBA{120, 255, 160, 255} // Bright green
-	default:
-		return color.RGBA{255, 255, 255, 255}
-	}
-}
 
 // drawTargetingArrows renders all active arrows
 func drawTargetingArrows(screen *ebiten.Image, combat model.CombatModel, boardX float32) {
@@ -485,13 +473,8 @@ func drawUnlockButton(screen *ebiten.Image, x, y int) image.Rectangle {
 }
 
 // drawCommandUnit draws command unit card and returns its rectangle.
-func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y float32, flash *entity.DieType) image.Rectangle {
-	// Draw card background with flash support
-	fillColor := c
-	if flash != nil {
-		fillColor = flashColor(*flash)
-	}
-	vector.FillRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, fillColor, false)
+func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y float32) image.Rectangle {
+	vector.FillRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, c, false)
 	vector.StrokeRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, FrameStroke, color.White, false)
 
 	// Unit ID at top
@@ -526,14 +509,8 @@ func drawUnitsOnBoard(screen *ebiten.Image, units []entity.Unit, boardX, boardY 
 		cw := getCombatWidth(unit)
 		w := calcUnitWidth(cw)
 
-		// Get flash state for this unit
-		var flash *entity.DieType
-		if ft, ok := combat.FlashTargets[unit.ID]; ok {
-			flash = &ft
-		}
-
 		// Draw unit card
-		drawUnit(screen, unit, c, currentX, unitY, w, flash)
+		drawUnit(screen, unit, c, currentX, unitY, w)
 		unitRect := image.Rect(int(currentX), int(unitY), int(currentX+w), int(unitY)+SlotHeight)
 		regions = append(regions, HitRegion{Rect: unitRect, Type: "unit", UnitID: unit.ID, DieIndex: -1})
 
@@ -598,11 +575,7 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	if enemyCmd != nil {
 		cmdX := boardX + (BoardWidth+2*BoardMargin-CommandUnitWidth)/2
 		cmdY := float32(enemyBoardY - CommandGap - CommandUnitHeight)
-		var enemyCmdFlash *entity.DieType
-		if ft, ok := combat.FlashTargets[enemyCmd.ID]; ok {
-			enemyCmdFlash = &ft
-		}
-		rect := drawCommandUnit(screen, *enemyCmd, colorEnemy, cmdX, cmdY, enemyCmdFlash)
+		rect := drawCommandUnit(screen, *enemyCmd, colorEnemy, cmdX, cmdY)
 		regions = append(regions, HitRegion{Rect: rect, Type: "unit", UnitID: enemyCmd.ID, DieIndex: -1})
 		diceRegions := drawCommandDice(screen, *enemyCmd, cmdX, cmdY, combat, false)
 		regions = append(regions, diceRegions...)
@@ -622,11 +595,7 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	if playerCmd != nil {
 		cmdX := boardX + (BoardWidth+2*BoardMargin-CommandUnitWidth)/2
 		cmdY := float32(playerBoardY + SlotHeight + 2*BoardMargin + CommandGap)
-		var playerCmdFlash *entity.DieType
-		if ft, ok := combat.FlashTargets[playerCmd.ID]; ok {
-			playerCmdFlash = &ft
-		}
-		rect := drawCommandUnit(screen, *playerCmd, colorPlayer, cmdX, cmdY, playerCmdFlash)
+		rect := drawCommandUnit(screen, *playerCmd, colorPlayer, cmdX, cmdY)
 		regions = append(regions, HitRegion{Rect: rect, Type: "unit", UnitID: playerCmd.ID, DieIndex: -1})
 		diceRegions := drawCommandDice(screen, *playerCmd, cmdX, cmdY, combat, true)
 		regions = append(regions, diceRegions...) // Die regions added AFTER unit region
@@ -637,7 +606,13 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 		drawTargetingArrows(screen, combat, boardX)
 	}
 
+	// Draw floating texts (Wave 7)
+	drawFloatingTexts(screen, combat, boardX)
+
 	// Phase-specific UI hints
+	if combat.DicePhase == model.DicePhaseExecution {
+		drawClickPrompt(screen, boardX)
+	}
 	if combat.DicePhase == model.DicePhasePlayerCommand {
 		allLocked := allCommandDiceLockedRenderer(combat)
 
@@ -671,12 +646,8 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	return regions
 }
 
-func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width float32, flash *entity.DieType) {
-	fillColor := c
-	if flash != nil {
-		fillColor = flashColor(*flash)
-	}
-	vector.FillRect(screen, x, y, width, SlotHeight, fillColor, false)
+func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width float32) {
+	vector.FillRect(screen, x, y, width, SlotHeight, c, false)
 	vector.StrokeRect(screen, x, y, width, SlotHeight, FrameStroke, color.White, false)
 
 	// Unit ID (truncated for narrow units)
@@ -768,4 +739,122 @@ func renderChoice(screen *ebiten.Image, ct tea.ChoiceType, choices []string) {
 		line := fmt.Sprintf("[%d] %s", i+1, c)
 		ebitenutil.DebugPrintAt(screen, line, w/2-60, h/2-30+i*20)
 	}
+}
+
+// ===== Wave 7: Floating Text Rendering =====
+
+// drawFloatingTexts renders all active floating combat texts above units.
+func drawFloatingTexts(screen *ebiten.Image, combat model.CombatModel, boardX float32) {
+	now := time.Now().UnixNano()
+	durationNano := int64(tea.CombatTextDuration)
+
+	for _, ft := range combat.FloatingTexts {
+		elapsed := now - ft.StartedAt
+		if elapsed < 0 || elapsed > durationNano {
+			continue
+		}
+
+		// Get unit bounds
+		unitX, unitY, unitW, unitH := getUnitBounds(ft.UnitID, combat, boardX)
+		if unitW == 0 {
+			continue // Unit not found
+		}
+
+		// Progress: 0.0 to 1.0
+		progress := float32(elapsed) / float32(durationNano)
+
+		// Y position: start at 40% from top, scroll to 10% from top
+		startY := unitY + unitH*0.4
+		endY := unitY + unitH*0.1
+		textY := startY + (endY-startY)*progress
+
+		// Stack offset (capped at MaxTextStack)
+		textY += float32(ft.YOffset) * 14
+
+		// Center X
+		textX := unitX + unitW/2
+
+		// Alpha fade: full opacity for first 70%, then fade to 0
+		alpha := uint8(255)
+		if progress > 0.7 {
+			alpha = uint8(float32(255) * (1.0 - (progress-0.7)/0.3))
+		}
+
+		// Convert color and draw
+		c := uint32ToColor(ft.ColorRGBA)
+		c.A = alpha
+		drawCombatText(screen, ft.Text, textX, textY, c)
+	}
+}
+
+// getUnitBounds mirrors getUnitCenter's cumulative positioning approach
+// since units have variable widths based on combat_width attribute.
+func getUnitBounds(unitID string, combat model.CombatModel, boardX float32) (x, y, w, h float32) {
+	// Check player units - cumulative positioning like drawUnitsOnBoard
+	currentX := boardX + float32(BoardMargin)
+	for _, u := range combat.PlayerUnits {
+		if u.IsCommand() {
+			if u.ID == unitID {
+				cmdX := boardX + (float32(BoardWidth)+2*float32(BoardMargin)-float32(CommandUnitWidth))/2
+				cmdY := float32(playerBoardY + SlotHeight + 2*BoardMargin + CommandGap)
+				return cmdX, cmdY, CommandUnitWidth, CommandUnitHeight
+			}
+			continue
+		}
+		cw := getCombatWidth(u)
+		uw := calcUnitWidth(cw)
+		if u.ID == unitID {
+			return currentX, float32(playerBoardY + BoardMargin), uw, SlotHeight
+		}
+		currentX += uw + UnitGap
+	}
+
+	// Check enemy units
+	currentX = boardX + float32(BoardMargin)
+	for _, u := range combat.EnemyUnits {
+		if u.IsCommand() {
+			if u.ID == unitID {
+				cmdX := boardX + (float32(BoardWidth)+2*float32(BoardMargin)-float32(CommandUnitWidth))/2
+				cmdY := float32(enemyBoardY - CommandGap - CommandUnitHeight)
+				return cmdX, cmdY, CommandUnitWidth, CommandUnitHeight
+			}
+			continue
+		}
+		cw := getCombatWidth(u)
+		uw := calcUnitWidth(cw)
+		if u.ID == unitID {
+			return currentX, float32(enemyBoardY + BoardMargin), uw, SlotHeight
+		}
+		currentX += uw + UnitGap
+	}
+	return 0, 0, 0, 0
+}
+
+// uint32ToColor converts 0xRRGGBBAA to color.RGBA.
+func uint32ToColor(rgba uint32) color.RGBA {
+	return color.RGBA{
+		R: uint8((rgba >> 24) & 0xFF),
+		G: uint8((rgba >> 16) & 0xFF),
+		B: uint8((rgba >> 8) & 0xFF),
+		A: uint8(rgba & 0xFF),
+	}
+}
+
+// drawCombatText draws centered text using debug font.
+func drawCombatText(screen *ebiten.Image, s string, x, y float32, c color.RGBA) {
+	// Debug font: ~6px wide per char
+	textWidth := float32(len(s) * 6)
+	// For colored text with debug font, we create a temporary image
+	// Since ebitenutil.DebugPrint only supports white, we'll use it as-is for MVP
+	// (A more sophisticated approach would use text.Draw with a proper font)
+	ebitenutil.DebugPrintAt(screen, s, int(x-textWidth/2), int(y))
+}
+
+// drawClickPrompt shows "Click to continue" during execution phase.
+func drawClickPrompt(screen *ebiten.Image, boardX float32) {
+	s := "Click to continue"
+	x := boardX + BoardWidth/2
+	y := float32(720 - 40) // screenHeight=720 from app.go constants
+	textWidth := float32(len(s) * 6)
+	ebitenutil.DebugPrintAt(screen, s, int(x-textWidth/2), int(y))
 }
