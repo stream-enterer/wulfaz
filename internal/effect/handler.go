@@ -2,6 +2,7 @@ package effect
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 
 	"wulfaz/internal/core"
@@ -167,10 +168,7 @@ func handleConsumeAmmo(params map[string]any, ctx EffectContext) EffectResult {
 	}
 
 	// Calculate new ammo
-	newAmmo := ammoAttr.Base - amount
-	if newAmmo < 0 {
-		newAmmo = 0
-	}
+	newAmmo := max(0, ammoAttr.Base-amount)
 
 	// Create modified unit (deep copy with updated item)
 	modifiedUnit := copyUnit(ctx.SourceUnit)
@@ -188,10 +186,8 @@ func handleConsumeAmmo(params map[string]any, ctx EffectContext) EffectResult {
 
 	// Update the item's ammo
 	modifiedItem := modifiedContents[itemIndex]
-	modifiedItemAttrs := make(map[string]core.Attribute)
-	for k, v := range modifiedItem.Attributes {
-		modifiedItemAttrs[k] = v
-	}
+	modifiedItemAttrs := make(map[string]core.Attribute, len(modifiedItem.Attributes))
+	maps.Copy(modifiedItemAttrs, modifiedItem.Attributes)
 	modifiedAmmoAttr := ammoAttr
 	modifiedAmmoAttr.Base = newAmmo
 	modifiedItemAttrs["ammo"] = modifiedAmmoAttr
@@ -275,15 +271,11 @@ func getEnemiesOf(source entity.Unit, ctx EffectContext) []entity.Unit {
 
 // copyUnit creates a copy of a unit with new maps and slices for modification safety
 func copyUnit(u entity.Unit) entity.Unit {
-	newAttrs := make(map[string]core.Attribute)
-	for k, v := range u.Attributes {
-		newAttrs[k] = v
-	}
+	newAttrs := make(map[string]core.Attribute, len(u.Attributes))
+	maps.Copy(newAttrs, u.Attributes)
 
-	newParts := make(map[string]entity.Part)
-	for k, v := range u.Parts {
-		newParts[k] = v
-	}
+	newParts := make(map[string]entity.Part, len(u.Parts))
+	maps.Copy(newParts, u.Parts)
 
 	newTags := make([]core.Tag, len(u.Tags))
 	copy(newTags, u.Tags)
@@ -294,6 +286,18 @@ func copyUnit(u entity.Unit) entity.Unit {
 	newAbilities := make([]core.Ability, len(u.Abilities))
 	copy(newAbilities, u.Abilities)
 
+	var newDice []entity.Die
+	if u.Dice != nil {
+		newDice = make([]entity.Die, len(u.Dice))
+		for i, d := range u.Dice {
+			if d.Faces != nil {
+				faces := make([]entity.DieFace, len(d.Faces))
+				copy(faces, d.Faces)
+				newDice[i] = entity.Die{Faces: faces}
+			}
+		}
+	}
+
 	return entity.Unit{
 		ID:         u.ID,
 		TemplateID: u.TemplateID,
@@ -302,8 +306,10 @@ func copyUnit(u entity.Unit) entity.Unit {
 		Parts:      newParts,
 		Triggers:   newTriggers,
 		Abilities:  newAbilities,
+		Dice:       newDice,
 		Pilot:      u.Pilot,
 		HasPilot:   u.HasPilot,
+		Position:   u.Position,
 	}
 }
 
