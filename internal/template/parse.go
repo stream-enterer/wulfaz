@@ -474,7 +474,11 @@ func parseTriggers(node *document.Node, filename string) ([]core.Trigger, error)
 
 // parseRequirement parses a "requirement" node.
 func parseRequirement(node *document.Node, filename string) (core.Requirement, error) {
-	scope := getOptStringProp(node, "scope", "unit")
+	scopeStr := getOptStringProp(node, "scope", "unit")
+	scope, err := parseScope(scopeStr)
+	if err != nil {
+		return core.Requirement{}, &ParseError{File: filename, Node: "requirement", Field: "scope", Message: err.Error()}
+	}
 
 	onUnmetStr := getOptStringProp(node, "on_unmet", "disabled")
 	onUnmet, err := parseOnUnmet(onUnmetStr)

@@ -49,7 +49,7 @@ func TestCopyItem_RoundTrip(t *testing.T) {
 			{Scope: core.ScopeUnit, Attribute: "accuracy", Operation: core.ModifierOpAdd, Value: 2},
 		},
 		Requirements: []core.Requirement{
-			{Scope: "mount", Condition: core.Condition{Type: core.ConditionHasTag, Params: map[string]any{"tag": "arm"}}},
+			{Scope: core.ScopeMount, Condition: core.Condition{Type: core.ConditionHasTag, Params: map[string]any{"tag": "arm"}}},
 		},
 	}
 
@@ -295,7 +295,7 @@ func TestCopyItem_Independence(t *testing.T) {
 			{Scope: core.ScopeUnit, Attribute: "speed", Value: 2},
 		},
 		Requirements: []core.Requirement{
-			{Scope: "unit", Condition: core.Condition{Type: core.ConditionHasTag, Params: map[string]any{"tag": "mech"}}},
+			{Scope: core.ScopeUnit, Condition: core.Condition{Type: core.ConditionHasTag, Params: map[string]any{"tag": "mech"}}},
 		},
 	}
 	copied := CopyItem(orig, "new_id")

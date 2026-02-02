@@ -175,7 +175,7 @@ func (a *App) pollCombatInput() {
 	if combat.DicePhase == model.DicePhasePlayerCommand {
 		// R key = reroll unlocked dice
 		if inpututil.IsKeyJustPressed(ebiten.KeyR) && combat.RerollsRemaining > 0 {
-			playerCmd := findPlayerCommandUnit(combat)
+			playerCmd := tea.FindPlayerCommandUnit(combat)
 			if playerCmd != nil && !tea.AllCommandDiceLocked(combat) {
 				rolled := combat.RolledDice[playerCmd.ID]
 				cmd := tea.RerollUnlockedDice(a.model.Seed+int64(combat.Round)*100, playerCmd.ID, rolled)
@@ -202,7 +202,7 @@ func (a *App) pollCombatInput() {
 func (a *App) handleLeftClick(mx, my int) {
 	combat := a.model.Combat
 	pt := image.Point{mx, my}
-	playerCmd := findPlayerCommandUnit(combat)
+	playerCmd := tea.FindPlayerCommandUnit(combat)
 	allLocked := tea.AllCommandDiceLocked(combat)
 
 	// Check ↰ unlock button first (only visible when all locked AND rerolls > 0)
@@ -283,16 +283,6 @@ func (a *App) handleLeftClick(mx, my int) {
 	if allLocked && combat.SelectedUnitID != "" {
 		a.dispatch(tea.DieDeselected{})
 	}
-}
-
-// findPlayerCommandUnit returns the player's command unit (or nil).
-func findPlayerCommandUnit(combat model.CombatModel) *entity.Unit {
-	for i := range combat.PlayerUnits {
-		if combat.PlayerUnits[i].IsCommand() {
-			return &combat.PlayerUnits[i]
-		}
-	}
-	return nil
 }
 
 // dispatch sends a message through the TEA update cycle

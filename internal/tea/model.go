@@ -564,8 +564,9 @@ func applyModifications(unit entity.Unit, mods ModifiedUnit) entity.Unit {
 
 // ===== Dice Phase Helpers (Wave 2) =====
 
-// findPlayerCommandUnit returns the player's command unit (or nil).
-func findPlayerCommandUnit(combat model.CombatModel) *entity.Unit {
+// FindPlayerCommandUnit returns the player's command unit (or nil).
+// Exported for use by app package.
+func FindPlayerCommandUnit(combat model.CombatModel) *entity.Unit {
 	for i := range combat.PlayerUnits {
 		if combat.PlayerUnits[i].IsCommand() {
 			return &combat.PlayerUnits[i]
@@ -600,7 +601,7 @@ func (m Model) isValidDiceInteraction(unitID string, requiredPhase model.DicePha
 		return false
 	}
 	// Validate unit is player's command unit
-	cmd := findPlayerCommandUnit(m.Combat)
+	cmd := FindPlayerCommandUnit(m.Combat)
 	return cmd != nil && cmd.ID == unitID
 }
 
@@ -774,7 +775,7 @@ func updateUnitHP(units []entity.Unit, unitID string, newHP, newShields int) {
 // allCommandDiceActivated checks if all player command dice are activated.
 // Blank faces are skipped - they don't need activation.
 func allCommandDiceActivated(combat model.CombatModel) bool {
-	cmd := findPlayerCommandUnit(combat)
+	cmd := FindPlayerCommandUnit(combat)
 	if cmd == nil {
 		return true
 	}
@@ -798,7 +799,7 @@ func allCommandDiceActivated(combat model.CombatModel) bool {
 // AllCommandDiceLocked checks if all player command dice are locked.
 // Exported for use by renderer and app packages.
 func AllCommandDiceLocked(combat model.CombatModel) bool {
-	cmd := findPlayerCommandUnit(combat)
+	cmd := FindPlayerCommandUnit(combat)
 	if cmd == nil {
 		return true
 	}
@@ -1341,7 +1342,7 @@ func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
 		return m, nil
 	}
 
-	cmd := findPlayerCommandUnit(m.Combat)
+	cmd := FindPlayerCommandUnit(m.Combat)
 	if cmd == nil {
 		return m, nil
 	}
@@ -1496,16 +1497,6 @@ func computeEnemyPreviewArrows(combat model.CombatModel) []model.TargetingArrow 
 	}
 
 	return arrows
-}
-
-// findUnitByID returns a pointer to the unit with given ID, or nil
-func findUnitByID(units []entity.Unit, id string) *entity.Unit {
-	for i := range units {
-		if units[i].ID == id {
-			return &units[i]
-		}
-	}
-	return nil
 }
 
 func (m Model) handleCombatEnded(msg CombatEnded) (Model, Cmd) {

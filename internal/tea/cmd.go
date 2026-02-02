@@ -229,7 +229,7 @@ func ResolvePosition(pos model.FiringPosition, combat model.CombatModel, timesta
 		unitMap := buildUnitMap(combat)
 		hpSnapshot := buildHPSnapshot(combat)
 
-		playerCmd := findPlayerCommandUnit(combat)
+		playerCmd := FindPlayerCommandUnit(combat)
 		enemyCmd := findEnemyCommandUnit(combat)
 
 		// Player units attack enemy units

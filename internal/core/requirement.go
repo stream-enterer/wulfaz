@@ -9,7 +9,7 @@ const (
 )
 
 type Requirement struct {
-	Scope     string // "unit", "part", "mount"
+	Scope     Scope
 	Condition Condition
 	OnUnmet   OnUnmet
 }

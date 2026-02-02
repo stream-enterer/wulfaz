@@ -115,7 +115,7 @@ func TestCopyProvidedModifier_RoundTrip(t *testing.T) {
 
 func TestCopyRequirement_RoundTrip(t *testing.T) {
 	orig := Requirement{
-		Scope:     "part",
+		Scope:     ScopePart,
 		Condition: Condition{Type: ConditionAttrGTE, Params: map[string]any{"attribute": "slots", "value": 2}},
 		OnUnmet:   OnUnmetCannotMount,
 	}
@@ -268,7 +268,7 @@ func TestCopyProvidedModifier_Independence(t *testing.T) {
 
 func TestCopyRequirement_Independence(t *testing.T) {
 	orig := Requirement{
-		Scope:     "unit",
+		Scope:     ScopeUnit,
 		Condition: Condition{Type: ConditionHasTag, Params: map[string]any{"tag": "mech"}},
 		OnUnmet:   OnUnmetDisabled,
 	}
