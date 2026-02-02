@@ -287,3 +287,35 @@ type ExecutionAdvanceClicked struct {
 }
 
 func (ExecutionAdvanceClicked) isMsg() {}
+
+// ===== Drag-and-Drop Messages =====
+
+// UnitDragStarted signals player began dragging a unit.
+type UnitDragStarted struct {
+	UnitID        string
+	OriginalIndex int // Roster index (excluding command unit)
+	StartX        int
+	StartY        int
+}
+
+func (UnitDragStarted) isMsg() {}
+
+// UnitDragMoved signals drag position changed.
+type UnitDragMoved struct {
+	CurrentX int
+	CurrentY int
+}
+
+func (UnitDragMoved) isMsg() {}
+
+// UnitDragEnded signals player released drag.
+type UnitDragEnded struct {
+	InsertionIndex int // -1 if cancelled/invalid
+}
+
+func (UnitDragEnded) isMsg() {}
+
+// UnitDragCancelled signals drag cancelled (ESC/right-click).
+type UnitDragCancelled struct{}
+
+func (UnitDragCancelled) isMsg() {}

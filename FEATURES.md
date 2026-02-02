@@ -328,7 +328,7 @@ Win/loss detection, tie-breaking, combat end.
 - **Status:** Complete
 - **Source:** DESIGN.md:141
 - **Depends:** F-180
-- **Description:** Combat victory transitions to PhaseChoice, no dedicated screen (Wave 3)
+- **Description:** Combat victory transitions to PhaseInterCombat, no dedicated screen (Wave 3)
 
 _Reserved: F-184 – F-189_
 

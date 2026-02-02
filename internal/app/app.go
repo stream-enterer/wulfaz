@@ -103,52 +103,137 @@ func (a *App) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 // pollInput checks for player input and dispatches appropriate messages
 func (a *App) pollInput() {
-	// ESC always quits
+	// ESC handling - cancel drag first, then quit
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		if a.model.Phase == tea.PhaseInterCombat && a.model.DragState.IsDragging {
+			a.dispatch(tea.UnitDragCancelled{})
+			return
+		}
 		a.dispatch(tea.PlayerQuit{})
 		return
 	}
 
-	// Choice phase
-	if a.model.Phase == tea.PhaseChoice {
-		var selected int = -1
-		switch {
-		case inpututil.IsKeyJustPressed(ebiten.Key1):
-			selected = 0
-		case inpututil.IsKeyJustPressed(ebiten.Key2):
-			selected = 1
-		case inpututil.IsKeyJustPressed(ebiten.Key3):
-			selected = 2
+	switch a.model.Phase {
+	case tea.PhaseMenu:
+		// Menu input handled elsewhere
+	case tea.PhaseCombat:
+		if a.model.Combat.Phase == model.CombatActive {
+			a.pollCombatInput()
 		}
-		if selected >= 0 {
-			if a.model.ChoiceType == tea.ChoiceReward {
-				a.dispatch(tea.ChoiceSelected{Index: selected})
-			} else {
-				// Fight selection: App builds combat from persistent roster
+		// Pause/resume
+		if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+			if a.model.Combat.Phase == model.CombatActive {
+				a.dispatch(tea.PlayerPaused{})
+			} else if a.model.Combat.Phase == model.CombatPaused {
+				a.dispatch(tea.PlayerResumed{})
+			}
+		}
+	case tea.PhaseInterCombat:
+		a.pollInterCombatInput()
+	case tea.PhaseGameOver:
+		// ESC handled above
+	}
+}
+
+// pollInterCombatInput handles inter-combat phase input (rewards, fights, drag-drop)
+func (a *App) pollInterCombatInput() {
+	mx, my := ebiten.CursorPosition()
+
+	// Active drag handling
+	if a.model.DragState.IsDragging {
+		a.dispatch(tea.UnitDragMoved{CurrentX: mx, CurrentY: my})
+
+		if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+			idx := a.computeInsertionIndex(mx)
+			a.dispatch(tea.UnitDragEnded{InsertionIndex: idx})
+		}
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
+			a.dispatch(tea.UnitDragCancelled{})
+		}
+		return
+	}
+
+	// Keyboard: reward/fight selection (1/2/3)
+	for i, key := range []ebiten.Key{ebiten.Key1, ebiten.Key2, ebiten.Key3} {
+		if inpututil.IsKeyJustPressed(key) {
+			// Check if this is fight selection BEFORE dispatching
+			isFightSelection := a.model.ChoiceType == tea.ChoiceFight
+
+			a.dispatch(tea.ChoiceSelected{Index: i})
+
+			// If fight was selected, start combat (or end MVP game)
+			if isFightSelection {
+				// MVP: end game after fight 2
 				if a.model.FightNumber >= 2 {
-					a.dispatch(tea.PlayerQuit{}) // MVP: end after fight 2
+					a.dispatch(tea.PlayerQuit{})
 				} else {
 					combat := a.buildCombatFromRoster()
 					a.dispatch(tea.CombatStarted{Combat: combat})
 				}
 			}
-		}
-		return
-	}
-
-	// Combat phase input
-	if a.model.Phase == tea.PhaseCombat && a.model.Combat.Phase == model.CombatActive {
-		a.pollCombatInput()
-	}
-
-	// Pause/resume
-	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		if a.model.Combat.Phase == model.CombatActive {
-			a.dispatch(tea.PlayerPaused{})
-		} else if a.model.Combat.Phase == model.CombatPaused {
-			a.dispatch(tea.PlayerResumed{})
+			return
 		}
 	}
+
+	// Mouse: start drag on unit click
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		pt := image.Point{mx, my}
+		for _, region := range a.hitRegions {
+			if pt.In(region.Rect) && region.Type == "unit" && region.DieIndex == -1 {
+				// Find roster index (excluding command unit)
+				idx := a.findRosterIndex(region.UnitID)
+				if idx >= 0 {
+					a.dispatch(tea.UnitDragStarted{
+						UnitID: region.UnitID, OriginalIndex: idx,
+						StartX: mx, StartY: my,
+					})
+				}
+				return
+			}
+		}
+	}
+}
+
+// computeInsertionIndex determines insertion point from mouse X position
+func (a *App) computeInsertionIndex(mouseX int) int {
+	boardX := renderer.CalcBoardX(screenWidth)
+	currentX := boardX + float32(renderer.BoardMargin)
+
+	// Get board units (exclude command)
+	boardIdx := 0
+	for _, unit := range a.model.PlayerRoster {
+		if unit.IsCommand() {
+			continue
+		}
+		// Skip the dragged unit
+		if unit.ID == a.model.DragState.DraggedUnitID {
+			continue
+		}
+		cw := renderer.GetCombatWidth(unit)
+		unitW := renderer.CalcUnitWidth(cw)
+		midPoint := currentX + unitW/2
+		if float32(mouseX) < midPoint {
+			return boardIdx
+		}
+		currentX += unitW + float32(renderer.UnitGap)
+		boardIdx++
+	}
+	return boardIdx // Insert at end
+}
+
+// findRosterIndex returns board unit index (excluding command), -1 if not found
+func (a *App) findRosterIndex(unitID string) int {
+	boardIdx := 0
+	for _, unit := range a.model.PlayerRoster {
+		if unit.IsCommand() {
+			continue
+		}
+		if unit.ID == unitID {
+			return boardIdx
+		}
+		boardIdx++
+	}
+	return -1 // Not found or was command unit
 }
 
 // pollCombatInput handles dice phase interactions

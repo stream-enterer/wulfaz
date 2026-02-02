@@ -33,7 +33,7 @@ type GamePhase int
 const (
 	PhaseMenu GamePhase = iota
 	PhaseCombat
-	PhaseChoice // reward or fight selection
+	PhaseInterCombat // Board visible, rewards/fight as overlays, repositioning enabled
 	PhaseGameOver
 )
 
@@ -67,6 +67,15 @@ func (v Victor) String() string {
 	return ""
 }
 
+// DragState tracks unit drag-and-drop state during inter-combat phase.
+type DragState struct {
+	IsDragging    bool
+	DraggedUnitID string
+	OriginalIndex int // Roster index (board units only, excludes command)
+	CurrentX      int // Mouse position
+	CurrentY      int
+}
+
 type Model struct {
 	Version int
 	Phase   GamePhase
@@ -80,6 +89,8 @@ type Model struct {
 	FightNumber int
 	// F-155/F-156: Persistent player roster (survives between fights)
 	PlayerRoster []entity.Unit
+	// Drag-and-drop state for inter-combat repositioning
+	DragState DragState
 }
 
 func (m Model) Update(msg Msg) (Model, Cmd) {
@@ -167,6 +178,16 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 	// Wave 7: Click-through execution
 	case ExecutionAdvanceClicked:
 		return m.handleExecutionAdvanceClicked(msg)
+
+	// Drag-and-drop messages
+	case UnitDragStarted:
+		return m.handleUnitDragStarted(msg)
+	case UnitDragMoved:
+		return m.handleUnitDragMoved(msg)
+	case UnitDragEnded:
+		return m.handleUnitDragEnded(msg)
+	case UnitDragCancelled:
+		return m.handleUnitDragCancelled(msg)
 
 	default:
 		return m, nil
@@ -1595,10 +1616,11 @@ func (m Model) handleCombatEnded(msg CombatEnded) (Model, Cmd) {
 		// F-155/F-156: Persist surviving units (syncRosterFromCombat filters dead)
 		m.PlayerRoster = syncRosterFromCombat(m.Combat.PlayerUnits)
 
-		m.Phase = PhaseChoice
+		m.Phase = PhaseInterCombat
 		m.ChoiceType = ChoiceReward
 		m.RewardChoicesLeft = 2
 		m.Choices = []string{"Reward A", "Reward B", "Reward C"}
+		m.DragState = DragState{} // Clear any existing drag state
 	} else {
 		m.Phase = PhaseGameOver
 	}
@@ -1606,8 +1628,8 @@ func (m Model) handleCombatEnded(msg CombatEnded) (Model, Cmd) {
 }
 
 func (m Model) handleChoiceSelected(msg ChoiceSelected) (Model, Cmd) {
-	// Phase guard - only process during choice phase
-	if m.Phase != PhaseChoice {
+	// Phase guard - only process during inter-combat phase
+	if m.Phase != PhaseInterCombat {
 		return m, nil
 	}
 	// Bounds validation - reject invalid indices
@@ -1624,4 +1646,91 @@ func (m Model) handleChoiceSelected(msg ChoiceSelected) (Model, Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// ===== Drag-and-Drop Handlers =====
+
+func (m Model) handleUnitDragStarted(msg UnitDragStarted) (Model, Cmd) {
+	if m.Phase != PhaseInterCombat {
+		return m, nil
+	}
+	m.DragState = DragState{
+		IsDragging:    true,
+		DraggedUnitID: msg.UnitID,
+		OriginalIndex: msg.OriginalIndex,
+		CurrentX:      msg.StartX,
+		CurrentY:      msg.StartY,
+	}
+	return m, nil
+}
+
+func (m Model) handleUnitDragMoved(msg UnitDragMoved) (Model, Cmd) {
+	if m.Phase != PhaseInterCombat || !m.DragState.IsDragging {
+		return m, nil
+	}
+	m.DragState.CurrentX = msg.CurrentX
+	m.DragState.CurrentY = msg.CurrentY
+	return m, nil
+}
+
+func (m Model) handleUnitDragEnded(msg UnitDragEnded) (Model, Cmd) {
+	if m.Phase != PhaseInterCombat || !m.DragState.IsDragging {
+		return m, nil
+	}
+	// Reorder if valid and different position
+	if msg.InsertionIndex >= 0 && msg.InsertionIndex != m.DragState.OriginalIndex {
+		m.PlayerRoster = reorderRoster(m.PlayerRoster, m.DragState.OriginalIndex, msg.InsertionIndex)
+	}
+	m.DragState = DragState{} // Clear
+	return m, nil
+}
+
+func (m Model) handleUnitDragCancelled(_ UnitDragCancelled) (Model, Cmd) {
+	m.DragState = DragState{} // Clear
+	return m, nil
+}
+
+// reorderRoster moves unit from fromIdx to toIdx, returns new slice.
+// Indices are relative to board units only (command unit excluded).
+func reorderRoster(roster []entity.Unit, fromIdx, toIdx int) []entity.Unit {
+	// Separate command unit
+	var cmd *entity.Unit
+	var board []entity.Unit
+	for i := range roster {
+		if roster[i].IsCommand() {
+			c := roster[i]
+			cmd = &c
+		} else {
+			board = append(board, roster[i])
+		}
+	}
+
+	// Bounds check
+	if fromIdx < 0 || fromIdx >= len(board) || toIdx < 0 || toIdx > len(board) {
+		return roster
+	}
+	if fromIdx == toIdx {
+		return roster
+	}
+
+	// Remove from original position
+	unit := board[fromIdx]
+	board = append(board[:fromIdx], board[fromIdx+1:]...)
+
+	// Adjust toIdx if needed (removal shifted indices)
+	if toIdx > fromIdx {
+		toIdx--
+	}
+
+	// Insert at new position
+	board = append(board[:toIdx], append([]entity.Unit{unit}, board[toIdx:]...)...)
+
+	// Rebuild roster: command first (if exists), then board units
+	result := make([]entity.Unit, 0, len(roster))
+	if cmd != nil {
+		result = append(result, *cmd)
+	}
+	result = append(result, board...)
+
+	return result
 }

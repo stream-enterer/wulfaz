@@ -71,6 +71,14 @@ const (
 
 	// Overlay
 	pausedOverlayAlpha = 128
+
+	// Inter-combat overlay positions
+	overlayTextY1 = 50 // First line of overlay instructions
+	overlayTextY2 = 70 // Second line
+	overlayTextY3 = 90 // Third line (reward count or drag hint)
+
+	// Drag-and-drop rendering
+	insertionIndicatorWidth = 4
 )
 
 var (
@@ -89,6 +97,10 @@ var (
 	colorArrowDamage = color.RGBA{255, 80, 80, 220}  // Red
 	colorArrowShield = color.RGBA{80, 140, 255, 220} // Blue
 	colorArrowHeal   = color.RGBA{80, 255, 140, 220} // Green
+
+	// Drag-and-drop colors
+	colorInsertionIndicator = color.RGBA{255, 255, 0, 200} // Yellow
+	colorDragHighlight      = color.RGBA{255, 255, 0, 255} // Yellow border
 )
 
 // HitRegion represents a clickable area on screen for input handling.
@@ -106,15 +118,18 @@ func getAttr(unit entity.Unit, name string) int {
 	return 0
 }
 
-func getCombatWidth(unit entity.Unit) int {
+// GetCombatWidth returns the combat_width attribute of a unit, defaulting to 1.
+// Exported for use by app.go for drag-drop calculations.
+func GetCombatWidth(unit entity.Unit) int {
 	if cw := getAttr(unit, "combat_width"); cw > 0 {
 		return cw
 	}
 	return 1
 }
 
-// calcUnitWidth returns pixel width for a given combat_width
-func calcUnitWidth(combatWidth int) float32 {
+// CalcUnitWidth returns pixel width for a given combat_width.
+// Exported for use by app.go for drag-drop calculations.
+func CalcUnitWidth(combatWidth int) float32 {
 	return float32(combatWidth*SlotWidth - UnitGap)
 }
 
@@ -257,7 +272,7 @@ func drawUnitDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY, cardW fl
 		return regions
 	}
 
-	cw := getCombatWidth(unit)
+	cw := GetCombatWidth(unit)
 
 	if cw == 1 && len(rolled) >= 1 {
 		// Small unit: 1 die centered
@@ -341,8 +356,8 @@ func getUnitCenter(unitID string, combat model.CombatModel, boardX float32) (flo
 			}
 			continue
 		}
-		cw := getCombatWidth(u)
-		w := calcUnitWidth(cw)
+		cw := GetCombatWidth(u)
+		w := CalcUnitWidth(cw)
 		if u.ID == unitID {
 			return currentX + w/2, float32(playerBoardY+BoardMargin) + float32(SlotHeight)/2
 		}
@@ -361,8 +376,8 @@ func getUnitCenter(unitID string, combat model.CombatModel, boardX float32) (flo
 			}
 			continue
 		}
-		cw := getCombatWidth(u)
-		w := calcUnitWidth(cw)
+		cw := GetCombatWidth(u)
+		w := CalcUnitWidth(cw)
 		if u.ID == unitID {
 			return currentX + w/2, float32(enemyBoardY+BoardMargin) + float32(SlotHeight)/2
 		}
@@ -496,8 +511,8 @@ func drawUnitsOnBoard(screen *ebiten.Image, units []entity.Unit, boardX, boardY 
 	unitY := boardY + float32(BoardMargin)
 
 	for _, unit := range units {
-		cw := getCombatWidth(unit)
-		w := calcUnitWidth(cw)
+		cw := GetCombatWidth(unit)
+		w := CalcUnitWidth(cw)
 
 		// Draw unit card
 		drawUnit(screen, unit, c, currentX, unitY, w)
@@ -524,9 +539,8 @@ func RenderEbiten(screen *ebiten.Image, m tea.Model) []HitRegion {
 		return nil
 	case tea.PhaseCombat:
 		return renderCombat(screen, m.Combat)
-	case tea.PhaseChoice:
-		renderChoice(screen, m.ChoiceType, m.Choices)
-		return nil
+	case tea.PhaseInterCombat:
+		return renderInterCombat(screen, m)
 	case tea.PhaseGameOver:
 		renderGameOver(screen)
 		return nil
@@ -733,19 +747,128 @@ func renderPausedOverlay(screen *ebiten.Image) {
 	DrawTextCentered(screen, "Press SPACE to resume", w/2, h/2+20)
 }
 
-func renderChoice(screen *ebiten.Image, ct tea.ChoiceType, choices []string) {
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+// renderInterCombat renders the inter-combat phase: board visible with overlay choices.
+func renderInterCombat(screen *ebiten.Image, m tea.Model) []HitRegion {
+	var regions []HitRegion
+	w := screen.Bounds().Dx()
+	boardX := CalcBoardX(w)
 
-	header := "Choose a reward:"
-	if ct == tea.ChoiceFight {
-		header = "Choose next fight:"
-	}
-	DrawTextCentered(screen, header, w/2, h/2-60)
+	// Draw player board frame
+	drawBoardFrame(screen, boardX, playerBoardY)
 
-	for i, c := range choices {
-		line := fmt.Sprintf("[%d] %s", i+1, c)
-		DrawTextCentered(screen, line, w/2, h/2-30+i*20)
+	// Separate command from board units
+	playerCmd, boardUnits := separateCommandUnit(m.PlayerRoster)
+
+	// Compute insertion index from drag position (if dragging)
+	insertionIdx := -1
+	var draggedUnitWidth float32
+	if m.DragState.IsDragging {
+		insertionIdx = computeInsertionIndex(m.DragState.CurrentX, boardX, boardUnits, m.DragState.DraggedUnitID)
+		// Find dragged unit width for gap
+		for _, unit := range boardUnits {
+			if unit.ID == m.DragState.DraggedUnitID {
+				draggedUnitWidth = CalcUnitWidth(GetCombatWidth(unit))
+				break
+			}
+		}
 	}
+
+	// Draw board units with shift for drag gap
+	currentX := boardX + float32(BoardMargin)
+	unitY := float32(playerBoardY + BoardMargin)
+
+	// Track position in non-dragged units (for insertion comparison)
+	drawIdx := 0
+	for _, unit := range boardUnits {
+		// Skip dragged unit in normal draw
+		if m.DragState.IsDragging && unit.ID == m.DragState.DraggedUnitID {
+			continue // Don't increment drawIdx - dragged unit doesn't count
+		}
+
+		cw := GetCombatWidth(unit)
+		unitW := CalcUnitWidth(cw)
+
+		// Insert gap at insertion point (before this unit)
+		if m.DragState.IsDragging && drawIdx == insertionIdx {
+			// Draw insertion indicator
+			vector.FillRect(screen, currentX, unitY-5, insertionIndicatorWidth,
+				SlotHeight+10, colorInsertionIndicator, false)
+			// Add gap for dragged unit
+			currentX += draggedUnitWidth + UnitGap
+		}
+
+		// Draw unit
+		drawUnit(screen, unit, colorPlayer, currentX, unitY, unitW)
+		rect := image.Rect(int(currentX), int(unitY), int(currentX+unitW), int(unitY)+SlotHeight)
+		regions = append(regions, HitRegion{Rect: rect, Type: "unit", UnitID: unit.ID, DieIndex: -1})
+
+		currentX += unitW + UnitGap
+		drawIdx++
+	}
+
+	// Insertion at end (drawIdx equals insertion point after loop)
+	if m.DragState.IsDragging && drawIdx == insertionIdx {
+		vector.FillRect(screen, currentX, unitY-5, insertionIndicatorWidth,
+			SlotHeight+10, colorInsertionIndicator, false)
+	}
+
+	// Draw dragged unit at cursor
+	if m.DragState.IsDragging {
+		for _, unit := range boardUnits {
+			if unit.ID == m.DragState.DraggedUnitID {
+				cw := GetCombatWidth(unit)
+				unitW := CalcUnitWidth(cw)
+				dragX := float32(m.DragState.CurrentX) - unitW/2
+				dragY := float32(m.DragState.CurrentY) - SlotHeight/2
+				drawUnit(screen, unit, colorPlayer, dragX, dragY, unitW)
+				vector.StrokeRect(screen, dragX, dragY, unitW, SlotHeight, 3, colorDragHighlight, false)
+				break
+			}
+		}
+	}
+
+	// Draw player command unit below board (not draggable)
+	if playerCmd != nil {
+		cmdX := boardX + (BoardWidth+2*BoardMargin-CommandUnitWidth)/2
+		cmdY := float32(playerBoardY + SlotHeight + 2*BoardMargin + CommandGap)
+		drawCommandUnit(screen, *playerCmd, colorPlayer, cmdX, cmdY)
+		// No hit region for command - not draggable
+	}
+
+	// Draw overlay text
+	if m.ChoiceType == tea.ChoiceReward && len(m.Choices) >= 3 {
+		DrawText(screen, fmt.Sprintf("[1] %s  [2] %s  [3] %s", m.Choices[0], m.Choices[1], m.Choices[2]),
+			uiLeftMargin, overlayTextY1)
+		DrawText(screen, fmt.Sprintf("Rewards left: %d", m.RewardChoicesLeft), uiLeftMargin, overlayTextY2)
+	} else if len(m.Choices) >= 3 {
+		DrawText(screen, fmt.Sprintf("[1] %s  [2] %s  [3] %s", m.Choices[0], m.Choices[1], m.Choices[2]),
+			uiLeftMargin, overlayTextY1)
+	}
+	DrawText(screen, "Drag units to reposition", uiLeftMargin, overlayTextY3)
+
+	return regions
+}
+
+// computeInsertionIndex determines where dragged unit would be inserted.
+// IMPORTANT: Must skip the dragged unit to match visual layout.
+func computeInsertionIndex(mouseX int, boardX float32, boardUnits []entity.Unit, draggedUnitID string) int {
+	currentX := boardX + float32(BoardMargin)
+	insertIdx := 0
+	for _, unit := range boardUnits {
+		// Skip dragged unit - it's not in the visual layout
+		if unit.ID == draggedUnitID {
+			continue
+		}
+		cw := GetCombatWidth(unit)
+		unitW := CalcUnitWidth(cw)
+		midPoint := currentX + unitW/2
+		if float32(mouseX) < midPoint {
+			return insertIdx
+		}
+		currentX += unitW + UnitGap
+		insertIdx++
+	}
+	return insertIdx // Insert at end
 }
 
 // ===== Wave 7: Floating Text Rendering =====
@@ -799,8 +922,8 @@ func getUnitBounds(unitID string, combat model.CombatModel, boardX float32) (x, 
 			}
 			continue
 		}
-		cw := getCombatWidth(u)
-		uw := calcUnitWidth(cw)
+		cw := GetCombatWidth(u)
+		uw := CalcUnitWidth(cw)
 		if u.ID == unitID {
 			return currentX, float32(playerBoardY + BoardMargin), uw, SlotHeight
 		}
@@ -818,8 +941,8 @@ func getUnitBounds(unitID string, combat model.CombatModel, boardX float32) (x, 
 			}
 			continue
 		}
-		cw := getCombatWidth(u)
-		uw := calcUnitWidth(cw)
+		cw := GetCombatWidth(u)
+		uw := CalcUnitWidth(cw)
 		if u.ID == unitID {
 			return currentX, float32(enemyBoardY + BoardMargin), uw, SlotHeight
 		}

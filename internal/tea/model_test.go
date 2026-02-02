@@ -316,8 +316,8 @@ func TestUpdate_CombatEnded_PlayerWins(t *testing.T) {
 
 	newModel, cmd := m.Update(CombatEnded{Victor: VictorPlayer})
 
-	if newModel.Phase != PhaseChoice {
-		t.Errorf("expected PhaseChoice, got %d", newModel.Phase)
+	if newModel.Phase != PhaseInterCombat {
+		t.Errorf("expected PhaseInterCombat, got %d", newModel.Phase)
 	}
 	if newModel.ChoiceType != ChoiceReward {
 		t.Errorf("expected ChoiceReward, got %d", newModel.ChoiceType)
@@ -368,7 +368,7 @@ func TestUpdate_CombatEnded_Draw(t *testing.T) {
 func TestUpdate_ChoiceSelected_Reward(t *testing.T) {
 	m := Model{
 		Version:           1,
-		Phase:             PhaseChoice,
+		Phase:             PhaseInterCombat,
 		ChoiceType:        ChoiceReward,
 		RewardChoicesLeft: 2,
 		Choices:           []string{"A", "B", "C"},
@@ -407,7 +407,7 @@ func TestUpdate_ChoiceSelected_Reward(t *testing.T) {
 func TestUpdate_CombatStarted(t *testing.T) {
 	m := Model{
 		Version:     1,
-		Phase:       PhaseChoice,
+		Phase:       PhaseInterCombat,
 		FightNumber: 1,
 	}
 
@@ -436,7 +436,7 @@ func TestUpdate_CombatStarted(t *testing.T) {
 func TestChoiceSelected_ValidatesIndex(t *testing.T) {
 	m := Model{
 		Version:    1,
-		Phase:      PhaseChoice,
+		Phase:      PhaseInterCombat,
 		ChoiceType: ChoiceReward,
 		Choices:    []string{"A", "B", "C"},
 	}
@@ -466,7 +466,7 @@ func TestChoiceSelected_RequiresChoicePhase(t *testing.T) {
 
 	// Should be no-op - not in choice phase
 	if newM.Phase != PhaseCombat {
-		t.Error("should not change phase when not in PhaseChoice")
+		t.Error("should not change phase when not in PhaseInterCombat")
 	}
 }
 

@@ -278,7 +278,7 @@ func TestDieLockToggled_RequiresCombatActive(t *testing.T) {
 func TestDieLockToggled_RequiresPhaseCombat(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseChoice, // Wrong phase
+		Phase:   PhaseInterCombat, // Wrong phase
 		Combat: model.CombatModel{
 			DicePhase: model.DicePhasePlayerCommand,
 		},
@@ -296,7 +296,7 @@ func TestDieLockToggled_RequiresPhaseCombat(t *testing.T) {
 func TestDieDeselected_RequiresPhaseCombat(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseChoice, // Wrong phase
+		Phase:   PhaseInterCombat, // Wrong phase
 		Combat: model.CombatModel{
 			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
@@ -336,7 +336,7 @@ func TestDieDeselected_RequiresCombatActive(t *testing.T) {
 func TestPreviewDone_RequiresPhaseCombat(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseChoice, // Wrong phase
+		Phase:   PhaseInterCombat, // Wrong phase
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
 			DicePhase: model.DicePhasePreview,
@@ -372,7 +372,7 @@ func TestPreviewDone_RequiresCombatActive(t *testing.T) {
 func TestUnlockAllDice_RequiresPhaseCombat(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseChoice, // Wrong phase
+		Phase:   PhaseInterCombat, // Wrong phase
 		Combat: model.CombatModel{
 			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
