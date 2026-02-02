@@ -45,9 +45,6 @@ type CombatModel struct {
 	// Execution phase fields (Wave 3)
 	FiringOrder        []FiringPosition // Positions to resolve in order
 	CurrentFiringIndex int              // Index into FiringOrder
-
-	// Round transition (Wave 6)
-	ShowRoundToast bool // Display round toast overlay
 }
 
 // FiringPosition groups units at same board position for simultaneous resolution

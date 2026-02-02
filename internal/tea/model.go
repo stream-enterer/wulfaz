@@ -161,8 +161,6 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleExecutionComplete(msg)
 	case RoundEnded:
 		return m.handleRoundEnded(msg)
-	case RoundToastDismissed:
-		return m.handleRoundToastDismissed(msg)
 	case UnlockAllDice:
 		return m.handleUnlockAllDice(msg)
 
@@ -1169,28 +1167,16 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 	combat.DicePhase = model.DicePhaseNone
 	combat.FiringOrder = nil
 	combat.CurrentFiringIndex = 0
-	// NOTE: Round increment moved to handleRoundToastDismissed
 
 	m.Combat = combat
 
-	// Check if combat ended BEFORE showing toast
+	// Check if combat ended before starting next round
 	if victor := m.checkCombatEnd(); victor != VictorNone {
 		return m.applyCombatEnd()
 	}
 
-	// Show round toast, wait for player click
-	combat.ShowRoundToast = true
-	m.Combat = combat
-	return m, nil
-}
-
-func (m Model) handleRoundToastDismissed(_ RoundToastDismissed) (Model, Cmd) {
-	if !m.Combat.ShowRoundToast {
-		return m, nil
-	}
-	combat := m.Combat
-	combat.ShowRoundToast = false
-	combat.Round++ // Increment here instead of in RoundEnded
+	// Increment round and start next round immediately
+	combat.Round++
 	m.Combat = combat
 	return m, StartNextRound(m.Seed, combat.Round, getAllUnits(m.Combat))
 }

@@ -250,11 +250,6 @@ type RoundEnded struct{}
 
 func (RoundEnded) isMsg() {}
 
-// RoundToastDismissed signals player clicked to dismiss round toast.
-type RoundToastDismissed struct{}
-
-func (RoundToastDismissed) isMsg() {}
-
 // UnlockAllDice signals player wants to unlock all dice to re-enter lock phase.
 type UnlockAllDice struct{}
 

@@ -484,11 +484,6 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 		renderPausedOverlay(screen)
 	}
 
-	// Round toast overlay (F-224)
-	if combat.ShowRoundToast {
-		renderRoundToast(screen, combat.Round+1) // Show UPCOMING round number
-	}
-
 	return regions
 }
 
@@ -570,24 +565,6 @@ func renderPausedOverlay(screen *ebiten.Image) {
 	// PAUSED text
 	ebitenutil.DebugPrintAt(screen, "=== PAUSED ===", w/2-50, h/2-10)
 	ebitenutil.DebugPrintAt(screen, "Press SPACE to resume", w/2-70, h/2+20)
-}
-
-func renderRoundToast(screen *ebiten.Image, round int) {
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-
-	// Semi-transparent overlay
-	vector.FillRect(screen, 0, 0, float32(w), float32(h), color.RGBA{0, 0, 0, 180}, false)
-
-	// Toast box
-	boxW, boxH := float32(160), float32(60)
-	boxX := (float32(w) - boxW) / 2
-	boxY := (float32(h) - boxH) / 2
-	vector.FillRect(screen, boxX, boxY, boxW, boxH, color.RGBA{50, 50, 70, 255}, false)
-	vector.StrokeRect(screen, boxX, boxY, boxW, boxH, 2, color.White, false)
-
-	// "Round N" centered
-	text := fmt.Sprintf("Round %d", round)
-	ebitenutil.DebugPrintAt(screen, text, int(boxX)+55, int(boxY)+22)
 }
 
 func renderChoice(screen *ebiten.Image, ct tea.ChoiceType, choices []string) {

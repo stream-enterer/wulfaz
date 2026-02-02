@@ -91,14 +91,6 @@ func (a *App) pollInput() {
 		return
 	}
 
-	// Toast dismissal blocks other input
-	if a.model.Combat.ShowRoundToast {
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			a.dispatch(tea.RoundToastDismissed{})
-		}
-		return
-	}
-
 	// Choice phase
 	if a.model.Phase == tea.PhaseChoice {
 		var selected int = -1

@@ -464,30 +464,9 @@ func TestRoundEnded_ShieldExpiration(t *testing.T) {
 		}
 	}
 
-	// Round should NOT increment yet (waits for toast dismissal)
-	if newM.Combat.Round != 1 {
-		t.Errorf("Round = %d, want 1 (before toast dismissal)", newM.Combat.Round)
-	}
-
-	// Toast should be showing
-	if !newM.Combat.ShowRoundToast {
-		t.Error("ShowRoundToast = false, want true")
-	}
-
-	// Dismiss toast to increment round
-	newM, cmd := newM.Update(RoundToastDismissed{})
-
+	// Round should increment immediately
 	if newM.Combat.Round != 2 {
-		t.Errorf("Round = %d after toast dismissed, want 2", newM.Combat.Round)
-	}
-
-	if newM.Combat.ShowRoundToast {
-		t.Error("ShowRoundToast = true after dismissal, want false")
-	}
-
-	// Should return StartNextRound command
-	if cmd == nil {
-		t.Error("Expected StartNextRound command after toast dismissal")
+		t.Errorf("Round = %d, want 2", newM.Combat.Round)
 	}
 }
 
