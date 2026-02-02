@@ -1224,3 +1224,122 @@ func TestResolvePosition_OverflowStopsAtCommand(t *testing.T) {
 		}
 	}
 }
+
+// ===== Round Skip Prevention Tests =====
+
+func TestMultipleExecutionComplete_NoRoundSkip(t *testing.T) {
+	// Regression test: multiple ExecutionComplete messages should not cause round skipping
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Seed:    42,
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhaseExecution,
+			Round:     1,
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+		},
+	}
+
+	// First ExecutionComplete should transition to RoundEnd and trigger RoundEnded
+	m1, cmd1 := m.Update(ExecutionComplete{})
+	if m1.Combat.DicePhase != model.DicePhaseRoundEnd {
+		t.Errorf("after first ExecutionComplete: DicePhase = %v, want DicePhaseRoundEnd", m1.Combat.DicePhase)
+	}
+	if cmd1 == nil {
+		t.Fatal("expected RoundEnded cmd, got nil")
+	}
+
+	// Process the RoundEnded from first ExecutionComplete
+	msg1 := cmd1()
+	if _, ok := msg1.(RoundEnded); !ok {
+		t.Fatalf("expected RoundEnded, got %T", msg1)
+	}
+
+	m2, _ := m1.Update(msg1)
+	if m2.Combat.Round != 2 {
+		t.Errorf("Round = %d, want 2", m2.Combat.Round)
+	}
+
+	// Additional RoundEnded messages should be ignored (phase changed by handleRoundEnded)
+	// Simulate what happens when multiple timers fire: phase is no longer RoundEnd
+	m3, cmd3 := m2.Update(RoundEnded{})
+	if cmd3 != nil {
+		t.Error("duplicate RoundEnded should return nil cmd")
+	}
+	if m3.Combat.Round != 2 {
+		t.Errorf("Round after duplicate = %d, want 2 (no change)", m3.Combat.Round)
+	}
+}
+
+func TestExecutionAdvanceClicked_SetsRoundEndPhase(t *testing.T) {
+	// Verify that when all positions are resolved, clicking sets DicePhaseRoundEnd
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Seed:    42,
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhaseExecution,
+			Round:     1,
+			FiringOrder: []model.FiringPosition{
+				{Position: 0, PlayerUnits: []string{"p1"}},
+			},
+			CurrentFiringIndex: 1, // All positions already resolved
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+		},
+	}
+
+	// Click when all positions resolved should set RoundEnd phase
+	m1, _ := m.Update(ExecutionAdvanceClicked{Timestamp: 1000})
+	if m1.Combat.DicePhase != model.DicePhaseRoundEnd {
+		t.Errorf("DicePhase = %v, want DicePhaseRoundEnd", m1.Combat.DicePhase)
+	}
+
+	// Second click should be ignored (not in Execution phase anymore)
+	m2, cmd2 := m1.Update(ExecutionAdvanceClicked{Timestamp: 2000})
+	if cmd2 != nil {
+		t.Error("second click should be ignored when not in Execution phase")
+	}
+	if m2.Combat.DicePhase != model.DicePhaseRoundEnd {
+		t.Errorf("DicePhase after second click = %v, want DicePhaseRoundEnd", m2.Combat.DicePhase)
+	}
+}

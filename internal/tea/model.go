@@ -621,6 +621,21 @@ func findLowestHPAliveUnit(units []entity.Unit) string {
 	return lowestID
 }
 
+// findUnitByID returns a pointer to the unit with given ID, or nil.
+func findUnitByID(combat model.CombatModel, unitID string) *entity.Unit {
+	for i := range combat.PlayerUnits {
+		if combat.PlayerUnits[i].ID == unitID {
+			return &combat.PlayerUnits[i]
+		}
+	}
+	for i := range combat.EnemyUnits {
+		if combat.EnemyUnits[i].ID == unitID {
+			return &combat.EnemyUnits[i]
+		}
+	}
+	return nil
+}
+
 // buildFiringOrder creates left-to-right position list.
 // Excludes Position < 0 (off-board command units) and dead units.
 func buildFiringOrder(combat model.CombatModel) []model.FiringPosition {
@@ -1151,17 +1166,65 @@ func (m Model) handleEnemyCommandResolved(msg EnemyCommandResolved) (Model, Cmd)
 	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
 	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
 
+	// Track shield absorption for logging
+	type damageResult struct {
+		action         EnemyDiceAction
+		shieldAbsorbed int
+		healthDamage   int
+	}
+	var results []damageResult
+
 	// Apply each enemy action (damage/shield/heal)
 	for _, action := range msg.Actions {
-		combat = applyDiceEffectToCombat(combat, action.TargetUnitID,
-			action.Effect, action.Value)
+		// Capture pre-state for damage logging
+		var shieldAbsorbed, healthDamage int
+		if action.Effect == entity.DieDamage {
+			target := findUnitByID(combat, action.TargetUnitID)
+			if target != nil {
+				oldShields := 0
+				if s, ok := target.Attributes["shields"]; ok {
+					oldShields = s.Base
+				}
+				oldHealth := 0
+				if h, ok := target.Attributes["health"]; ok {
+					oldHealth = h.Base
+				}
+
+				combat = applyDiceEffectToCombat(combat, action.TargetUnitID,
+					action.Effect, action.Value)
+
+				// Calculate what was absorbed
+				newTarget := findUnitByID(combat, action.TargetUnitID)
+				if newTarget != nil {
+					newShields := 0
+					if s, ok := newTarget.Attributes["shields"]; ok {
+						newShields = s.Base
+					}
+					newHealth := 0
+					if h, ok := newTarget.Attributes["health"]; ok {
+						newHealth = h.Base
+					}
+					shieldAbsorbed = oldShields - newShields
+					healthDamage = oldHealth - newHealth
+				}
+			}
+		} else {
+			combat = applyDiceEffectToCombat(combat, action.TargetUnitID,
+				action.Effect, action.Value)
+		}
+		results = append(results, damageResult{action, shieldAbsorbed, healthDamage})
 	}
 
-	// Add to combat log (batch for efficiency)
+	// Add to combat log with shield absorption details
 	var logEntries []string
-	for _, action := range msg.Actions {
-		logEntries = append(logEntries, fmt.Sprintf("Enemy: %s -> %s: %s %d",
-			action.SourceUnitID, action.TargetUnitID, action.Effect, action.Value))
+	for _, r := range results {
+		if r.action.Effect == entity.DieDamage && r.shieldAbsorbed > 0 {
+			logEntries = append(logEntries, fmt.Sprintf("Enemy: %s -> %s: %d dmg (%d absorbed, %d to health)",
+				r.action.SourceUnitID, r.action.TargetUnitID, r.action.Value, r.shieldAbsorbed, r.healthDamage))
+		} else {
+			logEntries = append(logEntries, fmt.Sprintf("Enemy: %s -> %s: %s %d",
+				r.action.SourceUnitID, r.action.TargetUnitID, r.action.Effect, r.action.Value))
+		}
 	}
 	combat.Log = appendLogEntries(combat.Log, logEntries)
 
@@ -1210,15 +1273,21 @@ func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
 
 	combat.CurrentFiringIndex++
 
-	// Log attacks (batch for efficiency)
+	// Log attacks with shield absorption details
 	var logEntries []string
 	for _, atk := range msg.Attacks {
 		status := ""
 		if atk.TargetDead {
 			status = " [DESTROYED]"
 		}
-		logEntries = append(logEntries, fmt.Sprintf("Pos %d: %s -> %s: %d dmg%s",
-			msg.Position, atk.AttackerID, atk.TargetID, atk.Damage, status))
+		if atk.ShieldAbsorbed > 0 {
+			healthDmg := atk.Damage - atk.ShieldAbsorbed
+			logEntries = append(logEntries, fmt.Sprintf("Pos %d: %s -> %s: %d dmg (%d absorbed, %d to health)%s",
+				msg.Position, atk.AttackerID, atk.TargetID, atk.Damage, atk.ShieldAbsorbed, healthDmg, status))
+		} else {
+			logEntries = append(logEntries, fmt.Sprintf("Pos %d: %s -> %s: %d dmg%s",
+				msg.Position, atk.AttackerID, atk.TargetID, atk.Damage, status))
+		}
 	}
 	combat.Log = appendLogEntries(combat.Log, logEntries)
 
@@ -1226,6 +1295,9 @@ func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
 
 	// Check victory immediately (will show texts during pause)
 	if victor := m.checkCombatEnd(); victor != VictorNone {
+		// Set phase to RoundEnd to prevent multiple timer starts from clicks
+		combat.DicePhase = model.DicePhaseRoundEnd
+		m.Combat = combat
 		return m, StartTimer(TimerRoundEnd, RoundEndPause)
 	}
 
@@ -1278,6 +1350,10 @@ func formatAttackTexts(atk AttackResult, timestamp int64, existing []model.Float
 }
 
 func (m Model) handleExecutionComplete(_ ExecutionComplete) (Model, Cmd) {
+	// Allow from Execution (normal) or RoundEnd (timer fired after phase already set by click)
+	if m.Combat.DicePhase != model.DicePhaseExecution && m.Combat.DicePhase != model.DicePhaseRoundEnd {
+		return m, nil
+	}
 	combat := m.Combat
 	combat.DicePhase = model.DicePhaseRoundEnd
 	m.Combat = combat
@@ -1285,6 +1361,10 @@ func (m Model) handleExecutionComplete(_ ExecutionComplete) (Model, Cmd) {
 }
 
 func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
+	// Guard: only process once per round (prevents double increment from multiple timers)
+	if m.Combat.DicePhase != model.DicePhaseRoundEnd {
+		return m, nil
+	}
 	combat := m.Combat
 	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
 	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
@@ -1394,6 +1474,8 @@ func (m Model) handleExecutionAdvanceClicked(msg ExecutionAdvanceClicked) (Model
 
 	// Check if all positions resolved
 	if combat.CurrentFiringIndex >= len(combat.FiringOrder) {
+		// Set phase to RoundEnd to prevent multiple timer starts from clicks
+		combat.DicePhase = model.DicePhaseRoundEnd
 		m.Combat = combat
 		return m, StartTimer(TimerRoundEnd, RoundEndPause)
 	}
