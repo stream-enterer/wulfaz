@@ -188,8 +188,8 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleUnitDragMoved(msg)
 	case UnitDragEnded:
 		return m.handleUnitDragEnded(msg)
-	case UnitDragCancelled:
-		return m.handleUnitDragCancelled(msg)
+	case UnitDragCanceled:
+		return m.handleUnitDragCanceled(msg)
 
 	default:
 		return m, nil
@@ -1700,7 +1700,7 @@ func (m Model) handleUnitDragEnded(msg UnitDragEnded) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleUnitDragCancelled(_ UnitDragCancelled) (Model, Cmd) {
+func (m Model) handleUnitDragCanceled(_ UnitDragCanceled) (Model, Cmd) {
 	m.DragState = DragState{} // Clear
 	return m, nil
 }

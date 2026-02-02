@@ -315,12 +315,12 @@ func (UnitDragMoved) isMsg() {}
 
 // UnitDragEnded signals player released drag.
 type UnitDragEnded struct {
-	InsertionIndex int // -1 if cancelled/invalid
+	InsertionIndex int // -1 if canceled/invalid
 }
 
 func (UnitDragEnded) isMsg() {}
 
-// UnitDragCancelled signals drag cancelled (ESC/right-click).
-type UnitDragCancelled struct{}
+// UnitDragCanceled signals drag canceled (ESC/right-click).
+type UnitDragCanceled struct{}
 
-func (UnitDragCancelled) isMsg() {}
+func (UnitDragCanceled) isMsg() {}

@@ -106,7 +106,7 @@ func (a *App) pollInput() {
 	// ESC handling - cancel drag first, then quit
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		if a.model.Phase == tea.PhaseInterCombat && a.model.DragState.IsDragging {
-			a.dispatch(tea.UnitDragCancelled{})
+			a.dispatch(tea.UnitDragCanceled{})
 			return
 		}
 		a.dispatch(tea.PlayerQuit{})
@@ -148,7 +148,7 @@ func (a *App) pollInterCombatInput() {
 			a.dispatch(tea.UnitDragEnded{InsertionIndex: idx})
 		}
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
-			a.dispatch(tea.UnitDragCancelled{})
+			a.dispatch(tea.UnitDragCanceled{})
 		}
 		return
 	}
