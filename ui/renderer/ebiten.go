@@ -587,7 +587,7 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 
 	// Phase-specific UI hints
 	if combat.DicePhase == model.DicePhaseExecution {
-		drawClickPrompt(screen, boardX)
+		ebitenutil.DebugPrintAt(screen, "Click to continue...", uiLeftMargin, uiHintY1)
 	}
 	if combat.DicePhase == model.DicePhasePlayerCommand {
 		allLocked := tea.AllCommandDiceLocked(combat)
@@ -809,11 +809,3 @@ func drawCombatText(screen *ebiten.Image, s string, x, y float32) {
 	ebitenutil.DebugPrintAt(screen, s, int(x-textWidth/2), int(y))
 }
 
-// drawClickPrompt shows "Click to continue" during execution phase.
-func drawClickPrompt(screen *ebiten.Image, boardX float32) {
-	s := "Click to continue"
-	x := boardX + BoardWidth/2
-	y := float32(screen.Bounds().Dy() - 40)
-	textWidth := float32(len(s) * 6)
-	ebitenutil.DebugPrintAt(screen, s, int(x-textWidth/2), int(y))
-}
