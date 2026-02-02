@@ -30,7 +30,7 @@ const (
 // App implements ebiten.Game and drives the TEA runtime
 type App struct {
 	model         tea.Model
-	registry      *template.Registry    // Immutable after init; for shop/rewards later
+	registry      *template.Registry // Immutable after init; for shop/rewards later
 	rng           *rand.Rand
 	hitRegions    []renderer.HitRegion // Updated each frame for input handling
 	pendingTimers []pendingTimer       // Timers requested by commands
@@ -265,6 +265,8 @@ func (a *App) handleLeftClick(mx, my int) {
 					if !combat.IsPlayerUnit(region.UnitID) {
 						continue // Shield/Heal must target friendly
 					}
+				case entity.DieBlank:
+					continue // Blank dice cannot be activated
 				}
 				a.dispatch(tea.DiceActivated{
 					SourceUnitID: combat.SelectedUnitID,

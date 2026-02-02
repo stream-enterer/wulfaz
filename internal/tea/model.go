@@ -55,15 +55,16 @@ const (
 
 func (v Victor) String() string {
 	switch v {
+	case VictorNone:
+		return ""
 	case VictorPlayer:
 		return "player"
 	case VictorEnemy:
 		return "enemy"
 	case VictorDraw:
 		return "draw"
-	default:
-		return ""
 	}
+	return ""
 }
 
 type Model struct {
@@ -742,6 +743,8 @@ func applyDiceEffectToCombat(combat model.CombatModel, targetID string,
 				shields += value
 			case entity.DieHeal:
 				health = min(health+value, maxHealth)
+			case entity.DieBlank:
+				// Blank dice have no effect
 			}
 
 			if h, ok := attrs["health"]; ok {
@@ -1109,6 +1112,8 @@ func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
 				StartedAt: msg.Timestamp,
 				YOffset:   offset,
 			})
+		case entity.DieBlank:
+			// Blank dice produce no floating text
 		}
 	}
 
@@ -1244,8 +1249,8 @@ func (m Model) handleExecutionStarted(msg ExecutionStarted) (Model, Cmd) {
 	combat.FiringOrder = msg.FiringOrder
 	combat.CurrentFiringIndex = 0
 	combat.DicePhase = model.DicePhaseExecution
-	combat.ActiveArrows = nil    // No arrows during execution
-	combat.FloatingTexts = nil   // Clear any stale texts
+	combat.ActiveArrows = nil  // No arrows during execution
+	combat.FloatingTexts = nil // Clear any stale texts
 	m.Combat = combat
 
 	if len(msg.FiringOrder) == 0 {
@@ -1446,8 +1451,7 @@ func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
 // ===== Wave 7: Timer Handlers =====
 
 func (m Model) handleTimerFired(msg TimerFired) (Model, Cmd) {
-	switch msg.ID {
-	case TimerRoundEnd:
+	if msg.ID == TimerRoundEnd {
 		// Check victory after pause
 		if victor := m.checkCombatEnd(); victor != VictorNone {
 			return m.applyCombatEnd()
@@ -1458,7 +1462,6 @@ func (m Model) handleTimerFired(msg TimerFired) (Model, Cmd) {
 		m.Combat = combat
 		return m, func() Msg { return ExecutionComplete{} }
 	}
-
 	return m, nil
 }
 
@@ -1523,7 +1526,7 @@ func computePlayerPreviewArrows(combat model.CombatModel) []model.TargetingArrow
 				SourceUnitID: u.ID,
 				TargetUnitID: targetID,
 				EffectType:   entity.DieDamage,
-				IsDashed:     false, // Player = solid
+				IsDashed:     false,
 			})
 		}
 	}
@@ -1550,6 +1553,8 @@ func computeEnemyPreviewArrows(combat model.CombatModel) []model.TargetingArrow 
 				targetID = findLowestHPAliveUnit(combat.PlayerUnits)
 			case entity.DieShield, entity.DieHeal:
 				targetID = findLowestHPAliveUnit(combat.EnemyUnits)
+			case entity.DieBlank:
+				// Blank dice are skipped earlier, but handle for exhaustiveness
 			}
 			if targetID != "" {
 				arrows = append(arrows, model.TargetingArrow{

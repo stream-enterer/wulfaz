@@ -82,11 +82,9 @@ func RerollUnlockedDice(seed int64, unitID string, current []entity.RolledDie) C
 			if rd.Locked {
 				// Keep locked dice at same face index
 				results[i] = rd.FaceIndex
-			} else {
+			} else if len(rd.Faces) > 0 {
 				// Reroll unlocked dice
-				if len(rd.Faces) > 0 {
-					results[i] = rng.Intn(len(rd.Faces))
-				}
+				results[i] = rng.Intn(len(rd.Faces))
 			}
 		}
 
@@ -148,6 +146,9 @@ func ApplyDiceEffect(sourceID, targetID string, effect entity.DieType, value int
 
 		case entity.DieHeal:
 			newHealth = min(health+value, maxHealth)
+
+		case entity.DieBlank:
+			// Blank dice have no effect
 		}
 
 		return DiceEffectApplied{
@@ -197,6 +198,8 @@ func ExecuteEnemyCommand(combat model.CombatModel) Cmd {
 				targetID = findLowestHPAliveUnit(combat.PlayerUnits)
 			case entity.DieShield, entity.DieHeal:
 				targetID = findLowestHPAliveUnit(combat.EnemyUnits)
+			case entity.DieBlank:
+				// Blank dice are skipped earlier, but handle for exhaustiveness
 			}
 
 			if targetID != "" {
@@ -286,31 +289,29 @@ func resolveAttacks(
 						TargetDead:     r.Killed,
 					})
 				}
-			} else {
+			} else if !AnyAliveUnits(targets) && targetCmd != nil && targetCmd.IsAlive() {
 				// Gap case: F-166 + F-167
 				// Only hit command if ALL enemy units are dead
-				if !AnyAliveUnits(targets) && targetCmd != nil && targetCmd.IsAlive() {
-					hp, shields := hpSnapshot[targetCmd.ID][0], hpSnapshot[targetCmd.ID][1]
-					remaining := rd.Value()
-					absorbed := min(remaining, shields)
-					remaining -= absorbed
-					shields -= absorbed
-					hp = max(0, hp-remaining)
+				hp, shields := hpSnapshot[targetCmd.ID][0], hpSnapshot[targetCmd.ID][1]
+				remaining := rd.Value()
+				absorbed := min(remaining, shields)
+				remaining -= absorbed
+				shields -= absorbed
+				hp = max(0, hp-remaining)
 
-					attacks = append(attacks, AttackResult{
-						AttackerID:     uid,
-						TargetID:       targetCmd.ID,
-						DieIndex:       dieIdx,
-						Damage:         rd.Value(),
-						ShieldAbsorbed: absorbed,
-						NewHealth:      hp,
-						NewShields:     shields,
-						TargetDead:     hp <= 0,
-					})
-					hpSnapshot[targetCmd.ID] = [2]int{hp, shields}
-				}
-				// Else: gap but units exist elsewhere - damage wasted
+				attacks = append(attacks, AttackResult{
+					AttackerID:     uid,
+					TargetID:       targetCmd.ID,
+					DieIndex:       dieIdx,
+					Damage:         rd.Value(),
+					ShieldAbsorbed: absorbed,
+					NewHealth:      hp,
+					NewShields:     shields,
+					TargetDead:     hp <= 0,
+				})
+				hpSnapshot[targetCmd.ID] = [2]int{hp, shields}
 			}
+			// Else: gap but units exist elsewhere - damage wasted
 		}
 	}
 	return attacks

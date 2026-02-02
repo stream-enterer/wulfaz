@@ -1,0 +1,86 @@
+# golangci-lint configuration for Wulfaz
+# Tuned for TEA (The Elm Architecture) patterns
+
+run:
+  timeout: 2m
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    # Essential - catch real bugs
+    - errcheck          # Unchecked errors (works with ok bool pattern)
+    - govet             # Go vet issues - catches common mistakes
+    - staticcheck       # Semantic analysis - strong static checker
+    - ineffassign       # Detects unused assignments (important for copy patterns)
+    - typecheck         # Type checking
+
+    # Dead code - maintain clean architecture
+    - unused            # Find unused code
+
+    # TEA enforcement
+    - exhaustive        # Ensure exhaustive enum/type switches (critical for Msg handling)
+
+    # Code quality
+    - gofmt             # Formatting consistency
+    - goimports         # Import organization
+    - misspell          # Typos in comments/strings
+    - unconvert         # Unnecessary type conversions
+    - gocritic          # Opinionated but useful suggestions
+
+    # Bug prevention
+    - nilerr            # Return nil error with non-nil value
+    - bodyclose         # HTTP response body not closed
+    - copyloopvar       # Loop variable captured by closure (Go 1.22+ fixes this but good to have)
+
+linters-settings:
+  exhaustive:
+    # Require all enum cases in switches - critical for Msg handling
+    default-signifies-exhaustive: false
+    check-generated: false
+
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment  # We prioritize readability over struct packing
+
+  staticcheck:
+    checks: ["all"]
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+    disabled-checks:
+      - hugeParam        # Value receivers on Model are intentional (TEA pattern)
+      - rangeValCopy     # Intentional value copies for immutability
+      - appendAssign     # We use defensive copy patterns
+
+  misspell:
+    locale: US
+
+issues:
+  # Don't limit issues per linter
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  exclude-rules:
+    # Test files can be more relaxed
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gocritic
+
+    # Allow unused parameters in interface implementations
+    - linters:
+        - unused
+      text: "unused-parameter"
+
+    # The Copy* functions intentionally duplicate structure
+    - path: copy\.go
+      linters:
+        - gocritic
+      text: "dupSubExpr"
+
+  # Show all issues, not just new ones
+  new: false

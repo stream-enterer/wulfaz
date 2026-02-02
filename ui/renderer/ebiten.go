@@ -43,11 +43,11 @@ const (
 	logY        = 10
 	logChars    = 35
 	logMaxLines = 20
-	charWidth   = 7  // approx width of debug font char
+	charWidth   = 7 // approx width of debug font char
 	lineHeight  = 15
 
 	// Die detail rendering
-	dieContentPadding         = 4  // Used in drawRedX for X positioning
+	dieContentPadding         = 4 // Used in drawRedX for X positioning
 	commandDiceAreaYOffset    = 16
 	commandDiceTopYOffset     = 14
 	diagonalDiceMargin        = 15
@@ -55,14 +55,14 @@ const (
 	diagonalDiceBottomYOffset = 20
 
 	// UI layout
-	unlockButtonWidth   = 80
-	unlockButtonHeight  = 20
-	unlockButtonTextX   = 8
-	unlockButtonTextY   = 2
-	uiLeftMargin        = 10
-	uiHintY1            = 50
-	uiHintY2            = 70
-	uiUnlockButtonY     = 90
+	unlockButtonWidth  = 80
+	unlockButtonHeight = 20
+	unlockButtonTextX  = 8
+	unlockButtonTextY  = 2
+	uiLeftMargin       = 10
+	uiHintY1           = 50
+	uiHintY2           = 70
+	uiUnlockButtonY    = 90
 
 	// Text rendering
 	unitIDTruncateWidth = 80
@@ -78,11 +78,11 @@ var (
 	colorBackground   = color.RGBA{30, 30, 50, 255}
 	colorPlayer       = color.RGBA{60, 100, 200, 255}
 	colorEnemy        = color.RGBA{200, 60, 60, 255}
-	colorOrangeLock   = color.RGBA{255, 165, 0, 255}  // Locked die
-	colorGreenSelect  = color.RGBA{0, 255, 0, 255}    // Selected die
-	colorRedUsed      = color.RGBA{255, 0, 0, 255}    // Activated/used die
-	colorDieBox       = color.RGBA{40, 40, 40, 255}   // Die background
-	colorGrayBlank    = color.RGBA{80, 80, 80, 255}   // Blank die (grayed out)
+	colorOrangeLock   = color.RGBA{255, 165, 0, 255} // Locked die
+	colorGreenSelect  = color.RGBA{0, 255, 0, 255}   // Selected die
+	colorRedUsed      = color.RGBA{255, 0, 0, 255}   // Activated/used die
+	colorDieBox       = color.RGBA{40, 40, 40, 255}  // Die background
+	colorGrayBlank    = color.RGBA{80, 80, 80, 255}  // Blank die (grayed out)
 	colorUnlockButton = color.RGBA{60, 60, 80, 255}
 
 	// Wave 7: Arrow colors
@@ -229,9 +229,9 @@ func drawCommandDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY float3
 	bottomY := topDieY + DieBoxSize + DieBoxMargin
 
 	positions := []struct{ x, y float32 }{
-		{topDieX, topDieY},       // Die 0: top
-		{bottomLeftX, bottomY},   // Die 1: bottom-left
-		{bottomRightX, bottomY},  // Die 2: bottom-right
+		{topDieX, topDieY},      // Die 0: top
+		{bottomLeftX, bottomY},  // Die 1: bottom-left
+		{bottomRightX, bottomY}, // Die 2: bottom-right
 	}
 
 	for i, pos := range positions {
@@ -294,11 +294,11 @@ func arrowColor(effectType entity.DieType) color.RGBA {
 		return colorArrowShield
 	case entity.DieHeal:
 		return colorArrowHeal
-	default:
+	case entity.DieBlank:
 		return color.RGBA{200, 200, 200, 220}
 	}
+	return color.RGBA{200, 200, 200, 220}
 }
-
 
 // drawTargetingArrows renders all active arrows
 func drawTargetingArrows(screen *ebiten.Image, combat model.CombatModel, boardX float32) {

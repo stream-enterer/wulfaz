@@ -312,4 +312,3 @@ func copyUnit(u entity.Unit) entity.Unit {
 		Position:   u.Position,
 	}
 }
-

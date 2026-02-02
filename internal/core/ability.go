@@ -34,13 +34,13 @@ type EffectRef struct {
 }
 
 type Ability struct {
-	ID                  string
-	Tags                []Tag
-	Conditions          []Condition
-	Costs               []Cost
-	Targeting           Targeting
-	Effects             []EffectRef
-	Cooldown            int
-	Charges             int       // -1 = unlimited
-	ChargeRestoreEvent  EventType // event that restores charges
+	ID                 string
+	Tags               []Tag
+	Conditions         []Condition
+	Costs              []Cost
+	Targeting          Targeting
+	Effects            []EffectRef
+	Cooldown           int
+	Charges            int       // -1 = unlimited
+	ChargeRestoreEvent EventType // event that restores charges
 }

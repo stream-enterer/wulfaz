@@ -564,27 +564,27 @@ func TestLoadUnitsFromDir(t *testing.T) {
 	}
 
 	// Check small_mech loaded
-	small, ok := reg.GetUnit("small_mech")
-	if !ok {
+	small, smallOK := reg.GetUnit("small_mech")
+	if !smallOK {
 		t.Error("small_mech not registered")
 	} else {
 		if small.ID != "small_mech" {
 			t.Errorf("small_mech ID: got %q, want %q", small.ID, "small_mech")
 		}
-		if cw, ok := small.Attributes["combat_width"]; !ok || cw.Base != 1 {
+		if cw, cwOK := small.Attributes["combat_width"]; !cwOK || cw.Base != 1 {
 			t.Errorf("small_mech combat_width: got %+v", small.Attributes["combat_width"])
 		}
 	}
 
 	// Check medium_mech loaded
-	medium, ok := reg.GetUnit("medium_mech")
-	if !ok {
+	medium, mediumOK := reg.GetUnit("medium_mech")
+	if !mediumOK {
 		t.Error("medium_mech not registered")
 	} else {
 		if medium.ID != "medium_mech" {
 			t.Errorf("medium_mech ID: got %q, want %q", medium.ID, "medium_mech")
 		}
-		if cw, ok := medium.Attributes["combat_width"]; !ok || cw.Base != 2 {
+		if cw, cwOK := medium.Attributes["combat_width"]; !cwOK || cw.Base != 2 {
 			t.Errorf("medium_mech combat_width: got %+v", medium.Attributes["combat_width"])
 		}
 	}
@@ -615,27 +615,27 @@ func TestLoadItemsFromDir(t *testing.T) {
 	}
 
 	// Check medium_laser loaded
-	laser, ok := reg.GetItem("medium_laser")
-	if !ok {
+	laser, laserOK := reg.GetItem("medium_laser")
+	if !laserOK {
 		t.Error("medium_laser not registered")
 	} else {
 		if laser.ID != "medium_laser" {
 			t.Errorf("medium_laser ID: got %q, want %q", laser.ID, "medium_laser")
 		}
-		if dmg, ok := laser.Attributes["damage"]; !ok || dmg.Base != 5 {
+		if dmg, dmgOK := laser.Attributes["damage"]; !dmgOK || dmg.Base != 5 {
 			t.Errorf("medium_laser damage: got %+v", laser.Attributes["damage"])
 		}
 	}
 
 	// Check autocannon loaded
-	ac, ok := reg.GetItem("autocannon")
-	if !ok {
+	ac, acOK := reg.GetItem("autocannon")
+	if !acOK {
 		t.Error("autocannon not registered")
 	} else {
 		if ac.ID != "autocannon" {
 			t.Errorf("autocannon ID: got %q, want %q", ac.ID, "autocannon")
 		}
-		if dmg, ok := ac.Attributes["damage"]; !ok || dmg.Base != 8 {
+		if dmg, dmgOK := ac.Attributes["damage"]; !dmgOK || dmg.Base != 8 {
 			t.Errorf("autocannon damage: got %+v", ac.Attributes["damage"])
 		}
 		if len(ac.Triggers) != 2 {
@@ -685,8 +685,8 @@ func TestLoadUnitsFromDir_InvalidKDL(t *testing.T) {
 
 	// Write invalid KDL file
 	invalidKDL := `unit id="broken" { this is not valid kdl!!!`
-	if err := os.WriteFile(filepath.Join(dir, "broken.kdl"), []byte(invalidKDL), 0644); err != nil {
-		t.Fatalf("write invalid KDL: %v", err)
+	if writeErr := os.WriteFile(filepath.Join(dir, "broken.kdl"), []byte(invalidKDL), 0644); writeErr != nil {
+		t.Fatalf("write invalid KDL: %v", writeErr)
 	}
 
 	reg := NewRegistry()
@@ -708,8 +708,8 @@ func TestLoadUnitsFromDir_MissingID(t *testing.T) {
 	missingIDKDL := `unit {
 		tags "mech"
 	}`
-	if err := os.WriteFile(filepath.Join(dir, "missing.kdl"), []byte(missingIDKDL), 0644); err != nil {
-		t.Fatalf("write missing ID KDL: %v", err)
+	if writeErr := os.WriteFile(filepath.Join(dir, "missing.kdl"), []byte(missingIDKDL), 0644); writeErr != nil {
+		t.Fatalf("write missing ID KDL: %v", writeErr)
 	}
 
 	reg := NewRegistry()

@@ -18,10 +18,10 @@ func Render(m tea.Model) string {
 		sb.WriteString("Menu\n")
 	case tea.PhaseCombat:
 		renderCombatText(&sb, m.Combat)
+	case tea.PhaseChoice:
+		sb.WriteString("=== CHOICE ===\n")
 	case tea.PhaseGameOver:
 		sb.WriteString("=== GAME OVER ===\n")
-	default:
-		sb.WriteString("Unknown phase\n")
 	}
 
 	return sb.String()
