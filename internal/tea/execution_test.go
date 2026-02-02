@@ -420,7 +420,7 @@ func TestRoundEnded_ShieldExpiration(t *testing.T) {
 					ID:       "player_cmd",
 					Position: -1,
 					Tags:     []core.Tag{"command"},
-					Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{5}}},
+					Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
 					Attributes: map[string]core.Attribute{
 						"health":  {Base: 100},
 						"shields": {Base: 15}, // Should expire
@@ -440,7 +440,7 @@ func TestRoundEnded_ShieldExpiration(t *testing.T) {
 					ID:       "enemy_cmd",
 					Position: -1,
 					Tags:     []core.Tag{"command"},
-					Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{5}}},
+					Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
 					Attributes: map[string]core.Attribute{
 						"health":  {Base: 100},
 						"shields": {Base: 20}, // Should expire
@@ -507,7 +507,7 @@ func TestCombatStarted_TriggersFirstRound(t *testing.T) {
 				ID:       "player_cmd",
 				Position: -1,
 				Tags:     []core.Tag{"command"},
-				Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{5, 5, 8, 12, 0, 0}}},
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 8}, {Type: entity.DieDamage, Value: 12}, {Type: entity.DieBlank, Value: 0}, {Type: entity.DieBlank, Value: 0}}}},
 				Attributes: map[string]core.Attribute{
 					"health": {Base: 100},
 				},
@@ -518,7 +518,7 @@ func TestCombatStarted_TriggersFirstRound(t *testing.T) {
 				ID:       "enemy_cmd",
 				Position: -1,
 				Tags:     []core.Tag{"command"},
-				Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{5, 5, 8, 12, 0, 0}}},
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 8}, {Type: entity.DieDamage, Value: 12}, {Type: entity.DieBlank, Value: 0}, {Type: entity.DieBlank, Value: 0}}}},
 				Attributes: map[string]core.Attribute{
 					"health": {Base: 100},
 				},
@@ -853,7 +853,7 @@ func TestResolvePosition_OverflowDamage(t *testing.T) {
 			{
 				ID:       "attacker",
 				Position: 0,
-				Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{50}}},
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 50}}}},
 				Attributes: map[string]core.Attribute{
 					"health":       {Base: 50},
 					"combat_width": {Base: 2},
@@ -885,7 +885,7 @@ func TestResolvePosition_OverflowDamage(t *testing.T) {
 			},
 		},
 		RolledDice: map[string][]entity.RolledDie{
-			"attacker": {{Type: entity.DieDamage, Result: 50, FaceIndex: 0, Faces: []int{50}}},
+			"attacker": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 50}}, FaceIndex: 0}},
 		},
 		FiringOrder:        []model.FiringPosition{{Position: 0, PlayerUnits: []string{"attacker"}}},
 		CurrentFiringIndex: 0,
@@ -944,7 +944,7 @@ func TestResolvePosition_GapToCommand(t *testing.T) {
 			{
 				ID:       "attacker",
 				Position: 9, // Far right, no enemies overlap
-				Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{25}}},
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 25}}}},
 				Attributes: map[string]core.Attribute{
 					"health":       {Base: 50},
 					"combat_width": {Base: 1},
@@ -969,7 +969,7 @@ func TestResolvePosition_GapToCommand(t *testing.T) {
 			},
 		},
 		RolledDice: map[string][]entity.RolledDie{
-			"attacker": {{Type: entity.DieDamage, Result: 25, FaceIndex: 0, Faces: []int{25}}},
+			"attacker": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 25}}, FaceIndex: 0}},
 		},
 		FiringOrder:        []model.FiringPosition{{Position: 9, PlayerUnits: []string{"attacker"}}},
 		CurrentFiringIndex: 0,
@@ -1012,7 +1012,7 @@ func TestResolvePosition_GapWithLiveUnits_DamageWasted(t *testing.T) {
 			{
 				ID:       "attacker",
 				Position: 9, // Far right, no enemies overlap
-				Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{25}}},
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 25}}}},
 				Attributes: map[string]core.Attribute{
 					"health":       {Base: 50},
 					"combat_width": {Base: 1},
@@ -1037,7 +1037,7 @@ func TestResolvePosition_GapWithLiveUnits_DamageWasted(t *testing.T) {
 			},
 		},
 		RolledDice: map[string][]entity.RolledDie{
-			"attacker": {{Type: entity.DieDamage, Result: 25, FaceIndex: 0, Faces: []int{25}}},
+			"attacker": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 25}}, FaceIndex: 0}},
 		},
 		FiringOrder:        []model.FiringPosition{{Position: 9, PlayerUnits: []string{"attacker"}}},
 		CurrentFiringIndex: 0,
@@ -1078,8 +1078,8 @@ func TestResolvePosition_MultiDieSeparateTargets(t *testing.T) {
 				ID:       "attacker",
 				Position: 0,
 				Dice: []entity.Die{
-					{Type: entity.DieDamage, Faces: []int{30}},
-					{Type: entity.DieDamage, Faces: []int{20}},
+					{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 30}}},
+					{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 20}}},
 				},
 				Attributes: map[string]core.Attribute{
 					"health":       {Base: 50},
@@ -1113,8 +1113,8 @@ func TestResolvePosition_MultiDieSeparateTargets(t *testing.T) {
 		},
 		RolledDice: map[string][]entity.RolledDie{
 			"attacker": {
-				{Type: entity.DieDamage, Result: 30, FaceIndex: 0, Faces: []int{30}},
-				{Type: entity.DieDamage, Result: 20, FaceIndex: 0, Faces: []int{20}},
+				{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 30}}, FaceIndex: 0},
+				{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 20}}, FaceIndex: 0},
 			},
 		},
 		FiringOrder:        []model.FiringPosition{{Position: 0, PlayerUnits: []string{"attacker"}}},
@@ -1176,7 +1176,7 @@ func TestResolvePosition_OverflowStopsAtCommand(t *testing.T) {
 			{
 				ID:       "attacker",
 				Position: 0,
-				Dice:     []entity.Die{{Type: entity.DieDamage, Faces: []int{100}}},
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 100}}}},
 				Attributes: map[string]core.Attribute{
 					"health":       {Base: 50},
 					"combat_width": {Base: 1},
@@ -1201,7 +1201,7 @@ func TestResolvePosition_OverflowStopsAtCommand(t *testing.T) {
 			},
 		},
 		RolledDice: map[string][]entity.RolledDie{
-			"attacker": {{Type: entity.DieDamage, Result: 100, FaceIndex: 0, Faces: []int{100}}},
+			"attacker": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 100}}, FaceIndex: 0}},
 		},
 		FiringOrder:        []model.FiringPosition{{Position: 0, PlayerUnits: []string{"attacker"}}},
 		CurrentFiringIndex: 0,

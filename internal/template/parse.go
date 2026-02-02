@@ -2,8 +2,6 @@ package template
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/sblinch/kdl-go/document"
 
@@ -251,44 +249,71 @@ func parseDieType(s string) (entity.DieType, error) {
 		return entity.DieShield, nil
 	case "heal":
 		return entity.DieHeal, nil
+	case "blank":
+		return entity.DieBlank, nil
 	default:
 		return "", fmt.Errorf("unknown die type: %q", s)
 	}
 }
 
-// parseFaces parses comma-separated face values "2,2,3,4,0,0" -> []int.
-func parseFaces(s string) ([]int, error) {
-	parts := strings.Split(s, ",")
-	faces := make([]int, len(parts))
-	for i, p := range parts {
-		v, err := strconv.Atoi(strings.TrimSpace(p))
-		if err != nil {
-			return nil, fmt.Errorf("invalid face value %q", p)
-		}
-		faces[i] = v
+// toInt converts various numeric types to int.
+func toInt(v any) (int, error) {
+	switch val := v.(type) {
+	case int64:
+		return int(val), nil
+	case int:
+		return val, nil
+	case float64:
+		return int(val), nil
 	}
-	return faces, nil
+	return 0, fmt.Errorf("not an integer")
 }
 
-// parseDie parses a single "die" node.
-func parseDie(node *document.Node, filename string) (entity.Die, error) {
-	typeStr, err := getStringProp(node, "type")
-	if err != nil {
-		return entity.Die{}, &ParseError{File: filename, Node: "die", Field: "type", Message: err.Error()}
+// parseDieFace parses a single "face" node.
+func parseDieFace(node *document.Node, filename string) (entity.DieFace, error) {
+	args := node.Arguments
+	if len(args) == 0 {
+		return entity.DieFace{}, &ParseError{File: filename, Node: "face", Message: "missing type argument"}
+	}
+	typeStr, ok := args[0].Value.(string)
+	if !ok {
+		return entity.DieFace{}, &ParseError{File: filename, Node: "face", Message: "type must be string"}
 	}
 	dieType, err := parseDieType(typeStr)
 	if err != nil {
-		return entity.Die{}, &ParseError{File: filename, Node: "die", Field: "type", Message: err.Error()}
+		return entity.DieFace{}, &ParseError{File: filename, Node: "face", Field: "type", Message: err.Error()}
 	}
-	facesStr, err := getStringProp(node, "faces")
+
+	// Blank faces have no value
+	if dieType == entity.DieBlank {
+		return entity.DieFace{Type: entity.DieBlank, Value: 0}, nil
+	}
+
+	// Non-blank faces require a value
+	if len(args) < 2 {
+		return entity.DieFace{}, &ParseError{File: filename, Node: "face", Message: "missing value argument"}
+	}
+	value, err := toInt(args[1].Value)
 	if err != nil {
-		return entity.Die{}, &ParseError{File: filename, Node: "die", Field: "faces", Message: err.Error()}
+		return entity.DieFace{}, &ParseError{File: filename, Node: "face", Field: "value", Message: "must be integer"}
 	}
-	faces, err := parseFaces(facesStr)
-	if err != nil {
-		return entity.Die{}, &ParseError{File: filename, Node: "die", Field: "faces", Message: err.Error()}
+	return entity.DieFace{Type: dieType, Value: value}, nil
+}
+
+// parseDie parses a single "die" node with child "face" nodes.
+func parseDie(node *document.Node, filename string) (entity.Die, error) {
+	var faces []entity.DieFace
+	for _, faceNode := range findChildren(node, "face") {
+		face, err := parseDieFace(faceNode, filename)
+		if err != nil {
+			return entity.Die{}, err
+		}
+		faces = append(faces, face)
 	}
-	return entity.Die{Type: dieType, Faces: faces}, nil
+	if len(faces) == 0 {
+		return entity.Die{}, &ParseError{File: filename, Node: "die", Message: "die must have at least one face"}
+	}
+	return entity.Die{Faces: faces}, nil
 }
 
 // parseDice parses a "dice" block containing multiple die nodes.

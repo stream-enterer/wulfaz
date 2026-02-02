@@ -117,11 +117,11 @@ func CopyPilot(p Pilot) Pilot {
 // CopyDie creates a deep copy of a Die.
 func CopyDie(d Die) Die {
 	if d.Faces == nil {
-		return Die{Type: d.Type}
+		return Die{}
 	}
-	faces := make([]int, len(d.Faces))
+	faces := make([]DieFace, len(d.Faces))
 	copy(faces, d.Faces)
-	return Die{Type: d.Type, Faces: faces}
+	return Die{Faces: faces}
 }
 
 // CopyDice copies a slice of Dice.
@@ -148,11 +148,14 @@ func CopyIntSlice(s []int) []int {
 
 // CopyRolledDie creates a deep copy of a RolledDie.
 func CopyRolledDie(rd RolledDie) RolledDie {
+	var faces []DieFace
+	if rd.Faces != nil {
+		faces = make([]DieFace, len(rd.Faces))
+		copy(faces, rd.Faces)
+	}
 	return RolledDie{
-		Type:      rd.Type,
-		Faces:     CopyIntSlice(rd.Faces),
+		Faces:     faces,
 		FaceIndex: rd.FaceIndex,
-		Result:    rd.Result,
 		Locked:    rd.Locked,
 	}
 }

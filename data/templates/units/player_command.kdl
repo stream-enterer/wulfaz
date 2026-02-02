@@ -7,8 +7,29 @@ unit id="player_command" {
         attribute name="shields" base=0 min=0
     }
     dice {
-        die type="damage" faces="5,5,8,12,0,0"
-        die type="shield" faces="5,5,8,12,0,0"
-        die type="heal" faces="5,5,8,12,0,0"
+        die {
+            face "damage" 5
+            face "damage" 5
+            face "damage" 8
+            face "damage" 12
+            face "blank"
+            face "blank"
+        }
+        die {
+            face "shield" 5
+            face "shield" 5
+            face "shield" 8
+            face "shield" 12
+            face "blank"
+            face "blank"
+        }
+        die {
+            face "heal" 5
+            face "heal" 5
+            face "heal" 8
+            face "heal" 12
+            face "blank"
+            face "blank"
+        }
     }
 }

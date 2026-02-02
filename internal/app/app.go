@@ -213,7 +213,12 @@ func (a *App) handleLeftClick(mx, my int) {
 			// LOCK PHASE: toggle lock
 			a.dispatch(tea.DieLockToggled{UnitID: region.UnitID, DieIndex: region.DieIndex})
 		} else {
-			// ACTIVATION PHASE: toggle selection
+			// ACTIVATION PHASE: check for blank before allowing selection
+			rolled := combat.RolledDice[region.UnitID]
+			if region.DieIndex < len(rolled) && rolled[region.DieIndex].Type() == entity.DieBlank {
+				continue // Can't activate blank - skip this die
+			}
+			// Toggle selection
 			if combat.SelectedUnitID == region.UnitID && combat.SelectedDieIndex == region.DieIndex {
 				a.dispatch(tea.DieDeselected{})
 			} else {
@@ -236,8 +241,8 @@ func (a *App) handleLeftClick(mx, my int) {
 					SourceUnitID: combat.SelectedUnitID,
 					DieIndex:     combat.SelectedDieIndex,
 					TargetUnitID: region.UnitID,
-					Value:        die.Result,
-					Effect:       die.Type,
+					Value:        die.Value(),
+					Effect:       die.Type(),
 				})
 			}
 			return

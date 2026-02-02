@@ -7,9 +7,30 @@ unit id="large_mech" {
         attribute name="shields" base=0 min=0
     }
     dice {
-        die type="damage" faces="2,2,3,4,0,0"
-        die type="damage" faces="2,2,3,4,0,0"
-        die type="damage" faces="2,2,3,4,0,0"
+        die {
+            face "damage" 2
+            face "damage" 2
+            face "damage" 3
+            face "damage" 4
+            face "blank"
+            face "blank"
+        }
+        die {
+            face "damage" 2
+            face "damage" 2
+            face "damage" 3
+            face "damage" 4
+            face "blank"
+            face "blank"
+        }
+        die {
+            face "damage" 2
+            face "damage" 2
+            face "damage" 3
+            face "damage" 4
+            face "blank"
+            face "blank"
+        }
     }
     parts {
         part id="torso" template_id="heavy_torso" {

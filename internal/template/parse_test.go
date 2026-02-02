@@ -9,19 +9,6 @@ import (
 	"wulfaz/internal/entity"
 )
 
-// slicesEqual compares two int slices for equality (test helper).
-func slicesEqual(a, b []int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func TestParseDieType(t *testing.T) {
 	tests := []struct {
 		input   string
@@ -31,6 +18,7 @@ func TestParseDieType(t *testing.T) {
 		{"damage", entity.DieDamage, false},
 		{"shield", entity.DieShield, false},
 		{"heal", entity.DieHeal, false},
+		{"blank", entity.DieBlank, false},
 		{"unknown", "", true},
 	}
 	for _, tt := range tests {
@@ -44,32 +32,18 @@ func TestParseDieType(t *testing.T) {
 	}
 }
 
-func TestParseFaces(t *testing.T) {
-	tests := []struct {
-		input   string
-		want    []int
-		wantErr bool
-	}{
-		{"2,2,3,4,0,0", []int{2, 2, 3, 4, 0, 0}, false},
-		{"5, 5, 8, 12, 0, 0", []int{5, 5, 8, 12, 0, 0}, false}, // spaces
-		{"1", []int{1}, false},
-		{"abc", nil, true},
-	}
-	for _, tt := range tests {
-		got, err := parseFaces(tt.input)
-		if (err != nil) != tt.wantErr {
-			t.Errorf("parseFaces(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
-		}
-		if !tt.wantErr && !slicesEqual(got, tt.want) {
-			t.Errorf("parseFaces(%q) = %v, want %v", tt.input, got, tt.want)
-		}
-	}
-}
-
 func TestParseDice(t *testing.T) {
 	kdlStr := `dice {
-        die type="damage" faces="2,2,3,4,0,0"
-        die type="shield" faces="5,5,8,12,0,0"
+        die {
+            face "damage" 5
+            face "damage" 8
+            face "blank"
+        }
+        die {
+            face "shield" 5
+            face "shield" 12
+            face "blank"
+        }
     }`
 	doc, err := kdl.Parse(strings.NewReader(kdlStr))
 	if err != nil {
@@ -84,10 +58,16 @@ func TestParseDice(t *testing.T) {
 	if len(dice) != 2 {
 		t.Fatalf("expected 2 dice, got %d", len(dice))
 	}
-	if dice[0].Type != entity.DieDamage {
-		t.Errorf("dice[0].Type = %v, want damage", dice[0].Type)
+	if len(dice[0].Faces) != 3 {
+		t.Fatalf("expected 3 faces on die 0, got %d", len(dice[0].Faces))
 	}
-	if dice[1].Type != entity.DieShield {
-		t.Errorf("dice[1].Type = %v, want shield", dice[1].Type)
+	if dice[0].Faces[0].Type != entity.DieDamage || dice[0].Faces[0].Value != 5 {
+		t.Errorf("dice[0].Faces[0] = %+v, want damage/5", dice[0].Faces[0])
+	}
+	if dice[0].Faces[2].Type != entity.DieBlank {
+		t.Errorf("dice[0].Faces[2].Type = %v, want blank", dice[0].Faces[2].Type)
+	}
+	if dice[1].Faces[0].Type != entity.DieShield || dice[1].Faces[0].Value != 5 {
+		t.Errorf("dice[1].Faces[0] = %+v, want shield/5", dice[1].Faces[0])
 	}
 }

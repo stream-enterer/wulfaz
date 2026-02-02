@@ -158,6 +158,7 @@ func AdvanceDicePhase(next model.DicePhase) Cmd {
 
 // ExecuteEnemyCommand runs simple enemy AI for command dice.
 // Damage -> lowest HP player unit; Shield/Heal -> lowest HP enemy unit.
+// Blank faces are skipped.
 func ExecuteEnemyCommand(combat model.CombatModel) Cmd {
 	return func() Msg {
 		enemyCmd := findEnemyCommandUnit(combat)
@@ -169,12 +170,13 @@ func ExecuteEnemyCommand(combat model.CombatModel) Cmd {
 		var actions []EnemyDiceAction
 
 		for i, rd := range rolled {
-			if rd.Result == 0 { // Skip blank faces
+			// Skip blank faces
+			if rd.Type() == entity.DieBlank {
 				continue
 			}
 
 			var targetID string
-			switch rd.Type {
+			switch rd.Type() {
 			case entity.DieDamage:
 				targetID = findLowestHPAliveUnit(combat.PlayerUnits)
 			case entity.DieShield, entity.DieHeal:
@@ -186,8 +188,8 @@ func ExecuteEnemyCommand(combat model.CombatModel) Cmd {
 					SourceUnitID: enemyCmd.ID,
 					TargetUnitID: targetID,
 					DieIndex:     i,
-					Effect:       rd.Type,
-					Value:        rd.Result,
+					Effect:       rd.Type(),
+					Value:        rd.Value(),
 				})
 			}
 		}
@@ -246,12 +248,13 @@ func resolveAttacks(
 		rolled := rolledDice[uid]
 
 		for dieIdx, rd := range rolled {
-			if rd.Type != entity.DieDamage || rd.Result == 0 {
+			// Skip non-damage (this also skips blanks since blank != damage)
+			if rd.Type() != entity.DieDamage {
 				continue
 			}
 
 			// Try overflow damage to overlapping enemies
-			results := ApplyDamageWithOverflow(attacker, rd.Result, targets, hpSnapshot)
+			results := ApplyDamageWithOverflow(attacker, rd.Value(), targets, hpSnapshot)
 
 			if len(results) > 0 {
 				// Convert overflow results to AttackResults
@@ -271,7 +274,7 @@ func resolveAttacks(
 				// Only hit command if ALL enemy units are dead
 				if !AnyAliveUnits(targets) && targetCmd != nil && targetCmd.IsAlive() {
 					hp, shields := hpSnapshot[targetCmd.ID][0], hpSnapshot[targetCmd.ID][1]
-					remaining := rd.Result
+					remaining := rd.Value()
 					absorbed := min(remaining, shields)
 					remaining -= absorbed
 					shields -= absorbed
@@ -281,7 +284,7 @@ func resolveAttacks(
 						AttackerID: uid,
 						TargetID:   targetCmd.ID,
 						DieIndex:   dieIdx,
-						Damage:     rd.Result,
+						Damage:     rd.Value(),
 						NewHealth:  hp,
 						NewShields: shields,
 						TargetDead: hp <= 0,

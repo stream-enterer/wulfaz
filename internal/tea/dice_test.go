@@ -13,8 +13,15 @@ func TestHandleRoundStarted(t *testing.T) {
 		Version: 1,
 		Combat: model.CombatModel{
 			PlayerUnits: []entity.Unit{{
-				ID:   "unit1",
-				Dice: []entity.Die{{Type: entity.DieDamage, Faces: []int{2, 2, 3, 4, 0, 0}}},
+				ID: "unit1",
+				Dice: []entity.Die{{Faces: []entity.DieFace{
+					{Type: entity.DieDamage, Value: 2},
+					{Type: entity.DieDamage, Value: 2},
+					{Type: entity.DieDamage, Value: 3},
+					{Type: entity.DieDamage, Value: 4},
+					{Type: entity.DieBlank, Value: 0},
+					{Type: entity.DieBlank, Value: 0},
+				}}},
 			}},
 		},
 	}
@@ -40,8 +47,8 @@ func TestHandleRoundStarted(t *testing.T) {
 	if len(rolled) != 1 {
 		t.Fatalf("expected 1 rolled die, got %d", len(rolled))
 	}
-	if rolled[0].Result != 3 {
-		t.Errorf("rolled[0].Result = %d, want 3", rolled[0].Result)
+	if rolled[0].Value() != 3 {
+		t.Errorf("rolled[0].Value() = %d, want 3", rolled[0].Value())
 	}
 	if rolled[0].FaceIndex != 2 {
 		t.Errorf("rolled[0].FaceIndex = %d, want 2", rolled[0].FaceIndex)
@@ -86,7 +93,7 @@ func TestHandleDiceActivated_TargetValidation(t *testing.T) {
 	playerCmd := entity.Unit{
 		ID:   "player_cmd",
 		Tags: []core.Tag{"command"},
-		Dice: []entity.Die{{Type: entity.DieDamage, Faces: []int{5}}},
+		Dice: []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
 	}
 
 	m := Model{
@@ -98,7 +105,7 @@ func TestHandleDiceActivated_TargetValidation(t *testing.T) {
 			SelectedUnitID:   "player_cmd",
 			SelectedDieIndex: 0,
 			RolledDice: map[string][]entity.RolledDie{
-				"player_cmd": {{Type: entity.DieDamage, Result: 5}},
+				"player_cmd": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0}},
 			},
 			ActivatedDice: map[string][]bool{"player_cmd": {false}},
 		},
@@ -126,7 +133,7 @@ func TestHandleDieLockToggled(t *testing.T) {
 	playerCmd := entity.Unit{
 		ID:   "player_cmd",
 		Tags: []core.Tag{"command"},
-		Dice: []entity.Die{{Type: entity.DieDamage, Faces: []int{5}}},
+		Dice: []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
 	}
 
 	m := Model{
@@ -135,7 +142,7 @@ func TestHandleDieLockToggled(t *testing.T) {
 			PlayerUnits: []entity.Unit{playerCmd},
 			DicePhase:   model.DicePhasePlayerCommand,
 			RolledDice: map[string][]entity.RolledDie{
-				"player_cmd": {{Type: entity.DieDamage, Result: 5, Locked: false}},
+				"player_cmd": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0, Locked: false}},
 			},
 		},
 	}
@@ -158,7 +165,7 @@ func TestHandleDieSelected_BoundsCheck(t *testing.T) {
 	playerCmd := entity.Unit{
 		ID:   "player_cmd",
 		Tags: []core.Tag{"command"},
-		Dice: []entity.Die{{Type: entity.DieDamage, Faces: []int{5}}},
+		Dice: []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
 	}
 
 	m := Model{
@@ -169,7 +176,7 @@ func TestHandleDieSelected_BoundsCheck(t *testing.T) {
 			SelectedUnitID:   "",
 			SelectedDieIndex: -1,
 			RolledDice: map[string][]entity.RolledDie{
-				"player_cmd": {{Type: entity.DieDamage, Result: 5}},
+				"player_cmd": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0}},
 			},
 			ActivatedDice: map[string][]bool{"player_cmd": {false}},
 		},

@@ -136,8 +136,14 @@ func TestCopyPilot_RoundTrip(t *testing.T) {
 
 func TestCopyDie_RoundTrip(t *testing.T) {
 	orig := Die{
-		Type:  DieDamage,
-		Faces: []int{2, 2, 3, 4, 0, 0},
+		Faces: []DieFace{
+			{Type: DieDamage, Value: 2},
+			{Type: DieDamage, Value: 2},
+			{Type: DieDamage, Value: 3},
+			{Type: DieDamage, Value: 4},
+			{Type: DieBlank, Value: 0},
+			{Type: DieBlank, Value: 0},
+		},
 	}
 	copied := CopyDie(orig)
 
@@ -148,14 +154,20 @@ func TestCopyDie_RoundTrip(t *testing.T) {
 
 func TestCopyDie_Independence(t *testing.T) {
 	orig := Die{
-		Type:  DieDamage,
-		Faces: []int{2, 2, 3, 4, 0, 0},
+		Faces: []DieFace{
+			{Type: DieDamage, Value: 2},
+			{Type: DieDamage, Value: 2},
+			{Type: DieDamage, Value: 3},
+			{Type: DieDamage, Value: 4},
+			{Type: DieBlank, Value: 0},
+			{Type: DieBlank, Value: 0},
+		},
 	}
 	copied := CopyDie(orig)
 
-	copied.Faces[0] = 999
+	copied.Faces[0] = DieFace{Type: DieDamage, Value: 999}
 
-	if orig.Faces[0] != 2 {
+	if orig.Faces[0].Value != 2 {
 		t.Error("original Faces was mutated")
 	}
 }
@@ -168,12 +180,9 @@ func TestCopyDice_Nil(t *testing.T) {
 }
 
 func TestCopyDie_NilFaces(t *testing.T) {
-	orig := Die{Type: DieShield}
+	orig := Die{}
 	copied := CopyDie(orig)
 
-	if copied.Type != DieShield {
-		t.Errorf("expected Type DieShield, got %v", copied.Type)
-	}
 	if copied.Faces != nil {
 		t.Error("expected nil Faces")
 	}
@@ -199,8 +208,22 @@ func TestCopyUnit_RoundTrip(t *testing.T) {
 			{ID: "jump_jets", Tags: []core.Tag{"movement"}, Charges: 2},
 		},
 		Dice: []Die{
-			{Type: DieDamage, Faces: []int{2, 2, 3, 4, 0, 0}},
-			{Type: DieShield, Faces: []int{1, 1, 2, 3, 0, 0}},
+			{Faces: []DieFace{
+				{Type: DieDamage, Value: 2},
+				{Type: DieDamage, Value: 2},
+				{Type: DieDamage, Value: 3},
+				{Type: DieDamage, Value: 4},
+				{Type: DieBlank, Value: 0},
+				{Type: DieBlank, Value: 0},
+			}},
+			{Faces: []DieFace{
+				{Type: DieShield, Value: 1},
+				{Type: DieShield, Value: 1},
+				{Type: DieShield, Value: 2},
+				{Type: DieShield, Value: 3},
+				{Type: DieBlank, Value: 0},
+				{Type: DieBlank, Value: 0},
+			}},
 		},
 		Pilot:    Pilot{ID: "pilot_001", Name: "Commander Rex"},
 		HasPilot: true,
@@ -443,7 +466,11 @@ func TestCopyUnit_Independence(t *testing.T) {
 			{Event: core.EventOnTurnStart, EffectName: "regen"},
 		},
 		Dice: []Die{
-			{Type: DieDamage, Faces: []int{1, 2, 3}},
+			{Faces: []DieFace{
+				{Type: DieDamage, Value: 1},
+				{Type: DieDamage, Value: 2},
+				{Type: DieDamage, Value: 3},
+			}},
 		},
 		Pilot:    Pilot{ID: "pilot1", Name: "Test Pilot"},
 		HasPilot: true,
@@ -461,7 +488,7 @@ func TestCopyUnit_Independence(t *testing.T) {
 	copiedPart := copied.Parts["torso"]
 	copiedPart.Tags[0] = "modified"
 	copied.Parts["torso"] = copiedPart
-	copied.Dice[0].Faces[0] = 999
+	copied.Dice[0].Faces[0] = DieFace{Type: DieDamage, Value: 999}
 
 	if orig.Tags[0] != "mech" {
 		t.Error("original Tags was mutated")
@@ -472,7 +499,7 @@ func TestCopyUnit_Independence(t *testing.T) {
 	if orig.Parts["torso"].Tags[0] != "center" {
 		t.Error("original Parts was mutated")
 	}
-	if orig.Dice[0].Faces[0] != 1 {
+	if orig.Dice[0].Faces[0].Value != 1 {
 		t.Error("original Dice was mutated")
 	}
 }

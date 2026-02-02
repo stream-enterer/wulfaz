@@ -54,6 +54,7 @@ var (
 	colorGreenSelect = color.RGBA{0, 255, 0, 255}    // Selected die
 	colorRedUsed     = color.RGBA{255, 0, 0, 255}    // Activated/used die
 	colorDieBox      = color.RGBA{40, 40, 40, 255}   // Die background
+	colorGrayBlank   = color.RGBA{80, 80, 80, 255}   // Blank die (grayed out)
 )
 
 // HitRegion represents a clickable area on screen for input handling.
@@ -103,9 +104,15 @@ func separateCommandUnit(units []entity.Unit) (*entity.Unit, []entity.Unit) {
 	return cmd, board
 }
 
-// getDieState returns die outline state: 0=normal, 1=locked, 2=selected, 3=activated
-// Priority: activated > selected > locked > normal
+// getDieState returns die outline state: 0=normal, 1=locked, 2=selected, 3=activated, 4=blank
+// Priority: activated > selected > locked > blank > normal
 func getDieState(unitID string, dieIdx int, combat model.CombatModel, isPlayerCmd bool) int {
+	rolled := combat.RolledDice[unitID]
+	if rolled == nil || dieIdx >= len(rolled) {
+		return 0
+	}
+	rd := rolled[dieIdx]
+
 	// Check activated first (highest priority)
 	if activated := combat.ActivatedDice[unitID]; activated != nil && dieIdx < len(activated) && activated[dieIdx] {
 		return 3 // red
@@ -115,14 +122,18 @@ func getDieState(unitID string, dieIdx int, combat model.CombatModel, isPlayerCm
 		return 2 // green
 	}
 	// Check locked
-	if rolled := combat.RolledDice[unitID]; rolled != nil && dieIdx < len(rolled) && rolled[dieIdx].Locked {
+	if rd.Locked {
 		return 1 // orange
+	}
+	// Blank faces get gray state
+	if rd.Type() == entity.DieBlank {
+		return 4 // gray for blank
 	}
 	return 0 // white
 }
 
 // drawDieBox draws a single die box and returns its hit region rectangle.
-func drawDieBox(screen *ebiten.Image, x, y float32, result int, state int) image.Rectangle {
+func drawDieBox(screen *ebiten.Image, x, y float32, face entity.DieFace, state int) image.Rectangle {
 	// Background
 	vector.FillRect(screen, x, y, DieBoxSize, DieBoxSize, colorDieBox, false)
 
@@ -135,14 +146,16 @@ func drawDieBox(screen *ebiten.Image, x, y float32, result int, state int) image
 		outline = colorGreenSelect
 	case 3:
 		outline = colorRedUsed
+	case 4:
+		outline = colorGrayBlank
 	}
 	vector.StrokeRect(screen, x, y, DieBoxSize, DieBoxSize, 2, outline, false)
 
-	// Content: pips or X
-	if result == 0 {
+	// Content: pips, X for blank, or number
+	if face.Type == entity.DieBlank {
 		drawRedX(screen, x, y)
 	} else {
-		drawPips(screen, x, y, result)
+		drawPips(screen, x, y, face.Value)
 	}
 
 	return image.Rect(int(x), int(y), int(x)+DieBoxSize, int(y)+DieBoxSize)
@@ -227,7 +240,7 @@ func drawCommandDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY float3
 			break
 		}
 		state := getDieState(unit.ID, i, combat, isPlayerCmd)
-		rect := drawDieBox(screen, pos.x, pos.y, rolled[i].Result, state)
+		rect := drawDieBox(screen, pos.x, pos.y, rolled[i].CurrentFace(), state)
 		regions = append(regions, HitRegion{Rect: rect, Type: "die", UnitID: unit.ID, DieIndex: i})
 	}
 
@@ -249,7 +262,7 @@ func drawUnitDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY, cardW fl
 		dieX := cardX + (cardW-DieBoxSize)/2
 		dieY := cardY + (SlotHeight-DieBoxSize)/2
 		state := getDieState(unit.ID, 0, combat, false)
-		rect := drawDieBox(screen, dieX, dieY, rolled[0].Result, state)
+		rect := drawDieBox(screen, dieX, dieY, rolled[0].CurrentFace(), state)
 		regions = append(regions, HitRegion{Rect: rect, Type: "die", UnitID: unit.ID, DieIndex: 0})
 	} else if cw >= 2 && len(rolled) >= 2 {
 		// Medium+ unit: 2 dice diagonal
@@ -260,11 +273,11 @@ func drawUnitDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY, cardW fl
 		die2Y := cardY + SlotHeight - 20 - DieBoxSize
 
 		state0 := getDieState(unit.ID, 0, combat, false)
-		rect0 := drawDieBox(screen, die1X, die1Y, rolled[0].Result, state0)
+		rect0 := drawDieBox(screen, die1X, die1Y, rolled[0].CurrentFace(), state0)
 		regions = append(regions, HitRegion{Rect: rect0, Type: "die", UnitID: unit.ID, DieIndex: 0})
 
 		state1 := getDieState(unit.ID, 1, combat, false)
-		rect1 := drawDieBox(screen, die2X, die2Y, rolled[1].Result, state1)
+		rect1 := drawDieBox(screen, die2X, die2Y, rolled[1].CurrentFace(), state1)
 		regions = append(regions, HitRegion{Rect: rect1, Type: "die", UnitID: unit.ID, DieIndex: 1})
 	}
 

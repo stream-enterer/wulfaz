@@ -7,21 +7,37 @@ const (
 	DieDamage DieType = "damage"
 	DieShield DieType = "shield"
 	DieHeal   DieType = "heal"
+	DieBlank  DieType = "blank"
 )
 
-// Die represents a single die that a unit can roll.
-// Faces contains the value for each face (len = number of faces).
-// Example: [2, 2, 3, 4, 0, 0] is a 6-sided die with values 2,2,3,4,0,0.
-type Die struct {
+// DieFace represents a single face on a die.
+type DieFace struct {
 	Type  DieType
-	Faces []int
+	Value int
 }
 
-// RolledDie represents a die that has been rolled with its current result.
-type RolledDie struct {
-	Type      DieType
-	Faces     []int
-	FaceIndex int  // Index into Faces array (for reroll tracking)
-	Result    int  // The actual face value (Faces[FaceIndex])
-	Locked    bool // Whether locked from rerolling
+// Die represents a die template with multiple faces.
+type Die struct {
+	Faces []DieFace
 }
+
+// RolledDie represents a rolled die with current state.
+type RolledDie struct {
+	Faces     []DieFace // All faces on this die
+	FaceIndex int       // Current face index
+	Locked    bool      // Whether locked from rerolling
+}
+
+// CurrentFace returns the die face at the current index.
+func (rd RolledDie) CurrentFace() DieFace {
+	if rd.FaceIndex < 0 || rd.FaceIndex >= len(rd.Faces) {
+		return DieFace{Type: DieBlank, Value: 0}
+	}
+	return rd.Faces[rd.FaceIndex]
+}
+
+// Type returns the type of the current face.
+func (rd RolledDie) Type() DieType { return rd.CurrentFace().Type }
+
+// Value returns the value of the current face.
+func (rd RolledDie) Value() int { return rd.CurrentFace().Value }

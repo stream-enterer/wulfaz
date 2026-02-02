@@ -742,17 +742,23 @@ func updateUnitHP(units []entity.Unit, unitID string, newHP, newShields int) {
 }
 
 // allCommandDiceActivated checks if all player command dice are activated.
+// Blank faces are skipped - they don't need activation.
 func allCommandDiceActivated(combat model.CombatModel) bool {
 	cmd := findPlayerCommandUnit(combat)
 	if cmd == nil {
 		return true
 	}
+	rolled := combat.RolledDice[cmd.ID]
 	activated := combat.ActivatedDice[cmd.ID]
-	if activated == nil {
-		return false
+	if rolled == nil {
+		return true
 	}
-	for _, a := range activated {
-		if !a {
+	for i, rd := range rolled {
+		// Skip blank faces - they don't need activation
+		if rd.Type() == entity.DieBlank {
+			continue
+		}
+		if activated == nil || i >= len(activated) || !activated[i] {
 			return false
 		}
 	}
@@ -802,15 +808,9 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 			if i < len(rolls) {
 				faceIdx = rolls[i]
 			}
-			result := 0
-			if faceIdx < len(die.Faces) {
-				result = die.Faces[faceIdx]
-			}
 			rolled[i] = entity.RolledDie{
-				Type:      die.Type,
 				Faces:     die.Faces, // Share reference (immutable template data)
 				FaceIndex: faceIdx,
-				Result:    result,
 				Locked:    false,
 			}
 		}
@@ -877,9 +877,7 @@ func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
 		if !dice[i].Locked && i < len(msg.Results) {
 			faceIdx := msg.Results[i]
 			dice[i].FaceIndex = faceIdx
-			if faceIdx < len(dice[i].Faces) {
-				dice[i].Result = dice[i].Faces[faceIdx]
-			}
+			// Result is now computed dynamically via Value() method
 		}
 	}
 
@@ -944,16 +942,21 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 	}
 	die := rolled[msg.DieIndex]
 
+	// Block blank face activation
+	if die.Type() == entity.DieBlank {
+		return m, nil
+	}
+
 	// Targeting validation per DESIGN.md:
 	// - damage: enemy only
 	// - shield/heal: friendly only
 	targetIsEnemy := isEnemyUnit(m.Combat, msg.TargetUnitID)
 	targetIsPlayer := isPlayerUnit(m.Combat, msg.TargetUnitID)
 
-	if die.Type == entity.DieDamage && !targetIsEnemy {
+	if die.Type() == entity.DieDamage && !targetIsEnemy {
 		return m, nil // Invalid: damage must target enemy
 	}
-	if (die.Type == entity.DieShield || die.Type == entity.DieHeal) && !targetIsPlayer {
+	if (die.Type() == entity.DieShield || die.Type() == entity.DieHeal) && !targetIsPlayer {
 		return m, nil // Invalid: shield/heal must target friendly
 	}
 
@@ -969,7 +972,7 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 	m.Combat = combat
 
 	// Return Cmd to apply effect
-	return m, ApplyDiceEffect(msg.SourceUnitID, msg.TargetUnitID, die.Type, die.Result, m.Combat)
+	return m, ApplyDiceEffect(msg.SourceUnitID, msg.TargetUnitID, die.Type(), die.Value(), m.Combat)
 }
 
 func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
