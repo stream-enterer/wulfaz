@@ -271,6 +271,45 @@ func drawUnitDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY, cardW fl
 	return regions
 }
 
+// allCommandDiceLockedRenderer checks if all player command dice are locked.
+func allCommandDiceLockedRenderer(combat model.CombatModel) bool {
+	var cmdID string
+	for _, u := range combat.PlayerUnits {
+		if u.IsCommand() {
+			cmdID = u.ID
+			break
+		}
+	}
+	if cmdID == "" {
+		return true
+	}
+	rolled := combat.RolledDice[cmdID]
+	if len(rolled) == 0 {
+		return true
+	}
+	for _, rd := range rolled {
+		if !rd.Locked {
+			return false
+		}
+	}
+	return true
+}
+
+// drawUnlockButton draws the ↰ unlock all button and returns its hit rectangle.
+func drawUnlockButton(screen *ebiten.Image, x, y int) image.Rectangle {
+	btnW, btnH := 80, 20
+	fx, fy := float32(x), float32(y)
+
+	// Button background
+	vector.FillRect(screen, fx, fy, float32(btnW), float32(btnH), color.RGBA{60, 60, 80, 255}, false)
+	vector.StrokeRect(screen, fx, fy, float32(btnW), float32(btnH), 1, color.White, false)
+
+	// Button text
+	ebitenutil.DebugPrintAt(screen, "↰ Unlock", x+8, y+2)
+
+	return image.Rect(x, y, x+btnW, y+btnH)
+}
+
 // drawCommandUnit draws command unit card and returns its rectangle.
 func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y float32) image.Rectangle {
 	// Draw card background
@@ -403,7 +442,23 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 
 	// Phase-specific UI hints
 	if combat.DicePhase == model.DicePhasePlayerCommand {
-		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("R - Reroll (%d/2)", combat.RerollsRemaining), 10, 50)
+		allLocked := allCommandDiceLockedRenderer(combat)
+
+		if !allLocked {
+			// Lock phase hints
+			ebitenutil.DebugPrintAt(screen, "LClick die to lock/unlock", 10, 50)
+			ebitenutil.DebugPrintAt(screen, fmt.Sprintf("R - Reroll unlocked (%d/2)", combat.RerollsRemaining), 10, 70)
+		} else {
+			// Activation phase hints
+			ebitenutil.DebugPrintAt(screen, "LClick die to select, LClick target to activate", 10, 50)
+			ebitenutil.DebugPrintAt(screen, "RClick to cancel selection", 10, 70)
+
+			// ↰ Unlock button (only if rerolls > 0)
+			if combat.RerollsRemaining > 0 {
+				btnRect := drawUnlockButton(screen, 10, 90)
+				regions = append(regions, HitRegion{Rect: btnRect, Type: "unlock_button", UnitID: "", DieIndex: -1})
+			}
+		}
 	}
 	if combat.DicePhase == model.DicePhasePreview {
 		ebitenutil.DebugPrintAt(screen, "Click to continue...", 10, 50)

@@ -254,3 +254,8 @@ func (RoundEnded) isMsg() {}
 type RoundToastDismissed struct{}
 
 func (RoundToastDismissed) isMsg() {}
+
+// UnlockAllDice signals player wants to unlock all dice to re-enter lock phase.
+type UnlockAllDice struct{}
+
+func (UnlockAllDice) isMsg() {}

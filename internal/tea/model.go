@@ -163,6 +163,8 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleRoundEnded(msg)
 	case RoundToastDismissed:
 		return m.handleRoundToastDismissed(msg)
+	case UnlockAllDice:
+		return m.handleUnlockAllDice(msg)
 
 	default:
 		return m, nil
@@ -757,6 +759,24 @@ func allCommandDiceActivated(combat model.CombatModel) bool {
 	return true
 }
 
+// allCommandDiceLocked checks if all player command dice are locked.
+func allCommandDiceLocked(combat model.CombatModel) bool {
+	cmd := findPlayerCommandUnit(combat)
+	if cmd == nil {
+		return true
+	}
+	rolled := combat.RolledDice[cmd.ID]
+	if rolled == nil || len(rolled) == 0 {
+		return true // No dice = trivially locked
+	}
+	for _, rd := range rolled {
+		if !rd.Locked {
+			return false
+		}
+	}
+	return true
+}
+
 // ===== Dice Phase Handlers (Wave 2) =====
 
 func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
@@ -1172,4 +1192,34 @@ func (m Model) handleRoundToastDismissed(_ RoundToastDismissed) (Model, Cmd) {
 	combat.Round++ // Increment here instead of in RoundEnded
 	m.Combat = combat
 	return m, StartNextRound(m.Seed, combat.Round, getAllUnits(m.Combat))
+}
+
+func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
+	// Only valid during PlayerCommand phase with rerolls remaining
+	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
+	if m.Combat.RerollsRemaining <= 0 {
+		return m, nil
+	}
+
+	cmd := findPlayerCommandUnit(m.Combat)
+	if cmd == nil {
+		return m, nil
+	}
+
+	combat := m.Combat
+	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
+	combat.SelectedUnitID = ""
+	combat.SelectedDieIndex = -1
+
+	// Unlock all dice
+	if dice, ok := combat.RolledDice[cmd.ID]; ok {
+		for i := range dice {
+			dice[i].Locked = false
+		}
+	}
+
+	m.Combat = combat
+	return m, nil
 }

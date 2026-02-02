@@ -155,37 +155,47 @@ func (a *App) pollCombatInput() {
 
 	// PLAYER COMMAND PHASE
 	if combat.DicePhase == model.DicePhasePlayerCommand {
-		// R key = reroll
+		// R key = reroll unlocked dice
 		if inpututil.IsKeyJustPressed(ebiten.KeyR) && combat.RerollsRemaining > 0 {
 			playerCmd := findPlayerCommandUnit(combat)
-			if playerCmd != nil {
+			if playerCmd != nil && !allCommandDiceLocked(combat) {
 				rolled := combat.RolledDice[playerCmd.ID]
 				cmd := tea.RerollUnlockedDice(a.model.Seed+int64(combat.Round)*100, playerCmd.ID, rolled)
 				a.dispatch(cmd())
 			}
 		}
 
-		// Left-click = select die or target unit
+		// Left-click = lock toggle OR select/target (depending on lock state)
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			mx, my := ebiten.CursorPosition()
 			a.handleLeftClick(mx, my)
 		}
 
-		// Right-click = lock toggle
+		// Right-click = cancel selection (only in activation mode)
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
-			mx, my := ebiten.CursorPosition()
-			a.handleRightClick(mx, my)
+			if combat.SelectedUnitID != "" {
+				a.dispatch(tea.DieDeselected{})
+			}
 		}
 	}
 }
 
-// handleLeftClick processes left-click for die selection and targeting
+// handleLeftClick processes left-click for lock toggle or selection/targeting
 func (a *App) handleLeftClick(mx, my int) {
 	combat := a.model.Combat
 	pt := image.Point{mx, my}
 	playerCmd := findPlayerCommandUnit(combat)
+	allLocked := allCommandDiceLocked(combat)
 
-	// PASS 1: Check dice first (higher z-order priority)
+	// Check ↰ unlock button first (only visible when all locked AND rerolls > 0)
+	for _, region := range a.hitRegions {
+		if region.Type == "unlock_button" && pt.In(region.Rect) {
+			a.dispatch(tea.UnlockAllDice{})
+			return
+		}
+	}
+
+	// Check dice
 	for _, region := range a.hitRegions {
 		if region.Type != "die" || !pt.In(region.Rect) {
 			continue
@@ -199,17 +209,22 @@ func (a *App) handleLeftClick(mx, my int) {
 			continue // Can't interact with used dice
 		}
 
-		// Toggle selection
-		if combat.SelectedUnitID == region.UnitID && combat.SelectedDieIndex == region.DieIndex {
-			a.dispatch(tea.DieDeselected{})
+		if !allLocked {
+			// LOCK PHASE: toggle lock
+			a.dispatch(tea.DieLockToggled{UnitID: region.UnitID, DieIndex: region.DieIndex})
 		} else {
-			a.dispatch(tea.DieSelected{UnitID: region.UnitID, DieIndex: region.DieIndex})
+			// ACTIVATION PHASE: toggle selection
+			if combat.SelectedUnitID == region.UnitID && combat.SelectedDieIndex == region.DieIndex {
+				a.dispatch(tea.DieDeselected{})
+			} else {
+				a.dispatch(tea.DieSelected{UnitID: region.UnitID, DieIndex: region.DieIndex})
+			}
 		}
 		return
 	}
 
-	// PASS 2: Check units (only if a die is selected for targeting)
-	if combat.SelectedUnitID != "" {
+	// Check units for targeting (only if die is selected AND all locked)
+	if allLocked && combat.SelectedUnitID != "" {
 		for _, region := range a.hitRegions {
 			if region.Type != "unit" || !pt.In(region.Rect) {
 				continue
@@ -229,32 +244,28 @@ func (a *App) handleLeftClick(mx, my int) {
 		}
 	}
 
-	// Clicked empty space - deselect
-	if combat.SelectedUnitID != "" {
+	// Clicked empty space - deselect if in activation mode
+	if allLocked && combat.SelectedUnitID != "" {
 		a.dispatch(tea.DieDeselected{})
 	}
 }
 
-// handleRightClick processes right-click for lock toggle
-func (a *App) handleRightClick(mx, my int) {
-	combat := a.model.Combat
-	pt := image.Point{mx, my}
-	playerCmd := findPlayerCommandUnit(combat)
-
-	for _, region := range a.hitRegions {
-		if !pt.In(region.Rect) {
-			continue
-		}
-
-		if region.Type == "die" && playerCmd != nil && region.UnitID == playerCmd.ID {
-			// Check not already activated
-			if activated := combat.ActivatedDice[region.UnitID]; activated != nil && region.DieIndex < len(activated) && activated[region.DieIndex] {
-				return // Can't lock used dice
-			}
-			a.dispatch(tea.DieLockToggled{UnitID: region.UnitID, DieIndex: region.DieIndex})
-			return
+// allCommandDiceLocked checks if all player command dice are locked.
+func allCommandDiceLocked(combat model.CombatModel) bool {
+	cmd := findPlayerCommandUnit(combat)
+	if cmd == nil {
+		return true
+	}
+	rolled := combat.RolledDice[cmd.ID]
+	if len(rolled) == 0 {
+		return true
+	}
+	for _, rd := range rolled {
+		if !rd.Locked {
+			return false
 		}
 	}
+	return true
 }
 
 // findPlayerCommandUnit returns the player's command unit (or nil).
