@@ -162,8 +162,13 @@ func drawDieBox(screen *ebiten.Image, x, y float32, face entity.DieFace, state i
 
 // drawPips draws the die value as a centered number.
 func drawPips(screen *ebiten.Image, x, y float32, count int) {
-	cx, cy := x+DieBoxSize/2, y+DieBoxSize/2
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("%d", count), int(cx)-4, int(cy)-6)
+	s := fmt.Sprintf("%d", count)
+	// Debug font: 6px wide per char, 16px tall
+	textW := len(s) * 6
+	textH := 16
+	cx := int(x) + DieBoxSize/2 - textW/2
+	cy := int(y) + DieBoxSize/2 - textH/2
+	ebitenutil.DebugPrintAt(screen, s, cx, cy)
 }
 
 // drawRedX draws an X for blank (0) die faces.
