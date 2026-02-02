@@ -75,10 +75,10 @@ Board layout, unit placement, space occupation.
 - **Description:** _deferred_
 
 ### F-124: Dead Unit Gap Handling
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:127-128, 188
 - **Depends:** None (F-120 complete)
-- **Description:** _deferred_
+- **Description:** Dead units rendered with grey color and red X overlay during execution (Wave 8)
 
 _Reserved: F-125 – F-129_
 
@@ -339,28 +339,28 @@ _Reserved: F-184 – F-189_
 Special combat situations requiring explicit handling.
 
 ### F-190: Pure Command vs Command (All Units Dead)
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:147
 - **Depends:** F-114
-- **Description:** _deferred_
+- **Description:** Empty firing order handled gracefully; ExecutionComplete returned immediately (Wave 8)
 
 ### F-191: Zero-Dice Unit Handling
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:149
 - **Depends:** F-132
-- **Description:** _deferred_
+- **Description:** Units with empty dice slice skipped gracefully in RollAllDice (Wave 8)
 
 ### F-192: Dead Target Skip
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:92
 - **Depends:** F-152, F-173
-- **Description:** _deferred_
+- **Description:** Enemy command dice skip targets killed by earlier dice this phase (Wave 8)
 
 ### F-193: Simultaneous Death Resolution
-- **Status:** Not Started
+- **Status:** Complete
 - **Source:** DESIGN.md:491
 - **Depends:** F-175
-- **Description:** _deferred_
+- **Description:** HP snapshot ensures units attack even if killed in same position (Wave 8)
 
 _Reserved: F-194 – F-199_
 
@@ -592,18 +592,18 @@ Explicitly out of MVP scope per DESIGN.md.
 |----------|----------|-----------|----------|
 | Core Architecture | F-100 – F-109 | 0 | 4 |
 | Entity System | F-110 – F-119 | 2 | 4 |
-| Positioning | F-120 – F-129 | 2 | 3 |
+| Positioning | F-120 – F-129 | 1 | 4 |
 | Dice System | F-130 – F-149 | 0 | 10 |
 | Damage Model | F-150 – F-159 | 0 | 5 |
 | Targeting | F-160 – F-169 | 0 | 8 |
 | Combat Flow | F-170 – F-179 | 0 | 8 |
 | Victory Conditions | F-180 – F-189 | 0 | 4 |
-| Edge Cases | F-190 – F-199 | 4 | 0 |
+| Edge Cases | F-190 – F-199 | 0 | 4 |
 | Enemy AI | F-200 – F-209 | 4 | 0 |
 | Run Structure | F-210 – F-219 | 2 | 5 |
 | UI / Display | F-220 – F-239 | 3 | 4 |
 | Templates / Content | F-240 – F-249 | 4 | 2 |
-| **MVP Total** | | **21** | **40** |
+| **MVP Total** | | **16** | **45** |
 | Deferred | F-D01 – F-D20 | 20 | — |
 
 ---
@@ -636,12 +636,12 @@ Explicitly out of MVP scope per DESIGN.md.
 |-------|-------|----------|--------|
 | 1 | Foundation | F-100, F-101, F-102, F-103 | **COMPLETE** |
 | 2 | Entities | F-110 – F-115, F-130, F-131 | Partial (F-113, F-115 remain) |
-| 3 | Board | F-120 – F-124 | Partial (F-123, F-124 remain) |
+| 3 | Board | F-120 – F-124 | Partial (F-123 remains) |
 | 4 | Dice Mechanics | F-132 – F-139 | **COMPLETE** |
 | 5 | Damage | F-150 – F-156 | **COMPLETE** |
 | 6 | Targeting | F-160 – F-167 | **COMPLETE** |
 | 7 | Combat Flow | F-170 – F-178 | **COMPLETE** |
-| 8 | Victory + Edge | F-180 – F-183, F-190 – F-193 | Partial (F-190 – F-193 remain) |
+| 8 | Victory + Edge | F-180 – F-183, F-190 – F-193 | **COMPLETE** |
 | 9 | Enemy AI | F-200 – F-203 | Not Started |
 | 10 | Run Structure | F-210 – F-216 | Partial (F-215, F-216 remain) |
 | 11 | UI | F-220 – F-229 | Partial (F-227 – F-229 remain) |

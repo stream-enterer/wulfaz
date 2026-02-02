@@ -387,3 +387,112 @@ func TestUnlockAllDice_RequiresPhaseCombat(t *testing.T) {
 		t.Error("should not process unlock when not in PhaseCombat")
 	}
 }
+
+// ===== F-191: Zero-Dice Unit Handling Tests =====
+
+func TestRoundStarted_ZeroDiceUnit(t *testing.T) {
+	// Setup: Create combat with a unit that has empty Dice slice
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Seed:    42,
+		Combat: model.CombatModel{
+			Phase: model.CombatActive,
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+				{
+					ID:       "zero_dice_unit",
+					Position: 0,
+					Dice:     []entity.Die{}, // Empty dice slice
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 50},
+					},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+		},
+	}
+
+	// Verify: RollAllDice doesn't panic, unit is skipped gracefully
+	msg := RoundStarted{
+		Round:     1,
+		UnitRolls: map[string][]int{"player_cmd": {0}, "enemy_cmd": {0}}, // No rolls for zero_dice_unit
+	}
+
+	newM, _ := m.Update(msg)
+
+	// Zero-dice unit should have no rolled dice
+	if rolled, ok := newM.Combat.RolledDice["zero_dice_unit"]; ok && len(rolled) > 0 {
+		t.Errorf("zero_dice_unit should have no rolled dice, got %d", len(rolled))
+	}
+
+	// Other units should have rolled dice
+	if len(newM.Combat.RolledDice["player_cmd"]) != 1 {
+		t.Errorf("player_cmd should have 1 rolled die, got %d", len(newM.Combat.RolledDice["player_cmd"]))
+	}
+}
+
+func TestEnemyCommand_ZeroDiceEnemyCmd(t *testing.T) {
+	// Setup: Enemy command unit with no dice
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhaseEnemyCommand,
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Dice:     []entity.Die{}, // No dice
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+			RolledDice: map[string][]entity.RolledDie{}, // No rolled dice for enemy
+		},
+	}
+
+	// EnemyCommandResolved with empty actions should work fine
+	msg := EnemyCommandResolved{Actions: []EnemyDiceAction{}}
+
+	newM, cmd := m.Update(msg)
+
+	// Should advance to execution phase without crashing
+	if newM.Combat.DicePhase != model.DicePhaseExecution {
+		t.Errorf("DicePhase = %v, want Execution", newM.Combat.DicePhase)
+	}
+	if cmd == nil {
+		t.Error("expected cmd to advance to execution")
+	}
+}

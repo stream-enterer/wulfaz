@@ -1343,3 +1343,372 @@ func TestExecutionAdvanceClicked_SetsRoundEndPhase(t *testing.T) {
 		t.Errorf("DicePhase after second click = %v, want DicePhaseRoundEnd", m2.Combat.DicePhase)
 	}
 }
+
+// ===== F-192: Dead Target Skip Tests =====
+
+func TestEnemyCommand_TargetDiesFromEarlierDie(t *testing.T) {
+	// Setup:
+	// - Enemy command has 3 damage dice, each dealing 10 damage
+	// - Player unit has 10 HP (will die from first die)
+	// Flow:
+	// 1. All 3 dice target the same player unit (lowest HP)
+	// 2. Die 1 kills the unit
+	// 3. Dies 2 and 3 should skip (target dead)
+	// Verify: Only 10 damage applied, 2 skips logged, no crash
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhaseEnemyCommand,
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+				{
+					ID:       "low_hp_unit",
+					Position: 0,
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 10}, // Will die from first die
+					},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+		},
+	}
+
+	// Simulate 3 dice all targeting the same unit
+	msg := EnemyCommandResolved{
+		Actions: []EnemyDiceAction{
+			{SourceUnitID: "enemy_cmd", TargetUnitID: "low_hp_unit", DieIndex: 0, Effect: entity.DieDamage, Value: 10},
+			{SourceUnitID: "enemy_cmd", TargetUnitID: "low_hp_unit", DieIndex: 1, Effect: entity.DieDamage, Value: 10},
+			{SourceUnitID: "enemy_cmd", TargetUnitID: "low_hp_unit", DieIndex: 2, Effect: entity.DieDamage, Value: 10},
+		},
+	}
+
+	newM, _ := m.Update(msg)
+
+	// The unit should be dead (first die killed it)
+	var targetUnit *entity.Unit
+	for i := range newM.Combat.PlayerUnits {
+		if newM.Combat.PlayerUnits[i].ID == "low_hp_unit" {
+			targetUnit = &newM.Combat.PlayerUnits[i]
+			break
+		}
+	}
+
+	if targetUnit == nil {
+		t.Fatal("low_hp_unit not found")
+	}
+
+	// HP should be 0 (first die dealt 10, killed it)
+	hp := 0
+	if h, ok := targetUnit.Attributes["health"]; ok {
+		hp = h.Base
+	}
+	if hp != 0 {
+		t.Errorf("low_hp_unit HP = %d, want 0", hp)
+	}
+
+	// Log should contain skip messages
+	skipCount := 0
+	for _, entry := range newM.Combat.Log {
+		if entry == "Enemy: enemy_cmd skipped (target dead)" {
+			skipCount++
+		}
+	}
+	if skipCount != 2 {
+		t.Errorf("expected 2 skip messages in log, got %d", skipCount)
+	}
+}
+
+// ===== F-193: Simultaneous Death Resolution Tests =====
+
+func TestResolvePosition_MutualKill(t *testing.T) {
+	// Setup: Two units at same position, each can kill the other
+	// Both should deal damage since attacks are calculated before HP is updated
+	combat := model.CombatModel{
+		Phase:     model.CombatActive,
+		DicePhase: model.DicePhaseExecution,
+		PlayerUnits: []entity.Unit{
+			{
+				ID:       "player_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "player1",
+				Position: 0,
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 50}}}},
+				Attributes: map[string]core.Attribute{
+					"health":       {Base: 30}, // Will die from enemy
+					"combat_width": {Base: 1},
+				},
+			},
+		},
+		EnemyUnits: []entity.Unit{
+			{
+				ID:       "enemy_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "enemy1",
+				Position: 0,
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 50}}}},
+				Attributes: map[string]core.Attribute{
+					"health":       {Base: 30}, // Will die from player
+					"combat_width": {Base: 1},
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"player1": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 50}}, FaceIndex: 0}},
+			"enemy1":  {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 50}}, FaceIndex: 0}},
+		},
+		FiringOrder:        []model.FiringPosition{{Position: 0, PlayerUnits: []string{"player1"}, EnemyUnits: []string{"enemy1"}}},
+		CurrentFiringIndex: 0,
+	}
+
+	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"player1"}, EnemyUnits: []string{"enemy1"}}, combat, 0)
+	msg := cmd()
+
+	resolved, ok := msg.(PositionResolved)
+	if !ok {
+		t.Fatalf("expected PositionResolved, got %T", msg)
+	}
+
+	// Both units should have attacked (player-first, but both should attack)
+	playerAttacked := false
+	enemyAttacked := false
+	for _, a := range resolved.Attacks {
+		if a.AttackerID == "player1" {
+			playerAttacked = true
+		}
+		if a.AttackerID == "enemy1" {
+			enemyAttacked = true
+		}
+	}
+
+	if !playerAttacked {
+		t.Error("player1 should have attacked")
+	}
+	if !enemyAttacked {
+		t.Error("enemy1 should have attacked (simultaneous resolution)")
+	}
+}
+
+func TestResolvePosition_DeadAttackerStillAttacks(t *testing.T) {
+	// Setup: Unit A kills Unit B first (player-first), Unit B also has damage dice
+	// Verify: Unit B still deals damage (was alive at start of position resolution)
+	combat := model.CombatModel{
+		Phase:     model.CombatActive,
+		DicePhase: model.DicePhaseExecution,
+		PlayerUnits: []entity.Unit{
+			{
+				ID:       "player_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "player1",
+				Position: 0,
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 100}}}},
+				Attributes: map[string]core.Attribute{
+					"health":       {Base: 50},
+					"combat_width": {Base: 1},
+				},
+			},
+		},
+		EnemyUnits: []entity.Unit{
+			{
+				ID:       "enemy_cmd",
+				Position: -1,
+				Tags:     []core.Tag{"command"},
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+			{
+				ID:       "enemy1",
+				Position: 0,
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 25}}}},
+				Attributes: map[string]core.Attribute{
+					"health":       {Base: 20}, // Will die from player's 100 damage
+					"combat_width": {Base: 1},
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"player1": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 100}}, FaceIndex: 0}},
+			"enemy1":  {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 25}}, FaceIndex: 0}},
+		},
+		FiringOrder:        []model.FiringPosition{{Position: 0, PlayerUnits: []string{"player1"}, EnemyUnits: []string{"enemy1"}}},
+		CurrentFiringIndex: 0,
+	}
+
+	cmd := ResolvePosition(model.FiringPosition{Position: 0, PlayerUnits: []string{"player1"}, EnemyUnits: []string{"enemy1"}}, combat, 0)
+	msg := cmd()
+
+	resolved, ok := msg.(PositionResolved)
+	if !ok {
+		t.Fatalf("expected PositionResolved, got %T", msg)
+	}
+
+	// Enemy1 should still attack player1, even though player kills enemy first (HP snapshot)
+	enemyDamageDealt := 0
+	for _, a := range resolved.Attacks {
+		if a.AttackerID == "enemy1" && a.TargetID == "player1" {
+			enemyDamageDealt += a.Damage
+		}
+	}
+
+	if enemyDamageDealt != 25 {
+		t.Errorf("enemy1 damage dealt = %d, want 25 (should attack via HP snapshot)", enemyDamageDealt)
+	}
+}
+
+// ===== F-190: Pure Command vs Command Tests =====
+
+func TestCombat_OnlyCommandsRemain(t *testing.T) {
+	// Setup: Both sides have only command units (all board units dead)
+	// Flow: Round starts, dice roll, player activates, enemy activates
+	// Verify: Combat functions correctly, no panic on empty firing order
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Seed:    42,
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhaseExecution,
+			Round:     1,
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 10}}}},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+				// No board units (or all dead)
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 10}}}},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+				// No board units (or all dead)
+			},
+			FiringOrder:        []model.FiringPosition{}, // Empty - no board units
+			CurrentFiringIndex: 0,
+		},
+	}
+
+	// Execution with empty firing order should complete immediately
+	msg := ExecutionStarted{FiringOrder: nil}
+	newM, cmd := m.Update(msg)
+
+	if cmd == nil {
+		t.Fatal("expected cmd for empty execution")
+	}
+
+	// Should return ExecutionComplete immediately
+	result := cmd()
+	if _, ok := result.(ExecutionComplete); !ok {
+		t.Errorf("expected ExecutionComplete for empty firing order, got %T", result)
+	}
+
+	// Verify FiringOrder is empty
+	if len(newM.Combat.FiringOrder) != 0 {
+		t.Errorf("FiringOrder should be empty, got %d positions", len(newM.Combat.FiringOrder))
+	}
+}
+
+func TestExecution_EmptyFiringOrder(t *testing.T) {
+	// Setup: Create ExecutionStarted with empty FiringOrder
+	// Verify: Handler returns ExecutionComplete{} immediately
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhaseExecution,
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+		},
+	}
+
+	// ExecutionStarted with nil FiringOrder
+	msg := ExecutionStarted{FiringOrder: nil}
+	_, cmd := m.Update(msg)
+
+	if cmd == nil {
+		t.Fatal("expected cmd")
+	}
+
+	result := cmd()
+	if _, ok := result.(ExecutionComplete); !ok {
+		t.Errorf("expected ExecutionComplete, got %T", result)
+	}
+
+	// Also test with empty slice
+	msg2 := ExecutionStarted{FiringOrder: []model.FiringPosition{}}
+	_, cmd2 := m.Update(msg2)
+
+	if cmd2 == nil {
+		t.Fatal("expected cmd for empty slice")
+	}
+
+	result2 := cmd2()
+	if _, ok := result2.(ExecutionComplete); !ok {
+		t.Errorf("expected ExecutionComplete for empty slice, got %T", result2)
+	}
+}

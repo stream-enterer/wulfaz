@@ -83,6 +83,7 @@ var (
 	colorDieBox       = color.RGBA{40, 40, 40, 255}  // Die background
 	colorGrayBlank    = color.RGBA{80, 80, 80, 255}  // Blank die (grayed out)
 	colorUnlockButton = color.RGBA{60, 60, 80, 255}
+	colorDeadUnit     = color.RGBA{60, 60, 60, 180} // F-124: Greyed out dead unit
 
 	// Wave 7: Arrow colors
 	colorArrowDamage = color.RGBA{255, 80, 80, 220}  // Red
@@ -447,7 +448,12 @@ func drawUnlockButton(screen *ebiten.Image, x, y int) image.Rectangle {
 
 // drawCommandUnit draws command unit card and returns its rectangle.
 func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y float32) image.Rectangle {
-	vector.FillRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, c, false)
+	// F-124: Use grey color for dead command units
+	drawColor := c
+	if !unit.IsAlive() {
+		drawColor = colorDeadUnit
+	}
+	vector.FillRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, drawColor, false)
 	vector.StrokeRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, FrameStroke, color.White, false)
 
 	// Unit ID at top
@@ -461,6 +467,12 @@ func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y 
 		statText += fmt.Sprintf(" SH:%d", shields)
 	}
 	DrawText(screen, statText, int(x)+textPadding, int(y)+CommandUnitHeight-unitStatTextYOffset)
+
+	// F-124: Draw destroyed indicator for dead command units (red X)
+	if !unit.IsAlive() {
+		vector.StrokeLine(screen, x, y, x+CommandUnitWidth, y+CommandUnitHeight, 2, colorRedUsed, false)
+		vector.StrokeLine(screen, x+CommandUnitWidth, y, x, y+CommandUnitHeight, 2, colorRedUsed, false)
+	}
 
 	return image.Rect(int(x), int(y), int(x)+CommandUnitWidth, int(y)+CommandUnitHeight)
 }
@@ -620,7 +632,12 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 }
 
 func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width float32) {
-	vector.FillRect(screen, x, y, width, SlotHeight, c, false)
+	// F-124: Use grey color for dead units
+	drawColor := c
+	if !unit.IsAlive() {
+		drawColor = colorDeadUnit
+	}
+	vector.FillRect(screen, x, y, width, SlotHeight, drawColor, false)
 	vector.StrokeRect(screen, x, y, width, SlotHeight, FrameStroke, color.White, false)
 
 	// Unit ID (truncated for narrow units)
@@ -638,6 +655,12 @@ func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width 
 		statText += fmt.Sprintf(" SH:%d", shields)
 	}
 	DrawText(screen, statText, int(x)+textPadding, int(y)+SlotHeight-unitStatTextYOffset)
+
+	// F-124: Draw destroyed indicator for dead units (red X)
+	if !unit.IsAlive() {
+		vector.StrokeLine(screen, x, y, x+width, y+SlotHeight, 2, colorRedUsed, false)
+		vector.StrokeLine(screen, x+width, y, x, y+SlotHeight, 2, colorRedUsed, false)
+	}
 }
 
 func renderLog(screen *ebiten.Image, log []string) {

@@ -1181,37 +1181,42 @@ func (m Model) handleEnemyCommandResolved(msg EnemyCommandResolved) (Model, Cmd)
 
 	// Apply each enemy action (damage/shield/heal)
 	for _, action := range msg.Actions {
+		// F-192: Skip if target died from earlier enemy dice this phase
+		target := findUnitByID(combat, action.TargetUnitID)
+		if target == nil || !target.IsAlive() {
+			combat.Log = appendLogEntry(combat.Log,
+				fmt.Sprintf("Enemy: %s skipped (target dead)", action.SourceUnitID))
+			continue
+		}
+
 		// Capture pre-state for damage logging
 		var shieldAbsorbed, healthDamage int
 		if action.Effect == entity.DieDamage {
-			target := findUnitByID(combat, action.TargetUnitID)
-			if target != nil {
-				oldShields := 0
-				if s, ok := target.Attributes["shields"]; ok {
-					oldShields = s.Base
-				}
-				oldHealth := 0
-				if h, ok := target.Attributes["health"]; ok {
-					oldHealth = h.Base
-				}
+			oldShields := 0
+			if s, ok := target.Attributes["shields"]; ok {
+				oldShields = s.Base
+			}
+			oldHealth := 0
+			if h, ok := target.Attributes["health"]; ok {
+				oldHealth = h.Base
+			}
 
-				combat = applyDiceEffectToCombat(combat, action.TargetUnitID,
-					action.Effect, action.Value)
+			combat = applyDiceEffectToCombat(combat, action.TargetUnitID,
+				action.Effect, action.Value)
 
-				// Calculate what was absorbed
-				newTarget := findUnitByID(combat, action.TargetUnitID)
-				if newTarget != nil {
-					newShields := 0
-					if s, ok := newTarget.Attributes["shields"]; ok {
-						newShields = s.Base
-					}
-					newHealth := 0
-					if h, ok := newTarget.Attributes["health"]; ok {
-						newHealth = h.Base
-					}
-					shieldAbsorbed = oldShields - newShields
-					healthDamage = oldHealth - newHealth
+			// Calculate what was absorbed
+			newTarget := findUnitByID(combat, action.TargetUnitID)
+			if newTarget != nil {
+				newShields := 0
+				if s, ok := newTarget.Attributes["shields"]; ok {
+					newShields = s.Base
 				}
+				newHealth := 0
+				if h, ok := newTarget.Attributes["health"]; ok {
+					newHealth = h.Base
+				}
+				shieldAbsorbed = oldShields - newShields
+				healthDamage = oldHealth - newHealth
 			}
 		} else {
 			combat = applyDiceEffectToCombat(combat, action.TargetUnitID,

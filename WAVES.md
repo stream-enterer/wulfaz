@@ -39,25 +39,17 @@ Death system (F-152, F-155, F-156): Dead units removed at round end, damage pers
 ### Wave 6: Dice UI ✓
 Display and interaction (F-223–F-226): Shield display ("HP:X SH:Y"), round toast overlay between rounds, dice boxes with pip patterns on all units (3-die pyramid for command, centered/diagonal for board units), full interaction UI (left-click select/target, right-click lock, R reroll, auto-advance when all dice activated). Command units positioned above/below boards. Combat is now playable.
 
----
+### Wave 7: Combat Visualization ✓
+Visual feedback (F-227, F-228, F-202): Execution phase delays to see damage as it happens, targeting lines to show who attacks whom, enemy targeting preview during Preview phase. Combat is readable and players can anticipate outcomes.
+
+### Wave 8: Combat Edge Cases ✓
+Edge case handling (F-190–F-193, F-124): Dead target skip in enemy command phase, zero-dice unit handling, simultaneous death via HP snapshot, empty firing order for command-only combat, dead unit visual rendering with grey color and red X overlay.
 
 ---
 
-## Wave 7: Combat Visualization
-
-**Goal:** Make combat understandable — show what's happening and why.
-
-| ID | Feature | Why Now |
-|----|---------|---------|
-| F-228 | Execution Phase Visual Delay | See damage as it happens |
-| F-227 | Targeting Lines Display | Understand who targets whom |
-| F-202 | Enemy Targeting Display (Lines) | See enemy intent in Preview |
-
-**Deliverable:** Combat is readable. Players understand the flow and can anticipate outcomes.
-
 ---
 
-## Wave 8: Combat Edge Cases
+## Completed: Wave 8
 
 **Goal:** Fix gameplay bugs and edge cases that break combat logic.
 
@@ -115,22 +107,21 @@ Display and interaction (F-223–F-226): Shield display ("HP:X SH:Y"), round toa
 | 4 | 8 | Targeting (positional, overflow) | ✓ |
 | 5 | 8 | Death & victory (shields, permadeath, win) | ✓ |
 | 6 | 4 | Dice UI (display, interact, shields, round) | ✓ |
-| 7 | 3 | Combat visualization (delays, lines) | |
-| 8 | 5 | Edge cases (dead targets, gaps, zero dice) | |
+| 7 | 3 | Combat visualization (delays, lines) | ✓ |
+| 8 | 5 | Edge cases (dead targets, gaps, zero dice) | ✓ |
 | 9 | 4 | Run structure (repair, reposition, content) | |
 | 10 | 8 | Polish & systems (size, tags, AI, templates) | |
-| **Total** | **60** | | **40 done** |
+| **Total** | **60** | | **48 done** |
 
 ---
 
 ## Dependencies to Watch
 
-- **F-228 (Execution Delay)** — Needed before F-227 targeting lines make sense
-- **F-124 (Dead Unit Gap Handling)** — Affects board display when units die
+- No critical blockers remaining for Wave 9
 
 ---
 
 ## Next Steps
 
-1. **Wave 7: Combat Visualization** — Add execution delays and targeting lines
-2. Combat is now playable — iterate on feedback
+1. **Wave 9: Run Structure** — Repair action, repositioning, varied encounters
+2. Combat is complete — iterate on feedback
