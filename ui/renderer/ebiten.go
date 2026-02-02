@@ -753,12 +753,7 @@ func drawFloatingTexts(screen *ebiten.Image, combat model.CombatModel, boardX fl
 		// Center X
 		textX := unitX + unitW/2
 
-		// Calculate alpha: full for 70%, fade over final 30%
-		var alpha float32 = 1.0
-		if progress > 0.7 {
-			alpha = 1.0 - (progress-0.7)/0.3
-		}
-		drawCombatText(screen, ft.Text, textX, textY, ft.ColorRGBA, alpha)
+		drawCombatText(screen, ft.Text, textX, textY, ft.ColorRGBA, 1.0)
 	}
 }
 
