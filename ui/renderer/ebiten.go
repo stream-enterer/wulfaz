@@ -81,7 +81,7 @@ var (
 	colorGreenSelect  = color.RGBA{0, 255, 0, 255}   // Selected die
 	colorRedUsed      = color.RGBA{255, 0, 0, 255}   // Activated/used die
 	colorDieBox       = color.RGBA{40, 40, 40, 255}  // Die background
-	colorGrayBlank    = color.RGBA{80, 80, 80, 255}  // Blank die (grayed out)
+	colorGrayBlank    = color.RGBA{40, 40, 40, 255}  // Blank die border (#282828)
 	colorUnlockButton = color.RGBA{60, 60, 80, 255}
 	colorDeadUnit     = color.RGBA{60, 60, 60, 180} // F-124: Greyed out dead unit
 
@@ -140,6 +140,7 @@ func separateCommandUnit(units []entity.Unit) (*entity.Unit, []entity.Unit) {
 
 // getDieState returns die outline state: 0=normal, 1=locked, 2=selected, 3=activated, 4=blank
 // Priority: activated > selected > locked > blank > normal
+// Exception: during execution phase, blank dice always show blank state (not locked)
 func getDieState(unitID string, dieIdx int, combat model.CombatModel, isPlayerCmd bool) int {
 	rolled := combat.RolledDice[unitID]
 	if rolled == nil || dieIdx >= len(rolled) {
@@ -154,6 +155,10 @@ func getDieState(unitID string, dieIdx int, combat model.CombatModel, isPlayerCm
 	// Check selected (only for player command)
 	if isPlayerCmd && combat.SelectedUnitID == unitID && combat.SelectedDieIndex == dieIdx {
 		return 2 // green
+	}
+	// During execution/round-end phases, blank dice should show blank state (not locked orange)
+	if (combat.DicePhase == model.DicePhaseExecution || combat.DicePhase == model.DicePhaseRoundEnd) && rd.Type() == entity.DieBlank {
+		return 4 // gray for blank
 	}
 	// Check locked
 	if rd.Locked {
