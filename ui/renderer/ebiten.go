@@ -5,10 +5,10 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	"wulfaz/internal/entity"
@@ -40,11 +40,10 @@ const (
 	DieBoxMargin = 4
 
 	// Combat log (top right, mirrors tick/pause text)
-	logY        = 10
-	logChars    = 35
-	logMaxLines = 20
-	charWidth   = 7 // approx width of debug font char
-	lineHeight  = 15
+	logY           = 10
+	logMaxLines    = 20
+	lineHeight     = 14
+	logWidthPixels = 260
 
 	// Die detail rendering
 	dieContentPadding         = 4 // Used in drawRedX for X positioning
@@ -198,12 +197,10 @@ func drawDieBox(screen *ebiten.Image, x, y float32, face entity.DieFace, state i
 // drawPips draws the die value as a centered number.
 func drawPips(screen *ebiten.Image, x, y float32, count int) {
 	s := fmt.Sprintf("%d", count)
-	// Debug font: 6px wide per char, 16px tall
-	textW := len(s) * 6
-	textH := 16
+	textW := MeasureTextWidth(s)
 	cx := int(x) + DieBoxSize/2 - textW/2
-	cy := int(y) + DieBoxSize/2 - textH/2
-	ebitenutil.DebugPrintAt(screen, s, cx, cy)
+	cy := int(y) + DieBoxSize/2 - FontSize/2
+	DrawText(screen, s, cx, cy)
 }
 
 // drawRedX draws an X for blank (0) die faces.
@@ -443,7 +440,7 @@ func drawUnlockButton(screen *ebiten.Image, x, y int) image.Rectangle {
 	vector.StrokeRect(screen, fx, fy, float32(btnW), float32(btnH), 1, color.White, false)
 
 	// Button text
-	ebitenutil.DebugPrintAt(screen, "↰ Unlock", x+unlockButtonTextX, y+unlockButtonTextY)
+	DrawText(screen, "↰ Unlock", x+unlockButtonTextX, y+unlockButtonTextY)
 
 	return image.Rect(x, y, x+btnW, y+btnH)
 }
@@ -454,7 +451,7 @@ func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y 
 	vector.StrokeRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, FrameStroke, color.White, false)
 
 	// Unit ID at top
-	ebitenutil.DebugPrintAt(screen, unit.ID, int(x)+textPadding, int(y)+textPadding)
+	DrawText(screen, unit.ID, int(x)+textPadding, int(y)+textPadding)
 
 	// HP + Shields at bottom
 	hp := getAttr(unit, "health")
@@ -463,7 +460,7 @@ func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y 
 	if shields > 0 {
 		statText += fmt.Sprintf(" SH:%d", shields)
 	}
-	ebitenutil.DebugPrintAt(screen, statText, int(x)+textPadding, int(y)+CommandUnitHeight-unitStatTextYOffset)
+	DrawText(screen, statText, int(x)+textPadding, int(y)+CommandUnitHeight-unitStatTextYOffset)
 
 	return image.Rect(int(x), int(y), int(x)+CommandUnitWidth, int(y)+CommandUnitHeight)
 }
@@ -517,21 +514,21 @@ func RenderEbiten(screen *ebiten.Image, m tea.Model) []HitRegion {
 		renderGameOver(screen)
 		return nil
 	default:
-		ebitenutil.DebugPrint(screen, "Unknown phase")
+		DrawText(screen, "Unknown phase", 0, 0)
 		return nil
 	}
 }
 
 func renderMenu(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-	ebitenutil.DebugPrintAt(screen, "=== WULFAZ ===", w/2-50, h/2-20)
-	ebitenutil.DebugPrintAt(screen, "Press SPACE to start", w/2-70, h/2+10)
+	DrawTextCentered(screen, "=== WULFAZ ===", w/2, h/2-20)
+	DrawTextCentered(screen, "Press SPACE to start", w/2, h/2+10)
 }
 
 func renderGameOver(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-	ebitenutil.DebugPrintAt(screen, "=== GAME OVER ===", w/2-60, h/2-10)
-	ebitenutil.DebugPrintAt(screen, "Press ESC to quit", w/2-55, h/2+20)
+	DrawTextCentered(screen, "=== GAME OVER ===", w/2, h/2-10)
+	DrawTextCentered(screen, "Press ESC to quit", w/2, h/2+20)
 }
 
 func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
@@ -540,8 +537,8 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	boardX := CalcBoardX(w)
 
 	// Header
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Round: %d", combat.Round), 10, 10)
-	ebitenutil.DebugPrintAt(screen, "SPACE=Pause  ESC=Quit", 10, 30)
+	DrawText(screen, fmt.Sprintf("Round: %d", combat.Round), 10, 10)
+	DrawText(screen, "SPACE=Pause  ESC=Quit", 10, 30)
 
 	// Separate command units from board units
 	enemyCmd, enemyBoard := separateCommandUnit(combat.EnemyUnits)
@@ -587,19 +584,19 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 
 	// Phase-specific UI hints
 	if combat.DicePhase == model.DicePhaseExecution {
-		ebitenutil.DebugPrintAt(screen, "Click to continue...", uiLeftMargin, uiHintY1)
+		DrawText(screen, "Click to continue...", uiLeftMargin, uiHintY1)
 	}
 	if combat.DicePhase == model.DicePhasePlayerCommand {
 		allLocked := tea.AllCommandDiceLocked(combat)
 
 		if !allLocked {
 			// Lock phase hints
-			ebitenutil.DebugPrintAt(screen, "LClick die to lock/unlock", uiLeftMargin, uiHintY1)
-			ebitenutil.DebugPrintAt(screen, fmt.Sprintf("R - Reroll unlocked (%d/2)", combat.RerollsRemaining), uiLeftMargin, uiHintY2)
+			DrawText(screen, "LClick die to lock/unlock", uiLeftMargin, uiHintY1)
+			DrawText(screen, fmt.Sprintf("R - Reroll unlocked (%d/2)", combat.RerollsRemaining), uiLeftMargin, uiHintY2)
 		} else {
 			// Activation phase hints
-			ebitenutil.DebugPrintAt(screen, "LClick die to select, LClick target to activate", uiLeftMargin, uiHintY1)
-			ebitenutil.DebugPrintAt(screen, "RClick to cancel selection", uiLeftMargin, uiHintY2)
+			DrawText(screen, "LClick die to select, LClick target to activate", uiLeftMargin, uiHintY1)
+			DrawText(screen, "RClick to cancel selection", uiLeftMargin, uiHintY2)
 
 			// ↰ Unlock button (only if rerolls > 0)
 			if combat.RerollsRemaining > 0 {
@@ -609,7 +606,7 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 		}
 	}
 	if combat.DicePhase == model.DicePhasePreview {
-		ebitenutil.DebugPrintAt(screen, "Click to continue...", uiLeftMargin, uiHintY1)
+		DrawText(screen, "Click to continue...", uiLeftMargin, uiHintY1)
 	}
 
 	renderLog(screen, combat.Log)
@@ -631,7 +628,7 @@ func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width 
 	if width < unitIDTruncateWidth && len(unit.ID) > unitIDTruncateLen {
 		displayID = unit.ID[:unitIDTruncateLen]
 	}
-	ebitenutil.DebugPrintAt(screen, displayID, int(x)+textPadding, int(y)+textPadding)
+	DrawText(screen, displayID, int(x)+textPadding, int(y)+textPadding)
 
 	// HP + Shields at bottom (F-223)
 	hp := getAttr(unit, "health")
@@ -640,18 +637,18 @@ func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width 
 	if shields > 0 {
 		statText += fmt.Sprintf(" SH:%d", shields)
 	}
-	ebitenutil.DebugPrintAt(screen, statText, int(x)+textPadding, int(y)+SlotHeight-unitStatTextYOffset)
+	DrawText(screen, statText, int(x)+textPadding, int(y)+SlotHeight-unitStatTextYOffset)
 }
 
 func renderLog(screen *ebiten.Image, log []string) {
 	w := screen.Bounds().Dx()
-	logX := w - logChars*charWidth - BoardMargin
+	logX := w - logWidthPixels - BoardMargin
 
-	ebitenutil.DebugPrintAt(screen, "Combat Log:", logX, logY)
+	DrawText(screen, "Combat Log:", logX, logY)
 
 	var lines []string
 	for _, entry := range log {
-		lines = append(lines, wrapText(entry, logChars)...)
+		lines = append(lines, wrapText(entry, logWidthPixels)...)
 	}
 
 	start := 0
@@ -660,32 +657,38 @@ func renderLog(screen *ebiten.Image, log []string) {
 	}
 
 	for i, line := range lines[start:] {
-		ebitenutil.DebugPrintAt(screen, line, logX, logY+lineHeight+i*lineHeight)
+		DrawText(screen, line, logX, logY+lineHeight+i*lineHeight)
 	}
 }
 
-func wrapText(text string, maxChars int) []string {
-	if len(text) <= maxChars {
+// wrapText wraps text to fit within maxWidth pixels.
+func wrapText(text string, maxWidth int) []string {
+	if MeasureTextWidth(text) <= maxWidth {
 		return []string{text}
 	}
 
 	var lines []string
-	for len(text) > maxChars {
-		breakAt := maxChars
-		for i := maxChars; i > 0; i-- {
-			if text[i] == ' ' {
-				breakAt = i
-				break
-			}
+	words := strings.Fields(text)
+	currentLine := ""
+
+	for _, word := range words {
+		testLine := currentLine
+		if testLine != "" {
+			testLine += " "
 		}
-		lines = append(lines, text[:breakAt])
-		text = text[breakAt:]
-		if len(text) > 0 && text[0] == ' ' {
-			text = text[1:]
+		testLine += word
+
+		if MeasureTextWidth(testLine) <= maxWidth {
+			currentLine = testLine
+		} else {
+			if currentLine != "" {
+				lines = append(lines, currentLine)
+			}
+			currentLine = word
 		}
 	}
-	if len(text) > 0 {
-		lines = append(lines, text)
+	if currentLine != "" {
+		lines = append(lines, currentLine)
 	}
 	return lines
 }
@@ -698,8 +701,8 @@ func renderPausedOverlay(screen *ebiten.Image) {
 	vector.FillRect(screen, 0, 0, float32(w), float32(h), overlay, false)
 
 	// PAUSED text
-	ebitenutil.DebugPrintAt(screen, "=== PAUSED ===", w/2-50, h/2-10)
-	ebitenutil.DebugPrintAt(screen, "Press SPACE to resume", w/2-70, h/2+20)
+	DrawTextCentered(screen, "=== PAUSED ===", w/2, h/2-10)
+	DrawTextCentered(screen, "Press SPACE to resume", w/2, h/2+20)
 }
 
 func renderChoice(screen *ebiten.Image, ct tea.ChoiceType, choices []string) {
@@ -709,11 +712,11 @@ func renderChoice(screen *ebiten.Image, ct tea.ChoiceType, choices []string) {
 	if ct == tea.ChoiceFight {
 		header = "Choose next fight:"
 	}
-	ebitenutil.DebugPrintAt(screen, header, w/2-60, h/2-60)
+	DrawTextCentered(screen, header, w/2, h/2-60)
 
 	for i, c := range choices {
 		line := fmt.Sprintf("[%d] %s", i+1, c)
-		ebitenutil.DebugPrintAt(screen, line, w/2-60, h/2-30+i*20)
+		DrawTextCentered(screen, line, w/2, h/2-30+i*20)
 	}
 }
 
@@ -750,11 +753,12 @@ func drawFloatingTexts(screen *ebiten.Image, combat model.CombatModel, boardX fl
 		// Center X
 		textX := unitX + unitW/2
 
-		// Note: Color (ft.ColorRGBA) and alpha fade not implemented yet;
-		// debug font only supports white. When text.Draw is added:
-		// - Alpha fade: full opacity for 70%, then fade to 0 over final 30%
-		// - Color from ft.ColorRGBA (0xRRGGBBAA format)
-		drawCombatText(screen, ft.Text, textX, textY)
+		// Calculate alpha: full for 70%, fade over final 30%
+		var alpha float32 = 1.0
+		if progress > 0.7 {
+			alpha = 1.0 - (progress-0.7)/0.3
+		}
+		drawCombatText(screen, ft.Text, textX, textY, ft.ColorRGBA, alpha)
 	}
 }
 
@@ -801,11 +805,13 @@ func getUnitBounds(unitID string, combat model.CombatModel, boardX float32) (x, 
 	return 0, 0, 0, 0
 }
 
-// drawCombatText draws centered text using debug font.
-// Note: color parameter not implemented; DebugPrint only supports white.
-// A future upgrade would use text.Draw with a proper font for colored text.
-func drawCombatText(screen *ebiten.Image, s string, x, y float32) {
-	textWidth := float32(len(s) * 6) // Debug font: ~6px wide per char
-	ebitenutil.DebugPrintAt(screen, s, int(x-textWidth/2), int(y))
+// drawCombatText draws centered, colored text with alpha support.
+func drawCombatText(screen *ebiten.Image, s string, x, y float32, rgba uint32, alpha float32) {
+	c := color.RGBA{
+		R: uint8((rgba >> 24) & 0xFF),
+		G: uint8((rgba >> 16) & 0xFF),
+		B: uint8((rgba >> 8) & 0xFF),
+		A: uint8(float32((rgba)&0xFF) * alpha),
+	}
+	DrawTextCenteredColor(screen, s, int(x), int(y), c)
 }
-
