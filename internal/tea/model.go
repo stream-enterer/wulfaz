@@ -154,6 +154,8 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleDiceEffectApplied(msg)
 	case PlayerCommandDone:
 		return m.handlePlayerCommandDone(msg)
+	case EnemyCommandAdvanceClicked:
+		return m.handleEnemyCommandAdvanceClicked(msg)
 	case DicePhaseAdvanced:
 		return m.handleDicePhaseAdvanced(msg)
 
@@ -1169,12 +1171,25 @@ func (m Model) handlePlayerCommandDone(_ PlayerCommandDone) (Model, Cmd) {
 	}
 
 	combat := m.Combat
-	combat.DicePhase = model.DicePhaseEnemyCommand
+	combat.DicePhase = model.DicePhaseAwaitingEnemyCommand
 	combat.SelectedUnitID = ""
 	combat.SelectedDieIndex = -1
 	m.Combat = combat
 
-	// Trigger enemy command AI (Wave 3)
+	// Wait for player click before triggering enemy command
+	return m, nil
+}
+
+func (m Model) handleEnemyCommandAdvanceClicked(_ EnemyCommandAdvanceClicked) (Model, Cmd) {
+	if m.Combat.DicePhase != model.DicePhaseAwaitingEnemyCommand {
+		return m, nil
+	}
+
+	combat := m.Combat
+	combat.DicePhase = model.DicePhaseEnemyCommand
+	m.Combat = combat
+
+	// Trigger enemy command AI
 	return m, ExecuteEnemyCommand(m.Combat)
 }
 

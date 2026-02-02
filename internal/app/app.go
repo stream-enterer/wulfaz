@@ -256,6 +256,14 @@ func (a *App) pollCombatInput() {
 		return
 	}
 
+	// AWAITING ENEMY COMMAND PHASE: click to trigger enemy command
+	if combat.DicePhase == model.DicePhaseAwaitingEnemyCommand {
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			a.dispatch(tea.EnemyCommandAdvanceClicked{})
+		}
+		return
+	}
+
 	// PLAYER COMMAND PHASE
 	if combat.DicePhase == model.DicePhasePlayerCommand {
 		// R key = reroll unlocked dice

@@ -14,12 +14,13 @@ const (
 type DicePhase int
 
 const (
-	DicePhaseNone          DicePhase = iota
-	DicePhasePreview                 // All dice rolled, player sees enemy plan
-	DicePhasePlayerCommand           // Player manipulates their command dice
-	DicePhaseEnemyCommand            // Enemy activates their command dice
-	DicePhaseExecution               // Units fire in position order
-	DicePhaseRoundEnd                // Shields expire, round cleanup
+	DicePhaseNone                  DicePhase = iota
+	DicePhasePreview                         // All dice rolled, player sees enemy plan
+	DicePhasePlayerCommand                   // Player manipulates their command dice
+	DicePhaseAwaitingEnemyCommand            // Player done, click to trigger enemy command
+	DicePhaseEnemyCommand                    // Enemy activates their command dice
+	DicePhaseExecution                       // Units fire in position order
+	DicePhaseRoundEnd                        // Shields expire, round cleanup
 )
 
 // DefaultRerollsPerRound is the number of rerolls the player gets per round.

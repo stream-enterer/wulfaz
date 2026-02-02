@@ -617,6 +617,9 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	if combat.DicePhase == model.DicePhaseExecution {
 		DrawText(screen, "Click to continue...", uiLeftMargin, uiHintY1)
 	}
+	if combat.DicePhase == model.DicePhaseAwaitingEnemyCommand {
+		DrawText(screen, "Click to continue...", uiLeftMargin, uiHintY1)
+	}
 	if combat.DicePhase == model.DicePhasePlayerCommand {
 		allLocked := tea.AllCommandDiceLocked(combat)
 

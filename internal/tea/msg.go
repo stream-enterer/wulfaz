@@ -288,6 +288,11 @@ type ExecutionAdvanceClicked struct {
 
 func (ExecutionAdvanceClicked) isMsg() {}
 
+// EnemyCommandAdvanceClicked signals player clicked to trigger enemy command phase.
+type EnemyCommandAdvanceClicked struct{}
+
+func (EnemyCommandAdvanceClicked) isMsg() {}
+
 // ===== Drag-and-Drop Messages =====
 
 // UnitDragStarted signals player began dragging a unit.
