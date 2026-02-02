@@ -795,14 +795,15 @@ func allCommandDiceActivated(combat model.CombatModel) bool {
 	return true
 }
 
-// allCommandDiceLocked checks if all player command dice are locked.
-func allCommandDiceLocked(combat model.CombatModel) bool {
+// AllCommandDiceLocked checks if all player command dice are locked.
+// Exported for use by renderer and app packages.
+func AllCommandDiceLocked(combat model.CombatModel) bool {
 	cmd := findPlayerCommandUnit(combat)
 	if cmd == nil {
 		return true
 	}
 	rolled := combat.RolledDice[cmd.ID]
-	if rolled == nil || len(rolled) == 0 {
+	if len(rolled) == 0 {
 		return true // No dice = trivially locked
 	}
 	for _, rd := range rolled {
@@ -1412,47 +1413,6 @@ func pruneExpiredTexts(texts []model.FloatingText, nowNano int64) []model.Floati
 	return result
 }
 
-// buildPositionArrows creates arrows for all attackers at a firing position
-func buildPositionArrows(pos model.FiringPosition, combat model.CombatModel) []model.TargetingArrow {
-	var arrows []model.TargetingArrow
-
-	// Player units at this position targeting enemies
-	for _, uid := range pos.PlayerUnits {
-		unit := findUnitByID(combat.PlayerUnits, uid)
-		if unit == nil {
-			continue
-		}
-		targetID := SelectTargetUnit(*unit, combat.EnemyUnits)
-		if targetID != "" {
-			arrows = append(arrows, model.TargetingArrow{
-				SourceUnitID: uid,
-				TargetUnitID: targetID,
-				EffectType:   entity.DieDamage,
-				IsDashed:     false,
-			})
-		}
-	}
-
-	// Enemy units at this position targeting players
-	for _, uid := range pos.EnemyUnits {
-		unit := findUnitByID(combat.EnemyUnits, uid)
-		if unit == nil {
-			continue
-		}
-		targetID := SelectTargetUnit(*unit, combat.PlayerUnits)
-		if targetID != "" {
-			arrows = append(arrows, model.TargetingArrow{
-				SourceUnitID: uid,
-				TargetUnitID: targetID,
-				EffectType:   entity.DieDamage,
-				IsDashed:     false,
-			})
-		}
-	}
-
-	return arrows
-}
-
 // computeAllPreviewArrows shows both player (solid) and enemy (dashed) arrows.
 func computeAllPreviewArrows(combat model.CombatModel) []model.TargetingArrow {
 	arrows := computeEnemyPreviewArrows(combat) // Dashed
@@ -1519,7 +1479,7 @@ func computeEnemyPreviewArrows(combat model.CombatModel) []model.TargetingArrow 
 
 	// Enemy board units → positional targeting
 	for _, u := range combat.EnemyUnits {
-		if u.IsCommand() {
+		if u.IsCommand() || !u.IsAlive() {
 			continue
 		}
 		targetID := SelectTargetUnit(u, combat.PlayerUnits)

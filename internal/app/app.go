@@ -176,7 +176,7 @@ func (a *App) pollCombatInput() {
 		// R key = reroll unlocked dice
 		if inpututil.IsKeyJustPressed(ebiten.KeyR) && combat.RerollsRemaining > 0 {
 			playerCmd := findPlayerCommandUnit(combat)
-			if playerCmd != nil && !allCommandDiceLocked(combat) {
+			if playerCmd != nil && !tea.AllCommandDiceLocked(combat) {
 				rolled := combat.RolledDice[playerCmd.ID]
 				cmd := tea.RerollUnlockedDice(a.model.Seed+int64(combat.Round)*100, playerCmd.ID, rolled)
 				a.dispatch(cmd())
@@ -203,7 +203,7 @@ func (a *App) handleLeftClick(mx, my int) {
 	combat := a.model.Combat
 	pt := image.Point{mx, my}
 	playerCmd := findPlayerCommandUnit(combat)
-	allLocked := allCommandDiceLocked(combat)
+	allLocked := tea.AllCommandDiceLocked(combat)
 
 	// Check ↰ unlock button first (only visible when all locked AND rerolls > 0)
 	for _, region := range a.hitRegions {
@@ -283,24 +283,6 @@ func (a *App) handleLeftClick(mx, my int) {
 	if allLocked && combat.SelectedUnitID != "" {
 		a.dispatch(tea.DieDeselected{})
 	}
-}
-
-// allCommandDiceLocked checks if all player command dice are locked.
-func allCommandDiceLocked(combat model.CombatModel) bool {
-	cmd := findPlayerCommandUnit(combat)
-	if cmd == nil {
-		return true
-	}
-	rolled := combat.RolledDice[cmd.ID]
-	if len(rolled) == 0 {
-		return true
-	}
-	for _, rd := range rolled {
-		if !rd.Locked {
-			return false
-		}
-	}
-	return true
 }
 
 // findPlayerCommandUnit returns the player's command unit (or nil).

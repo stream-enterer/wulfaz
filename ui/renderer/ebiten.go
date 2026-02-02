@@ -283,30 +283,6 @@ func drawUnitDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY, cardW fl
 	return regions
 }
 
-// allCommandDiceLockedRenderer checks if all player command dice are locked.
-func allCommandDiceLockedRenderer(combat model.CombatModel) bool {
-	var cmdID string
-	for _, u := range combat.PlayerUnits {
-		if u.IsCommand() {
-			cmdID = u.ID
-			break
-		}
-	}
-	if cmdID == "" {
-		return true
-	}
-	rolled := combat.RolledDice[cmdID]
-	if len(rolled) == 0 {
-		return true
-	}
-	for _, rd := range rolled {
-		if !rd.Locked {
-			return false
-		}
-	}
-	return true
-}
-
 // ===== Wave 7: Arrow and Flash Rendering =====
 
 // arrowColor returns the color for an arrow based on effect type
@@ -614,7 +590,7 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 		drawClickPrompt(screen, boardX)
 	}
 	if combat.DicePhase == model.DicePhasePlayerCommand {
-		allLocked := allCommandDiceLockedRenderer(combat)
+		allLocked := tea.AllCommandDiceLocked(combat)
 
 		if !allLocked {
 			// Lock phase hints
@@ -774,16 +750,11 @@ func drawFloatingTexts(screen *ebiten.Image, combat model.CombatModel, boardX fl
 		// Center X
 		textX := unitX + unitW/2
 
-		// Alpha fade: full opacity for first 70%, then fade to 0
-		alpha := uint8(255)
-		if progress > 0.7 {
-			alpha = uint8(float32(255) * (1.0 - (progress-0.7)/0.3))
-		}
-
-		// Convert color and draw
-		c := uint32ToColor(ft.ColorRGBA)
-		c.A = alpha
-		drawCombatText(screen, ft.Text, textX, textY, c)
+		// Note: Color (ft.ColorRGBA) and alpha fade not implemented yet;
+		// debug font only supports white. When text.Draw is added:
+		// - Alpha fade: full opacity for 70%, then fade to 0 over final 30%
+		// - Color from ft.ColorRGBA (0xRRGGBBAA format)
+		drawCombatText(screen, ft.Text, textX, textY)
 	}
 }
 
@@ -830,23 +801,11 @@ func getUnitBounds(unitID string, combat model.CombatModel, boardX float32) (x, 
 	return 0, 0, 0, 0
 }
 
-// uint32ToColor converts 0xRRGGBBAA to color.RGBA.
-func uint32ToColor(rgba uint32) color.RGBA {
-	return color.RGBA{
-		R: uint8((rgba >> 24) & 0xFF),
-		G: uint8((rgba >> 16) & 0xFF),
-		B: uint8((rgba >> 8) & 0xFF),
-		A: uint8(rgba & 0xFF),
-	}
-}
-
 // drawCombatText draws centered text using debug font.
-func drawCombatText(screen *ebiten.Image, s string, x, y float32, c color.RGBA) {
-	// Debug font: ~6px wide per char
-	textWidth := float32(len(s) * 6)
-	// For colored text with debug font, we create a temporary image
-	// Since ebitenutil.DebugPrint only supports white, we'll use it as-is for MVP
-	// (A more sophisticated approach would use text.Draw with a proper font)
+// Note: color parameter not implemented; DebugPrint only supports white.
+// A future upgrade would use text.Draw with a proper font for colored text.
+func drawCombatText(screen *ebiten.Image, s string, x, y float32) {
+	textWidth := float32(len(s) * 6) // Debug font: ~6px wide per char
 	ebitenutil.DebugPrintAt(screen, s, int(x-textWidth/2), int(y))
 }
 
@@ -854,7 +813,7 @@ func drawCombatText(screen *ebiten.Image, s string, x, y float32, c color.RGBA) 
 func drawClickPrompt(screen *ebiten.Image, boardX float32) {
 	s := "Click to continue"
 	x := boardX + BoardWidth/2
-	y := float32(720 - 40) // screenHeight=720 from app.go constants
+	y := float32(screen.Bounds().Dy() - 40)
 	textWidth := float32(len(s) * 6)
 	ebitenutil.DebugPrintAt(screen, s, int(x-textWidth/2), int(y))
 }
