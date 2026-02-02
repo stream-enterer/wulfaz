@@ -2,24 +2,24 @@ unit id="medium_mech" {
     tags "mech" "medium"
     attributes {
         attribute name="combat_width" base=2
-        attribute name="health" base=100 min=0
-        attribute name="max_health" base=100
+        attribute name="health" base=8 min=0
+        attribute name="max_health" base=8
         attribute name="shields" base=0 min=0
     }
     dice {
         die {
+            face "damage" 1
             face "damage" 2
             face "damage" 2
             face "damage" 3
-            face "damage" 4
             face "blank"
             face "blank"
         }
         die {
+            face "damage" 1
             face "damage" 2
             face "damage" 2
             face "damage" 3
-            face "damage" 4
             face "blank"
             face "blank"
         }

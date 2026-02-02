@@ -2,32 +2,32 @@ unit id="player_command" {
     tags "command" "large"
     attributes {
         attribute name="combat_width" base=3
-        attribute name="health" base=100 min=0
-        attribute name="max_health" base=100
+        attribute name="health" base=12 min=0
+        attribute name="max_health" base=12
         attribute name="shields" base=0 min=0
     }
     dice {
         die {
-            face "damage" 5
-            face "damage" 5
-            face "damage" 8
-            face "damage" 12
+            face "damage" 1
+            face "damage" 1
+            face "damage" 2
+            face "damage" 3
             face "blank"
             face "blank"
         }
         die {
-            face "shield" 5
-            face "shield" 5
-            face "shield" 8
-            face "shield" 12
+            face "shield" 1
+            face "shield" 1
+            face "shield" 2
+            face "shield" 3
             face "blank"
             face "blank"
         }
         die {
-            face "heal" 5
-            face "heal" 5
-            face "heal" 8
-            face "heal" 12
+            face "heal" 1
+            face "heal" 1
+            face "heal" 2
+            face "heal" 3
             face "blank"
             face "blank"
         }

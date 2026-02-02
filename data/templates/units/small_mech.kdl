@@ -2,16 +2,16 @@ unit id="small_mech" {
     tags "mech" "small" "light"
     attributes {
         attribute name="combat_width" base=1
-        attribute name="health" base=60 min=0
-        attribute name="max_health" base=60
+        attribute name="health" base=4 min=0
+        attribute name="max_health" base=4
         attribute name="shields" base=0 min=0
     }
     dice {
         die {
+            face "damage" 1
             face "damage" 2
             face "damage" 2
             face "damage" 3
-            face "damage" 4
             face "blank"
             face "blank"
         }
