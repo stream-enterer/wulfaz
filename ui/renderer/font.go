@@ -18,6 +18,11 @@ var arkPixelFace *text.GoTextFace
 // FontSize is the pixel height of the font (exported for layout calculations).
 const FontSize = 12
 
+// Shadow settings (matches ebitenutil debug font)
+var shadowColor = color.RGBA{0, 0, 0, 128} // 50% black
+const shadowOffsetX = 1
+const shadowOffsetY = 1
+
 func init() {
 	src, err := text.NewGoTextFaceSource(bytes.NewReader(fontData))
 	if err != nil {
@@ -31,11 +36,24 @@ func DrawText(screen *ebiten.Image, s string, x, y int) {
 	DrawTextColor(screen, s, x, y, color.White)
 }
 
-// DrawTextColor renders text at (x, y) with specified color.
+// DrawTextColor renders text at (x, y) with specified color and drop shadow.
 // text/v2 uses top-left as origin by default (unlike v1 which used baseline).
 func DrawTextColor(screen *ebiten.Image, s string, x, y int, c color.Color) {
+	// Compute shadow alpha proportional to text alpha
+	_, _, _, a := c.RGBA()
+	shadowAlpha := uint8((uint32(shadowColor.A) * (a >> 8)) >> 8)
+	shadow := color.RGBA{0, 0, 0, shadowAlpha}
+
+	// Draw shadow first (1px right, 1px down)
 	op := &text.DrawOptions{}
+	op.GeoM.Translate(float64(x+shadowOffsetX), float64(y+shadowOffsetY))
+	op.ColorScale.ScaleWithColor(shadow)
+	text.Draw(screen, s, arkPixelFace, op)
+
+	// Draw text on top
+	op.GeoM.Reset()
 	op.GeoM.Translate(float64(x), float64(y))
+	op.ColorScale.Reset()
 	op.ColorScale.ScaleWithColor(c)
 	text.Draw(screen, s, arkPixelFace, op)
 }
