@@ -36,7 +36,6 @@ const (
 	// Dice box rendering
 	DieBoxSize   = 24
 	DieBoxMargin = 4
-	DiePipRadius = 2
 
 	// Combat log (top right, mirrors tick/pause text)
 	logY        = 10
@@ -161,50 +160,10 @@ func drawDieBox(screen *ebiten.Image, x, y float32, face entity.DieFace, state i
 	return image.Rect(int(x), int(y), int(x)+DieBoxSize, int(y)+DieBoxSize)
 }
 
-// drawPips draws standard die pip pattern.
+// drawPips draws the die value as a centered number.
 func drawPips(screen *ebiten.Image, x, y float32, count int) {
 	cx, cy := x+DieBoxSize/2, y+DieBoxSize/2
-	o := float32(6) // offset from center
-
-	if count > 6 {
-		// Show number for values > 6
-		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("%d", count), int(cx)-4, int(cy)-6)
-		return
-	}
-
-	pip := func(px, py float32) {
-		vector.FillCircle(screen, px, py, DiePipRadius, color.White, false)
-	}
-
-	switch count {
-	case 1:
-		pip(cx, cy)
-	case 2:
-		pip(cx-o, cy-o)
-		pip(cx+o, cy+o)
-	case 3:
-		pip(cx-o, cy-o)
-		pip(cx, cy)
-		pip(cx+o, cy+o)
-	case 4:
-		pip(cx-o, cy-o)
-		pip(cx+o, cy-o)
-		pip(cx-o, cy+o)
-		pip(cx+o, cy+o)
-	case 5:
-		pip(cx-o, cy-o)
-		pip(cx+o, cy-o)
-		pip(cx, cy)
-		pip(cx-o, cy+o)
-		pip(cx+o, cy+o)
-	case 6:
-		pip(cx-o, cy-o)
-		pip(cx+o, cy-o)
-		pip(cx-o, cy)
-		pip(cx+o, cy)
-		pip(cx-o, cy+o)
-		pip(cx+o, cy+o)
-	}
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("%d", count), int(cx)-4, int(cy)-6)
 }
 
 // drawRedX draws an X for blank (0) die faces.
