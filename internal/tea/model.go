@@ -5,12 +5,19 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"time"
 
 	"wulfaz/internal/core"
 	"wulfaz/internal/effect"
 	"wulfaz/internal/entity"
 	"wulfaz/internal/event"
 	"wulfaz/internal/model"
+)
+
+// Animation timing constants (Wave 7)
+const (
+	ArrowDisplayDuration = 750 * time.Millisecond
+	FlashDisplayDuration = 750 * time.Millisecond
 )
 
 type GamePhase int
@@ -143,6 +150,10 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleRoundEnded(msg)
 	case UnlockAllDice:
 		return m.handleUnlockAllDice(msg)
+
+	// Wave 7: Timer messages
+	case TimerFired:
+		return m.handleTimerFired(msg)
 
 	default:
 		return m, nil
@@ -801,6 +812,8 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 	combat.ActivatedDice = make(map[string][]bool)
 	combat.SelectedUnitID = ""
 	combat.SelectedDieIndex = -1
+	combat.FlashTargets = nil
+	combat.ExecutionAnim = model.ExecAnimNone
 
 	// Convert roll indices to RolledDie for all units
 	allUnits := getAllUnits(combat)
@@ -825,6 +838,9 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 		combat.ActivatedDice[unit.ID] = make([]bool, len(unit.Dice))
 	}
 
+	// Compute enemy preview arrows (Wave 7)
+	combat.ActiveArrows = computeEnemyPreviewArrows(combat)
+
 	m.Combat = combat
 	return m, nil
 }
@@ -842,6 +858,7 @@ func (m Model) handlePreviewDone(_ PreviewDone) (Model, Cmd) {
 	}
 	combat := m.Combat
 	combat.DicePhase = model.DicePhasePlayerCommand
+	combat.ActiveArrows = nil // Clear preview arrows (Wave 7)
 	m.Combat = combat
 	return m, nil
 }
@@ -1089,13 +1106,20 @@ func (m Model) handleExecutionStarted(msg ExecutionStarted) (Model, Cmd) {
 	combat := m.Combat
 	combat.FiringOrder = msg.FiringOrder
 	combat.CurrentFiringIndex = 0
-	m.Combat = combat
+	combat.FlashTargets = nil
 
 	if len(msg.FiringOrder) == 0 {
+		combat.ExecutionAnim = model.ExecAnimNone
+		m.Combat = combat
 		return m, func() Msg { return ExecutionComplete{} }
 	}
 
-	return m, ResolvePosition(msg.FiringOrder[0], m.Combat)
+	// Build arrows for first position
+	combat.ActiveArrows = buildPositionArrows(msg.FiringOrder[0], combat)
+	combat.ExecutionAnim = model.ExecAnimShowArrows
+	m.Combat = combat
+
+	return m, StartTimer(TimerExecResolve, ArrowDisplayDuration)
 }
 
 func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
@@ -1103,11 +1127,17 @@ func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
 	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
 	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
 
-	// Apply all attacks (simultaneous - already calculated)
+	// Apply all attacks and build flash targets
+	combat.FlashTargets = make(map[string]entity.DieType)
 	for _, atk := range msg.Attacks {
 		updateUnitHP(combat.PlayerUnits, atk.TargetID, atk.NewHealth, atk.NewShields)
 		updateUnitHP(combat.EnemyUnits, atk.TargetID, atk.NewHealth, atk.NewShields)
+		// Flash ALL hit targets
+		combat.FlashTargets[atk.TargetID] = entity.DieDamage
 	}
+
+	combat.ExecutionAnim = model.ExecAnimResolving
+	combat.ActiveArrows = nil
 
 	// Log attacks (batch for efficiency)
 	var logEntries []string
@@ -1123,20 +1153,8 @@ func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
 
 	m.Combat = combat
 
-	// CRITICAL: Check victory after EACH position (immediate end per DESIGN.md)
-	if victor := m.checkCombatEnd(); victor != VictorNone {
-		return m.applyCombatEnd()
-	}
-
-	// Advance to next position
-	combat.CurrentFiringIndex++
-	m.Combat = combat
-
-	if combat.CurrentFiringIndex >= len(combat.FiringOrder) {
-		return m, func() Msg { return ExecutionComplete{} }
-	}
-
-	return m, ResolvePosition(combat.FiringOrder[combat.CurrentFiringIndex], m.Combat)
+	// Always show the flash, even on victory - check for end after flash completes
+	return m, StartTimer(TimerExecAdvance, FlashDisplayDuration)
 }
 
 func (m Model) handleExecutionComplete(_ ExecutionComplete) (Model, Cmd) {
@@ -1223,6 +1241,151 @@ func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
 
 	m.Combat = combat
 	return m, nil
+}
+
+// ===== Wave 7: Timer Handlers =====
+
+func (m Model) handleTimerFired(msg TimerFired) (Model, Cmd) {
+	combat := m.Combat
+
+	switch msg.ID {
+	case TimerExecResolve:
+		// Clear arrows, resolve the position
+		combat.ActiveArrows = nil
+		m.Combat = combat
+		pos := combat.FiringOrder[combat.CurrentFiringIndex]
+		return m, ResolvePosition(pos, combat)
+
+	case TimerExecAdvance:
+		// Clear flash
+		combat.FlashTargets = nil
+		m.Combat = combat
+
+		// Check victory AFTER flash was shown (so player sees the killing blow)
+		if victor := m.checkCombatEnd(); victor != VictorNone {
+			return m.applyCombatEnd()
+		}
+
+		// Advance to next position
+		combat.CurrentFiringIndex++
+
+		if combat.CurrentFiringIndex >= len(combat.FiringOrder) {
+			combat.ExecutionAnim = model.ExecAnimNone
+			m.Combat = combat
+			return m, func() Msg { return ExecutionComplete{} }
+		}
+
+		// Build arrows for next position
+		pos := combat.FiringOrder[combat.CurrentFiringIndex]
+		combat.ActiveArrows = buildPositionArrows(pos, combat)
+		combat.ExecutionAnim = model.ExecAnimShowArrows
+		m.Combat = combat
+		return m, StartTimer(TimerExecResolve, ArrowDisplayDuration)
+	}
+
+	return m, nil
+}
+
+// buildPositionArrows creates arrows for all attackers at a firing position
+func buildPositionArrows(pos model.FiringPosition, combat model.CombatModel) []model.TargetingArrow {
+	var arrows []model.TargetingArrow
+
+	// Player units at this position targeting enemies
+	for _, uid := range pos.PlayerUnits {
+		unit := findUnitByID(combat.PlayerUnits, uid)
+		if unit == nil {
+			continue
+		}
+		targetID := SelectTargetUnit(*unit, combat.EnemyUnits)
+		if targetID != "" {
+			arrows = append(arrows, model.TargetingArrow{
+				SourceUnitID: uid,
+				TargetUnitID: targetID,
+				EffectType:   entity.DieDamage,
+				IsDashed:     false,
+			})
+		}
+	}
+
+	// Enemy units at this position targeting players
+	for _, uid := range pos.EnemyUnits {
+		unit := findUnitByID(combat.EnemyUnits, uid)
+		if unit == nil {
+			continue
+		}
+		targetID := SelectTargetUnit(*unit, combat.PlayerUnits)
+		if targetID != "" {
+			arrows = append(arrows, model.TargetingArrow{
+				SourceUnitID: uid,
+				TargetUnitID: targetID,
+				EffectType:   entity.DieDamage,
+				IsDashed:     false,
+			})
+		}
+	}
+
+	return arrows
+}
+
+// computeEnemyPreviewArrows builds dashed arrows showing enemy intent
+func computeEnemyPreviewArrows(combat model.CombatModel) []model.TargetingArrow {
+	var arrows []model.TargetingArrow
+
+	// Enemy command unit dice
+	for _, u := range combat.EnemyUnits {
+		if !u.IsCommand() {
+			continue
+		}
+		rolled := combat.RolledDice[u.ID]
+		for _, rd := range rolled {
+			if rd.Type() == entity.DieBlank {
+				continue
+			}
+			var targetID string
+			switch rd.Type() {
+			case entity.DieDamage:
+				targetID = findLowestHPAliveUnit(combat.PlayerUnits)
+			case entity.DieShield, entity.DieHeal:
+				targetID = findLowestHPAliveUnit(combat.EnemyUnits)
+			}
+			if targetID != "" {
+				arrows = append(arrows, model.TargetingArrow{
+					SourceUnitID: u.ID,
+					TargetUnitID: targetID,
+					EffectType:   rd.Type(),
+					IsDashed:     true,
+				})
+			}
+		}
+	}
+
+	// Enemy board units → positional targeting
+	for _, u := range combat.EnemyUnits {
+		if u.IsCommand() {
+			continue
+		}
+		targetID := SelectTargetUnit(u, combat.PlayerUnits)
+		if targetID != "" {
+			arrows = append(arrows, model.TargetingArrow{
+				SourceUnitID: u.ID,
+				TargetUnitID: targetID,
+				EffectType:   entity.DieDamage,
+				IsDashed:     true,
+			})
+		}
+	}
+
+	return arrows
+}
+
+// findUnitByID returns a pointer to the unit with given ID, or nil
+func findUnitByID(units []entity.Unit, id string) *entity.Unit {
+	for i := range units {
+		if units[i].ID == id {
+			return &units[i]
+		}
+	}
+	return nil
 }
 
 func (m Model) handleCombatEnded(msg CombatEnded) (Model, Cmd) {

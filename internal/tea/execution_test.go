@@ -386,7 +386,28 @@ func TestPositionResolved_VictoryCheck(t *testing.T) {
 		},
 	}
 
+	// Step 1: PositionResolved starts flash timer (Wave 7)
 	newM, cmd := m.Update(msg)
+
+	// Flash targets should be set
+	if newM.Combat.FlashTargets == nil || len(newM.Combat.FlashTargets) == 0 {
+		t.Errorf("FlashTargets should be set after PositionResolved")
+	}
+
+	// Should return timer request for flash display
+	if cmd == nil {
+		t.Fatal("expected timer cmd, got nil")
+	}
+	timerReq, ok := cmd().(StartTimerRequested)
+	if !ok {
+		t.Fatalf("expected StartTimerRequested, got %T", cmd())
+	}
+	if timerReq.ID != TimerExecAdvance {
+		t.Errorf("timer ID = %s, want %s", timerReq.ID, TimerExecAdvance)
+	}
+
+	// Step 2: TimerFired triggers victory check
+	newM, cmd = newM.Update(TimerFired{ID: TimerExecAdvance})
 
 	// Combat should end
 	if newM.Combat.Phase != model.CombatResolved {

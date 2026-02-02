@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -82,6 +83,11 @@ var (
 	colorDieBox       = color.RGBA{40, 40, 40, 255}   // Die background
 	colorGrayBlank    = color.RGBA{80, 80, 80, 255}   // Blank die (grayed out)
 	colorUnlockButton = color.RGBA{60, 60, 80, 255}
+
+	// Wave 7: Arrow colors
+	colorArrowDamage = color.RGBA{255, 80, 80, 220}  // Red
+	colorArrowShield = color.RGBA{80, 140, 255, 220} // Blue
+	colorArrowHeal   = color.RGBA{80, 255, 140, 220} // Green
 )
 
 // HitRegion represents a clickable area on screen for input handling.
@@ -300,6 +306,169 @@ func allCommandDiceLockedRenderer(combat model.CombatModel) bool {
 	return true
 }
 
+// ===== Wave 7: Arrow and Flash Rendering =====
+
+// arrowColor returns the color for an arrow based on effect type
+func arrowColor(effectType entity.DieType) color.RGBA {
+	switch effectType {
+	case entity.DieDamage:
+		return colorArrowDamage
+	case entity.DieShield:
+		return colorArrowShield
+	case entity.DieHeal:
+		return colorArrowHeal
+	default:
+		return color.RGBA{200, 200, 200, 220}
+	}
+}
+
+// flashColor returns the bright flash color for an effect type
+func flashColor(effectType entity.DieType) color.RGBA {
+	switch effectType {
+	case entity.DieDamage:
+		return color.RGBA{255, 120, 120, 255} // Bright red
+	case entity.DieShield:
+		return color.RGBA{120, 160, 255, 255} // Bright blue
+	case entity.DieHeal:
+		return color.RGBA{120, 255, 160, 255} // Bright green
+	default:
+		return color.RGBA{255, 255, 255, 255}
+	}
+}
+
+// drawTargetingArrows renders all active arrows
+func drawTargetingArrows(screen *ebiten.Image, combat model.CombatModel, boardX float32) {
+	for _, arrow := range combat.ActiveArrows {
+		srcX, srcY := getUnitCenter(arrow.SourceUnitID, combat, boardX)
+		dstX, dstY := getUnitCenter(arrow.TargetUnitID, combat, boardX)
+
+		if srcX == 0 && srcY == 0 {
+			continue // Source unit not found
+		}
+		if dstX == 0 && dstY == 0 {
+			continue // Target unit not found
+		}
+
+		c := arrowColor(arrow.EffectType)
+
+		if arrow.IsDashed {
+			drawDashedLine(screen, srcX, srcY, dstX, dstY, c)
+		} else {
+			vector.StrokeLine(screen, srcX, srcY, dstX, dstY, 3, c, false)
+		}
+		drawArrowhead(screen, srcX, srcY, dstX, dstY, c)
+	}
+}
+
+// getUnitCenter returns the center screen coordinates of a unit
+func getUnitCenter(unitID string, combat model.CombatModel, boardX float32) (float32, float32) {
+	// Check player units
+	currentX := boardX + float32(BoardMargin)
+	for _, u := range combat.PlayerUnits {
+		if u.IsCommand() {
+			if u.ID == unitID {
+				// Player command: centered below player board
+				cmdX := boardX + (float32(BoardWidth)+2*float32(BoardMargin)-float32(CommandUnitWidth))/2
+				cmdY := float32(playerBoardY + SlotHeight + 2*BoardMargin + CommandGap)
+				return cmdX + float32(CommandUnitWidth)/2, cmdY + float32(CommandUnitHeight)/2
+			}
+			continue
+		}
+		cw := getCombatWidth(u)
+		w := calcUnitWidth(cw)
+		if u.ID == unitID {
+			return currentX + w/2, float32(playerBoardY+BoardMargin) + float32(SlotHeight)/2
+		}
+		currentX += w + float32(UnitGap)
+	}
+
+	// Check enemy units
+	currentX = boardX + float32(BoardMargin)
+	for _, u := range combat.EnemyUnits {
+		if u.IsCommand() {
+			if u.ID == unitID {
+				// Enemy command: centered above enemy board
+				cmdX := boardX + (float32(BoardWidth)+2*float32(BoardMargin)-float32(CommandUnitWidth))/2
+				cmdY := float32(enemyBoardY - CommandGap - CommandUnitHeight)
+				return cmdX + float32(CommandUnitWidth)/2, cmdY + float32(CommandUnitHeight)/2
+			}
+			continue
+		}
+		cw := getCombatWidth(u)
+		w := calcUnitWidth(cw)
+		if u.ID == unitID {
+			return currentX + w/2, float32(enemyBoardY+BoardMargin) + float32(SlotHeight)/2
+		}
+		currentX += w + float32(UnitGap)
+	}
+
+	return 0, 0 // Not found
+}
+
+// drawDashedLine draws a dashed line (8px dash, 4px gap)
+func drawDashedLine(screen *ebiten.Image, x1, y1, x2, y2 float32, c color.RGBA) {
+	const dashLen = 8.0
+	const gapLen = 4.0
+
+	dx := x2 - x1
+	dy := y2 - y1
+	length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+	if length == 0 {
+		return
+	}
+
+	unitX := dx / length
+	unitY := dy / length
+
+	drawn := float32(0)
+	for drawn < length {
+		endDash := drawn + dashLen
+		if endDash > length {
+			endDash = length
+		}
+
+		sx := x1 + unitX*drawn
+		sy := y1 + unitY*drawn
+		ex := x1 + unitX*endDash
+		ey := y1 + unitY*endDash
+
+		vector.StrokeLine(screen, sx, sy, ex, ey, 2, c, false)
+		drawn = endDash + gapLen
+	}
+}
+
+// drawArrowhead draws a V-shaped arrowhead at the destination
+func drawArrowhead(screen *ebiten.Image, x1, y1, x2, y2 float32, c color.RGBA) {
+	const headLen = 10.0
+	const headAngle = 0.4 // radians (~23 degrees)
+
+	dx := x2 - x1
+	dy := y2 - y1
+	length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+	if length == 0 {
+		return
+	}
+
+	// Unit vector pointing back from destination
+	ux := -dx / length
+	uy := -dy / length
+
+	// Rotate for left and right sides of arrowhead
+	cos := float32(math.Cos(headAngle))
+	sin := float32(math.Sin(headAngle))
+
+	// Left arm of arrowhead
+	lx := x2 + headLen*(ux*cos-uy*sin)
+	ly := y2 + headLen*(ux*sin+uy*cos)
+
+	// Right arm of arrowhead
+	rx := x2 + headLen*(ux*cos+uy*sin)
+	ry := y2 + headLen*(-ux*sin+uy*cos)
+
+	vector.StrokeLine(screen, x2, y2, lx, ly, 2, c, false)
+	vector.StrokeLine(screen, x2, y2, rx, ry, 2, c, false)
+}
+
 // drawUnlockButton draws the ↰ unlock all button and returns its hit rectangle.
 func drawUnlockButton(screen *ebiten.Image, x, y int) image.Rectangle {
 	btnW, btnH := unlockButtonWidth, unlockButtonHeight
@@ -316,9 +485,13 @@ func drawUnlockButton(screen *ebiten.Image, x, y int) image.Rectangle {
 }
 
 // drawCommandUnit draws command unit card and returns its rectangle.
-func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y float32) image.Rectangle {
-	// Draw card background
-	vector.FillRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, c, false)
+func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y float32, flash *entity.DieType) image.Rectangle {
+	// Draw card background with flash support
+	fillColor := c
+	if flash != nil {
+		fillColor = flashColor(*flash)
+	}
+	vector.FillRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, fillColor, false)
 	vector.StrokeRect(screen, x, y, CommandUnitWidth, CommandUnitHeight, FrameStroke, color.White, false)
 
 	// Unit ID at top
@@ -353,8 +526,14 @@ func drawUnitsOnBoard(screen *ebiten.Image, units []entity.Unit, boardX, boardY 
 		cw := getCombatWidth(unit)
 		w := calcUnitWidth(cw)
 
+		// Get flash state for this unit
+		var flash *entity.DieType
+		if ft, ok := combat.FlashTargets[unit.ID]; ok {
+			flash = &ft
+		}
+
 		// Draw unit card
-		drawUnit(screen, unit, c, currentX, unitY, w)
+		drawUnit(screen, unit, c, currentX, unitY, w, flash)
 		unitRect := image.Rect(int(currentX), int(unitY), int(currentX+w), int(unitY)+SlotHeight)
 		regions = append(regions, HitRegion{Rect: unitRect, Type: "unit", UnitID: unit.ID, DieIndex: -1})
 
@@ -419,7 +598,11 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	if enemyCmd != nil {
 		cmdX := boardX + (BoardWidth+2*BoardMargin-CommandUnitWidth)/2
 		cmdY := float32(enemyBoardY - CommandGap - CommandUnitHeight)
-		rect := drawCommandUnit(screen, *enemyCmd, colorEnemy, cmdX, cmdY)
+		var enemyCmdFlash *entity.DieType
+		if ft, ok := combat.FlashTargets[enemyCmd.ID]; ok {
+			enemyCmdFlash = &ft
+		}
+		rect := drawCommandUnit(screen, *enemyCmd, colorEnemy, cmdX, cmdY, enemyCmdFlash)
 		regions = append(regions, HitRegion{Rect: rect, Type: "unit", UnitID: enemyCmd.ID, DieIndex: -1})
 		diceRegions := drawCommandDice(screen, *enemyCmd, cmdX, cmdY, combat, false)
 		regions = append(regions, diceRegions...)
@@ -439,10 +622,19 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	if playerCmd != nil {
 		cmdX := boardX + (BoardWidth+2*BoardMargin-CommandUnitWidth)/2
 		cmdY := float32(playerBoardY + SlotHeight + 2*BoardMargin + CommandGap)
-		rect := drawCommandUnit(screen, *playerCmd, colorPlayer, cmdX, cmdY)
+		var playerCmdFlash *entity.DieType
+		if ft, ok := combat.FlashTargets[playerCmd.ID]; ok {
+			playerCmdFlash = &ft
+		}
+		rect := drawCommandUnit(screen, *playerCmd, colorPlayer, cmdX, cmdY, playerCmdFlash)
 		regions = append(regions, HitRegion{Rect: rect, Type: "unit", UnitID: playerCmd.ID, DieIndex: -1})
 		diceRegions := drawCommandDice(screen, *playerCmd, cmdX, cmdY, combat, true)
 		regions = append(regions, diceRegions...) // Die regions added AFTER unit region
+	}
+
+	// Draw targeting arrows (Wave 7)
+	if len(combat.ActiveArrows) > 0 {
+		drawTargetingArrows(screen, combat, boardX)
 	}
 
 	// Phase-specific UI hints
@@ -479,8 +671,12 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	return regions
 }
 
-func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width float32) {
-	vector.FillRect(screen, x, y, width, SlotHeight, c, false)
+func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width float32, flash *entity.DieType) {
+	fillColor := c
+	if flash != nil {
+		fillColor = flashColor(*flash)
+	}
+	vector.FillRect(screen, x, y, width, SlotHeight, fillColor, false)
 	vector.StrokeRect(screen, x, y, width, SlotHeight, FrameStroke, color.White, false)
 
 	// Unit ID (truncated for narrow units)

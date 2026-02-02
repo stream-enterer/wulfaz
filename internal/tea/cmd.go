@@ -2,10 +2,24 @@ package tea
 
 import (
 	"math/rand"
+	"time"
 
 	"wulfaz/internal/entity"
 	"wulfaz/internal/model"
 )
+
+// Timer IDs for execution phase animation
+const (
+	TimerExecResolve = "exec_resolve"
+	TimerExecAdvance = "exec_advance"
+)
+
+// StartTimer creates a Cmd that requests a timer from the runtime.
+func StartTimer(id string, duration time.Duration) Cmd {
+	return func() Msg {
+		return StartTimerRequested{ID: id, Duration: duration}
+	}
+}
 
 type Cmd func() Msg
 

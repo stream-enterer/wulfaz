@@ -1,6 +1,8 @@
 package tea
 
 import (
+	"time"
+
 	"wulfaz/internal/core"
 	"wulfaz/internal/entity"
 	"wulfaz/internal/model"
@@ -254,3 +256,21 @@ func (RoundEnded) isMsg() {}
 type UnlockAllDice struct{}
 
 func (UnlockAllDice) isMsg() {}
+
+// ===== Wave 7: Timer Messages =====
+
+// StartTimerRequested asks the runtime to start a timer.
+// App intercepts this in dispatch() - it never reaches Update().
+type StartTimerRequested struct {
+	ID       string
+	Duration time.Duration
+}
+
+func (StartTimerRequested) isMsg() {}
+
+// TimerFired signals a timer completed.
+type TimerFired struct {
+	ID string
+}
+
+func (TimerFired) isMsg() {}

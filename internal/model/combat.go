@@ -48,6 +48,11 @@ type CombatModel struct {
 	// Execution phase fields (Wave 3)
 	FiringOrder        []FiringPosition // Positions to resolve in order
 	CurrentFiringIndex int              // Index into FiringOrder
+
+	// Visualization state (Wave 7)
+	ActiveArrows  []TargetingArrow          // Arrows to render
+	FlashTargets  map[string]entity.DieType // UnitID -> effect type (for flash color)
+	ExecutionAnim ExecutionAnimState        // Current animation state
 }
 
 // FiringPosition groups units at same board position for simultaneous resolution
@@ -55,6 +60,23 @@ type FiringPosition struct {
 	Position    int      // Board position (0-9)
 	PlayerUnits []string // Unit IDs of player units at this position
 	EnemyUnits  []string // Unit IDs of enemy units at this position
+}
+
+// ExecutionAnimState tracks execution animation progress
+type ExecutionAnimState int
+
+const (
+	ExecAnimNone      ExecutionAnimState = iota
+	ExecAnimShowArrows                   // Arrows visible, waiting to resolve
+	ExecAnimResolving                    // Damage applied, targets flashing
+)
+
+// TargetingArrow represents a line from attacker to target
+type TargetingArrow struct {
+	SourceUnitID string
+	TargetUnitID string
+	EffectType   entity.DieType // damage/shield/heal for coloring
+	IsDashed     bool           // true for enemy preview arrows
 }
 
 // IsPlayerUnit returns true if unitID belongs to player side.

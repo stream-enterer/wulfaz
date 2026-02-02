@@ -4,6 +4,8 @@ import (
 	"image"
 	"log"
 	"math/rand/v2"
+	"slices"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -15,6 +17,11 @@ import (
 	"wulfaz/ui/renderer"
 )
 
+type pendingTimer struct {
+	fireAt time.Time
+	id     string
+}
+
 const (
 	screenWidth  = 1280
 	screenHeight = 720
@@ -22,10 +29,11 @@ const (
 
 // App implements ebiten.Game and drives the TEA runtime
 type App struct {
-	model      tea.Model
-	registry   *template.Registry    // Immutable after init; for shop/rewards later
-	rng        *rand.Rand
-	hitRegions []renderer.HitRegion // Updated each frame for input handling
+	model         tea.Model
+	registry      *template.Registry    // Immutable after init; for shop/rewards later
+	rng           *rand.Rand
+	hitRegions    []renderer.HitRegion // Updated each frame for input handling
+	pendingTimers []pendingTimer       // Timers requested by commands
 }
 
 // New creates a new App with units loaded from templates
@@ -64,6 +72,16 @@ func New(seed int64) *App {
 
 // Update handles input and game logic (implements ebiten.Game)
 func (a *App) Update() error {
+	// Check for expired timers
+	now := time.Now()
+	for i := len(a.pendingTimers) - 1; i >= 0; i-- {
+		if now.After(a.pendingTimers[i].fireAt) {
+			id := a.pendingTimers[i].id
+			a.pendingTimers = slices.Delete(a.pendingTimers, i, i+1)
+			a.dispatch(tea.TimerFired{ID: id})
+		}
+	}
+
 	a.pollInput()
 
 	if a.model.Phase == tea.PhaseGameOver {
@@ -296,8 +314,22 @@ func (a *App) dispatch(msg tea.Msg) {
 		return
 	}
 
+	// Intercept timer requests - don't pass to Update
+	if req, ok := msg.(tea.StartTimerRequested); ok {
+		a.pendingTimers = append(a.pendingTimers, pendingTimer{
+			fireAt: time.Now().Add(req.Duration),
+			id:     req.ID,
+		})
+		return
+	}
+
 	var cmd tea.Cmd
 	a.model, cmd = a.model.Update(msg)
+
+	// Clear timers when combat ends
+	if _, ok := msg.(tea.CombatEnded); ok {
+		a.pendingTimers = nil
+	}
 
 	// Execute command if present
 	if cmd != nil {
