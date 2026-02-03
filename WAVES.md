@@ -72,7 +72,7 @@ Edge case handling (F-190–F-193, F-124): Dead target skip in enemy command pha
 | ID | Feature | Why Now |
 |----|---------|---------|
 | F-215 | Repair Action | Restore HP between fights |
-| F-216 | Free Repositioning | Tactical depth between fights |
+| F-216 | Free Repositioning ✓ | Tactical depth between fights |
 | F-243 | MVP Fight Encounter Templates | Multiple enemy compositions |
 | F-245 | MVP Event Templates | Meaningful choice events |
 
