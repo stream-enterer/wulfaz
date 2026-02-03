@@ -15,8 +15,17 @@ var fontData []byte
 
 var arkPixelFace *text.GoTextFace
 
+// fontFace is a package-level interface variable for ebitenui compatibility.
+// ebitenui expects *text.Face, and arkPixelFace implements text.Face.
+var fontFace text.Face
+
 // FontSize is the pixel height of the font (exported for layout calculations).
 const FontSize = 12
+
+// GetFace returns the font face for external use (ebitenui widgets expect *text.Face).
+func GetFace() *text.Face {
+	return &fontFace
+}
 
 // Shadow settings (matches ebitenutil debug font)
 var shadowColor = color.RGBA{0, 0, 0, 128} // 50% black
@@ -29,6 +38,7 @@ func init() {
 		log.Fatalf("font load failed: %v", err)
 	}
 	arkPixelFace = &text.GoTextFace{Source: src, Size: FontSize}
+	fontFace = arkPixelFace // Initialize interface for ebitenui
 }
 
 // DrawText renders white text at (x, y) where y is the TOP of the text.

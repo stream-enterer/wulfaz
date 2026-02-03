@@ -5,7 +5,6 @@ import (
 	"image"
 	"image/color"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -15,6 +14,27 @@ import (
 	"wulfaz/internal/model"
 	"wulfaz/internal/tea"
 )
+
+// Module-level layout info set by RenderEbiten for use by all render functions
+var (
+	centerOffset image.Point
+	centerWidth  int
+)
+
+// offsetX returns x coordinate offset into center area
+func offsetX(x float32) float32 {
+	return x + float32(centerOffset.X)
+}
+
+// offsetY returns y coordinate offset into center area
+func offsetY(y float32) float32 {
+	return y + float32(centerOffset.Y)
+}
+
+// offsetRect returns rectangle offset into center area
+func offsetRect(r image.Rectangle) image.Rectangle {
+	return r.Add(centerOffset)
+}
 
 const (
 	// Board layout
@@ -39,12 +59,6 @@ const (
 	DieBoxSize   = 24
 	DieBoxMargin = 4
 
-	// Combat log (top right, mirrors tick/pause text)
-	logY           = 10
-	logMaxLines    = 20
-	lineHeight     = 14
-	logWidthPixels = 260
-
 	// Die detail rendering
 	dieContentPadding         = 4 // Used in drawRedX for X positioning
 	commandDiceAreaYOffset    = 16
@@ -52,16 +66,6 @@ const (
 	diagonalDiceMargin        = 15
 	diagonalDiceTopYOffset    = 20
 	diagonalDiceBottomYOffset = 20
-
-	// UI layout
-	unlockButtonWidth  = 80
-	unlockButtonHeight = 20
-	unlockButtonTextX  = 8
-	unlockButtonTextY  = 2
-	uiLeftMargin       = 10
-	uiHintY1           = 50
-	uiHintY2           = 70
-	uiUnlockButtonY    = 90
 
 	// Text rendering
 	unitIDTruncateWidth = 80
@@ -71,11 +75,6 @@ const (
 
 	// Overlay
 	pausedOverlayAlpha = 128
-
-	// Inter-combat overlay positions
-	overlayTextY1 = 50 // First line of overlay instructions
-	overlayTextY2 = 70 // Second line
-	overlayTextY3 = 90 // Third line (reward count or drag hint)
 
 	// Drag-and-drop rendering
 	insertionIndicatorWidth = 4
@@ -88,10 +87,9 @@ var (
 	colorOrangeLock   = color.RGBA{255, 165, 0, 255} // Locked die
 	colorGreenSelect  = color.RGBA{0, 255, 0, 255}   // Selected die
 	colorRedUsed      = color.RGBA{255, 0, 0, 255}   // Activated/used die
-	colorDieBox       = color.RGBA{40, 40, 40, 255}  // Die background
-	colorGrayBlank    = color.RGBA{40, 40, 40, 255}  // Blank die border (#282828)
-	colorUnlockButton = color.RGBA{60, 60, 80, 255}
-	colorDeadUnit     = color.RGBA{60, 60, 60, 180} // F-124: Greyed out dead unit
+	colorDieBox    = color.RGBA{40, 40, 40, 255} // Die background
+	colorGrayBlank = color.RGBA{40, 40, 40, 255} // Blank die border (#282828)
+	colorDeadUnit  = color.RGBA{60, 60, 60, 180} // F-124: Greyed out dead unit
 
 	// Wave 7: Arrow colors
 	colorArrowDamage = color.RGBA{255, 80, 80, 220}  // Red
@@ -451,21 +449,6 @@ func drawArrowhead(screen *ebiten.Image, x1, y1, x2, y2 float32, c color.RGBA) {
 	vector.StrokeLine(screen, x2, y2, rx, ry, 2, c, false)
 }
 
-// drawUnlockButton draws the ↰ unlock all button and returns its hit rectangle.
-func drawUnlockButton(screen *ebiten.Image, x, y int) image.Rectangle {
-	btnW, btnH := unlockButtonWidth, unlockButtonHeight
-	fx, fy := float32(x), float32(y)
-
-	// Button background
-	vector.FillRect(screen, fx, fy, float32(btnW), float32(btnH), colorUnlockButton, false)
-	vector.StrokeRect(screen, fx, fy, float32(btnW), float32(btnH), 1, color.White, false)
-
-	// Button text
-	DrawText(screen, "↰ Unlock", x+unlockButtonTextX, y+unlockButtonTextY)
-
-	return image.Rect(x, y, x+btnW, y+btnH)
-}
-
 // drawCommandUnit draws command unit card and returns its rectangle.
 func drawCommandUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y float32) image.Rectangle {
 	// F-124: Use grey color for dead command units
@@ -530,7 +513,17 @@ func drawUnitsOnBoard(screen *ebiten.Image, units []entity.Unit, boardX, boardY 
 }
 
 // RenderEbiten renders the Model to an Ebitengine screen and returns hit regions.
-func RenderEbiten(screen *ebiten.Image, m tea.Model) []HitRegion {
+// centerRect is the area where game content should be rendered (between UI sidebars).
+func RenderEbiten(screen *ebiten.Image, m tea.Model, centerRect image.Rectangle) []HitRegion {
+	// Skip rendering if center rect not yet laid out (first frame)
+	if centerRect.Dx() == 0 || centerRect.Dy() == 0 {
+		return nil
+	}
+
+	// Store layout info for all rendering functions
+	centerOffset = centerRect.Min
+	centerWidth = centerRect.Dx()
+
 	screen.Fill(colorBackground)
 
 	switch m.Phase {
@@ -564,12 +557,7 @@ func renderGameOver(screen *ebiten.Image) {
 
 func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	var regions []HitRegion
-	w := screen.Bounds().Dx()
-	boardX := CalcBoardX(w)
-
-	// Header
-	DrawText(screen, fmt.Sprintf("Round: %d", combat.Round), 10, 10)
-	DrawText(screen, "SPACE=Pause  ESC=Quit", 10, 30)
+	boardX := offsetX(CalcBoardX(centerWidth))
 
 	// Separate command units from board units
 	enemyCmd, enemyBoard := separateCommandUnit(combat.EnemyUnits)
@@ -578,7 +566,7 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	// Enemy command unit ABOVE enemy board
 	if enemyCmd != nil {
 		cmdX := boardX + (BoardWidth+2*BoardMargin-CommandUnitWidth)/2
-		cmdY := float32(enemyBoardY - CommandGap - CommandUnitHeight)
+		cmdY := offsetY(float32(enemyBoardY - CommandGap - CommandUnitHeight))
 		rect := drawCommandUnit(screen, *enemyCmd, colorEnemy, cmdX, cmdY)
 		regions = append(regions, HitRegion{Rect: rect, Type: "unit", UnitID: enemyCmd.ID, DieIndex: -1})
 		diceRegions := drawCommandDice(screen, *enemyCmd, cmdX, cmdY, combat, false)
@@ -586,19 +574,19 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	}
 
 	// Enemy board
-	drawBoardFrame(screen, boardX, enemyBoardY)
-	boardRegions := drawUnitsOnBoard(screen, enemyBoard, boardX, enemyBoardY, colorEnemy, combat)
+	drawBoardFrame(screen, boardX, offsetY(enemyBoardY))
+	boardRegions := drawUnitsOnBoard(screen, enemyBoard, boardX, offsetY(enemyBoardY), colorEnemy, combat)
 	regions = append(regions, boardRegions...)
 
 	// Player board
-	drawBoardFrame(screen, boardX, playerBoardY)
-	boardRegions = drawUnitsOnBoard(screen, playerBoard, boardX, playerBoardY, colorPlayer, combat)
+	drawBoardFrame(screen, boardX, offsetY(playerBoardY))
+	boardRegions = drawUnitsOnBoard(screen, playerBoard, boardX, offsetY(playerBoardY), colorPlayer, combat)
 	regions = append(regions, boardRegions...)
 
 	// Player command unit BELOW player board
 	if playerCmd != nil {
 		cmdX := boardX + (BoardWidth+2*BoardMargin-CommandUnitWidth)/2
-		cmdY := float32(playerBoardY + SlotHeight + 2*BoardMargin + CommandGap)
+		cmdY := offsetY(float32(playerBoardY + SlotHeight + 2*BoardMargin + CommandGap))
 		rect := drawCommandUnit(screen, *playerCmd, colorPlayer, cmdX, cmdY)
 		regions = append(regions, HitRegion{Rect: rect, Type: "unit", UnitID: playerCmd.ID, DieIndex: -1})
 		diceRegions := drawCommandDice(screen, *playerCmd, cmdX, cmdY, combat, true)
@@ -613,39 +601,7 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 	// Draw floating texts (Wave 7)
 	drawFloatingTexts(screen, combat, boardX)
 
-	// Phase-specific UI hints
-	if combat.DicePhase == model.DicePhaseExecution {
-		DrawText(screen, "Click to continue...", uiLeftMargin, uiHintY1)
-	}
-	if combat.DicePhase == model.DicePhaseAwaitingEnemyCommand {
-		DrawText(screen, "Click to continue...", uiLeftMargin, uiHintY1)
-	}
-	if combat.DicePhase == model.DicePhasePlayerCommand {
-		allLocked := tea.AllCommandDiceLocked(combat)
-
-		if !allLocked {
-			// Lock phase hints
-			DrawText(screen, "LClick die to lock/unlock", uiLeftMargin, uiHintY1)
-			DrawText(screen, fmt.Sprintf("R - Reroll unlocked (%d/2)", combat.RerollsRemaining), uiLeftMargin, uiHintY2)
-		} else {
-			// Activation phase hints
-			DrawText(screen, "LClick die to select, LClick target to activate", uiLeftMargin, uiHintY1)
-			DrawText(screen, "RClick to cancel selection", uiLeftMargin, uiHintY2)
-
-			// ↰ Unlock button (only if rerolls > 0)
-			if combat.RerollsRemaining > 0 {
-				btnRect := drawUnlockButton(screen, uiLeftMargin, uiUnlockButtonY)
-				regions = append(regions, HitRegion{Rect: btnRect, Type: "unlock_button", UnitID: "", DieIndex: -1})
-			}
-		}
-	}
-	if combat.DicePhase == model.DicePhasePreview {
-		DrawText(screen, "Click to continue...", uiLeftMargin, uiHintY1)
-	}
-
-	renderLog(screen, combat.Log)
-
-	// Paused overlay
+	// Paused overlay (covers entire screen including sidebars)
 	if combat.Phase == model.CombatPaused {
 		renderPausedOverlay(screen)
 	}
@@ -685,59 +641,6 @@ func drawUnit(screen *ebiten.Image, unit entity.Unit, c color.RGBA, x, y, width 
 	}
 }
 
-func renderLog(screen *ebiten.Image, log []string) {
-	w := screen.Bounds().Dx()
-	logX := w - logWidthPixels - BoardMargin
-
-	DrawText(screen, "Combat Log:", logX, logY)
-
-	var lines []string
-	for _, entry := range log {
-		lines = append(lines, wrapText(entry, logWidthPixels)...)
-	}
-
-	start := 0
-	if len(lines) > logMaxLines {
-		start = len(lines) - logMaxLines
-	}
-
-	for i, line := range lines[start:] {
-		DrawText(screen, line, logX, logY+lineHeight+i*lineHeight)
-	}
-}
-
-// wrapText wraps text to fit within maxWidth pixels.
-func wrapText(text string, maxWidth int) []string {
-	if MeasureTextWidth(text) <= maxWidth {
-		return []string{text}
-	}
-
-	var lines []string
-	words := strings.Fields(text)
-	currentLine := ""
-
-	for _, word := range words {
-		testLine := currentLine
-		if testLine != "" {
-			testLine += " "
-		}
-		testLine += word
-
-		if MeasureTextWidth(testLine) <= maxWidth {
-			currentLine = testLine
-		} else {
-			if currentLine != "" {
-				lines = append(lines, currentLine)
-			}
-			currentLine = word
-		}
-	}
-	if currentLine != "" {
-		lines = append(lines, currentLine)
-	}
-	return lines
-}
-
 func renderPausedOverlay(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
@@ -753,11 +656,10 @@ func renderPausedOverlay(screen *ebiten.Image) {
 // renderInterCombat renders the inter-combat phase: board visible with overlay choices.
 func renderInterCombat(screen *ebiten.Image, m tea.Model) []HitRegion {
 	var regions []HitRegion
-	w := screen.Bounds().Dx()
-	boardX := CalcBoardX(w)
+	boardX := offsetX(CalcBoardX(centerWidth))
 
 	// Draw player board frame
-	drawBoardFrame(screen, boardX, playerBoardY)
+	drawBoardFrame(screen, boardX, offsetY(playerBoardY))
 
 	// Separate command from board units
 	playerCmd, boardUnits := separateCommandUnit(m.PlayerRoster)
@@ -778,7 +680,7 @@ func renderInterCombat(screen *ebiten.Image, m tea.Model) []HitRegion {
 
 	// Draw board units with shift for drag gap
 	currentX := boardX + float32(BoardMargin)
-	unitY := float32(playerBoardY + BoardMargin)
+	unitY := offsetY(float32(playerBoardY + BoardMargin))
 
 	// Track position in non-dragged units (for insertion comparison)
 	drawIdx := 0
@@ -818,21 +720,10 @@ func renderInterCombat(screen *ebiten.Image, m tea.Model) []HitRegion {
 	// Draw player command unit below board (not draggable)
 	if playerCmd != nil {
 		cmdX := boardX + (BoardWidth+2*BoardMargin-CommandUnitWidth)/2
-		cmdY := float32(playerBoardY + SlotHeight + 2*BoardMargin + CommandGap)
+		cmdY := offsetY(float32(playerBoardY + SlotHeight + 2*BoardMargin + CommandGap))
 		drawCommandUnit(screen, *playerCmd, colorPlayer, cmdX, cmdY)
 		// No hit region for command - not draggable
 	}
-
-	// Draw overlay text
-	if m.ChoiceType == tea.ChoiceReward && len(m.Choices) >= 3 {
-		DrawText(screen, fmt.Sprintf("[1] %s  [2] %s  [3] %s", m.Choices[0], m.Choices[1], m.Choices[2]),
-			uiLeftMargin, overlayTextY1)
-		DrawText(screen, fmt.Sprintf("Rewards left: %d", m.RewardChoicesLeft), uiLeftMargin, overlayTextY2)
-	} else if len(m.Choices) >= 3 {
-		DrawText(screen, fmt.Sprintf("[1] %s  [2] %s  [3] %s", m.Choices[0], m.Choices[1], m.Choices[2]),
-			uiLeftMargin, overlayTextY1)
-	}
-	DrawText(screen, "Drag units to reposition", uiLeftMargin, overlayTextY3)
 
 	// Draw dragged unit at cursor (topmost layer)
 	if m.DragState.IsDragging {

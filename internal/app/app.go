@@ -1,10 +1,12 @@
 package app
 
 import (
+	"fmt"
 	"image"
 	"log"
 	"math/rand/v2"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -14,6 +16,7 @@ import (
 	"wulfaz/internal/model"
 	"wulfaz/internal/tea"
 	"wulfaz/internal/template"
+	"wulfaz/ui/layout"
 	"wulfaz/ui/renderer"
 )
 
@@ -30,10 +33,11 @@ const (
 // App implements ebiten.Game and drives the TEA runtime
 type App struct {
 	model         tea.Model
-	registry      *template.Registry // Immutable after init; for shop/rewards later
+	registry      *template.Registry   // Immutable after init; for shop/rewards later
 	rng           *rand.Rand
 	hitRegions    []renderer.HitRegion // Updated each frame for input handling
 	pendingTimers []pendingTimer       // Timers requested by commands
+	gameUI        *layout.GameUI       // 3-column UI layout
 }
 
 // New creates a new App with units loaded from templates
@@ -59,6 +63,12 @@ func New(seed int64) *App {
 		},
 		registry: reg,
 		rng:      rng,
+		gameUI:   layout.NewGameUI(renderer.GetFace()),
+	}
+
+	// Set up unlock button callback
+	a.gameUI.OnUnlockClicked = func() {
+		a.dispatch(tea.UnlockAllDice{})
 	}
 
 	// Build initial roster and store in model
@@ -72,6 +82,12 @@ func New(seed int64) *App {
 
 // Update handles input and game logic (implements ebiten.Game)
 func (a *App) Update() error {
+	// Sync UI state from model
+	a.syncUIState()
+
+	// Update ebitenui
+	a.gameUI.Update()
+
 	// Check for expired timers
 	now := time.Now()
 	for i := len(a.pendingTimers) - 1; i >= 0; i-- {
@@ -93,12 +109,94 @@ func (a *App) Update() error {
 
 // Draw renders the game state (implements ebiten.Game)
 func (a *App) Draw(screen *ebiten.Image) {
-	a.hitRegions = renderer.RenderEbiten(screen, a.model)
+	// Draw ebitenui frame first (sidebars)
+	a.gameUI.Draw(screen)
+
+	// Then render game content in center area
+	a.hitRegions = renderer.RenderEbiten(screen, a.model, a.gameUI.CenterRect)
 }
 
 // Layout returns the game's screen size (implements ebiten.Game)
 func (a *App) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return screenWidth, screenHeight
+}
+
+// syncUIState updates the sidebar UI widgets from the current model state
+func (a *App) syncUIState() {
+	// Default: hide unlock button
+	a.gameUI.SetUnlockButtonVisible(false)
+
+	switch a.model.Phase {
+	case tea.PhaseMenu:
+		a.gameUI.SetRoundText("WULFAZ")
+		a.gameUI.SetKeysText("SPACE=Start  ESC=Quit")
+		a.gameUI.SetHintText("")
+		a.gameUI.SetLogText("")
+
+	case tea.PhaseInterCombat:
+		a.gameUI.SetRoundText(fmt.Sprintf("Fight %d Complete", a.model.FightNumber))
+		a.gameUI.SetKeysText("1/2/3=Select  ESC=Quit")
+
+		// Inter-combat instructions with choice display
+		hint := ""
+		if len(a.model.Choices) >= 3 {
+			hint = fmt.Sprintf("[1] %s\n[2] %s\n[3] %s\n\n",
+				a.model.Choices[0], a.model.Choices[1], a.model.Choices[2])
+		}
+		if a.model.ChoiceType == tea.ChoiceReward {
+			hint += fmt.Sprintf("Rewards left: %d\n", a.model.RewardChoicesLeft)
+		}
+		// Add drag instructions
+		if !a.model.DragState.IsDragging {
+			hint += "\nDrag units to reposition"
+		} else {
+			hint += "\nRelease to drop\nRClick or ESC to cancel"
+		}
+		a.gameUI.SetHintText(hint)
+		a.gameUI.SetLogText("")
+
+	case tea.PhaseGameOver:
+		a.gameUI.SetRoundText("GAME OVER")
+		a.gameUI.SetKeysText("ESC=Quit")
+		a.gameUI.SetHintText("")
+		a.gameUI.SetLogText("")
+
+	case tea.PhaseCombat:
+		combat := a.model.Combat
+		a.gameUI.SetRoundText(fmt.Sprintf("Round: %d", combat.Round))
+		a.gameUI.SetKeysText("SPACE=Pause  ESC=Quit")
+
+		// Phase-specific hints and unlock button
+		hint := ""
+		switch combat.DicePhase {
+		case model.DicePhaseExecution:
+			hint = "Click to continue..."
+		case model.DicePhaseAwaitingEnemyCommand:
+			hint = "Click to continue..."
+		case model.DicePhasePreview:
+			hint = "Click to continue..."
+		case model.DicePhasePlayerCommand:
+			allLocked := tea.AllCommandDiceLocked(combat)
+			if !allLocked {
+				hint = fmt.Sprintf("LClick die to lock/unlock\nR - Reroll unlocked (%d/2)", combat.RerollsRemaining)
+			} else {
+				hint = "LClick die to select\nLClick target to activate\nRClick to cancel"
+				// Show unlock button if rerolls remaining
+				if combat.RerollsRemaining > 0 {
+					a.gameUI.SetUnlockButtonVisible(true)
+				}
+			}
+		}
+		a.gameUI.SetHintText(hint)
+
+		// Combat log - show last N lines that fit
+		logLines := combat.Log
+		maxLines := 25
+		if len(logLines) > maxLines {
+			logLines = logLines[len(logLines)-maxLines:]
+		}
+		a.gameUI.SetLogText("Combat Log:\n" + strings.Join(logLines, "\n"))
+	}
 }
 
 // pollInput checks for player input and dispatches appropriate messages
@@ -175,8 +273,11 @@ func (a *App) pollInterCombatInput() {
 		}
 	}
 
-	// Mouse: start drag on unit click
+	// Mouse: start drag on unit click (only in game area)
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		if !a.gameUI.IsMouseInGameArea(mx, my) {
+			return // Let ebitenui handle sidebar clicks
+		}
 		pt := image.Point{mx, my}
 		for _, region := range a.hitRegions {
 			if pt.In(region.Rect) && region.Type == "unit" && region.DieIndex == -1 {
@@ -196,7 +297,9 @@ func (a *App) pollInterCombatInput() {
 
 // computeInsertionIndex determines insertion point from mouse X position
 func (a *App) computeInsertionIndex(mouseX int) int {
-	boardX := renderer.CalcBoardX(screenWidth)
+	// Account for sidebar offset
+	centerRect := a.gameUI.CenterRect
+	boardX := renderer.CalcBoardX(centerRect.Dx()) + float32(centerRect.Min.X)
 	currentX := boardX + float32(renderer.BoardMargin)
 
 	// Get board units (exclude command)
@@ -293,18 +396,15 @@ func (a *App) pollCombatInput() {
 
 // handleLeftClick processes left-click for lock toggle or selection/targeting
 func (a *App) handleLeftClick(mx, my int) {
+	// Ignore clicks outside game area (ebitenui handles sidebar clicks including unlock button)
+	if !a.gameUI.IsMouseInGameArea(mx, my) {
+		return
+	}
+
 	combat := a.model.Combat
 	pt := image.Point{mx, my}
 	playerCmd := tea.FindPlayerCommandUnit(combat)
 	allLocked := tea.AllCommandDiceLocked(combat)
-
-	// Check ↰ unlock button first (only visible when all locked AND rerolls > 0)
-	for _, region := range a.hitRegions {
-		if region.Type == "unlock_button" && pt.In(region.Rect) {
-			a.dispatch(tea.UnlockAllDice{})
-			return
-		}
-	}
 
 	// Check dice
 	for _, region := range a.hitRegions {
