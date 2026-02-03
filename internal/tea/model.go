@@ -3,7 +3,6 @@ package tea
 import (
 	"fmt"
 	"maps"
-	"math"
 	"time"
 
 	"wulfaz/internal/core"
@@ -595,16 +594,6 @@ func FindPlayerCommandUnit(combat model.CombatModel) *entity.Unit {
 	return nil
 }
 
-// findEnemyCommandUnit returns the enemy's command unit (or nil).
-func findEnemyCommandUnit(combat model.CombatModel) *entity.Unit {
-	for i := range combat.EnemyUnits {
-		if combat.EnemyUnits[i].IsCommand() {
-			return &combat.EnemyUnits[i]
-		}
-	}
-	return nil
-}
-
 // isValidDiceInteraction validates dice interaction prerequisites.
 // Rejects interactions when: not in combat phase, combat is paused, or wrong dice phase.
 func (m Model) isValidDiceInteraction(unitID string, requiredPhase model.DicePhase) bool {
@@ -622,22 +611,6 @@ func (m Model) isValidDiceInteraction(unitID string, requiredPhase model.DicePha
 	}
 	// Validate unit is a player unit
 	return m.Combat.IsPlayerUnit(unitID)
-}
-
-// findLowestHPAliveUnit returns ID of alive unit with lowest HP (or "").
-func findLowestHPAliveUnit(units []entity.Unit) string {
-	var lowestID string
-	lowestHP := math.MaxInt
-	for _, u := range units {
-		if !u.IsAlive() {
-			continue
-		}
-		if h, ok := u.Attributes["health"]; ok && h.Base < lowestHP {
-			lowestHP = h.Base
-			lowestID = u.ID
-		}
-	}
-	return lowestID
 }
 
 // findUnitByID returns a pointer to the unit with given ID, or nil.
@@ -681,69 +654,6 @@ func buildHPSnapshot(combat model.CombatModel) map[string][2]int {
 		snapshot[u.ID] = [2]int{hp, shields}
 	}
 	return snapshot
-}
-
-// applyDiceEffectToCombat applies damage/shield/heal to a target unit in combat.
-// Shields absorb damage first.
-func applyDiceEffectToCombat(combat model.CombatModel, targetID string,
-	effectType entity.DieType, value int) model.CombatModel {
-
-	updateInSlice := func(units []entity.Unit) {
-		for i, u := range units {
-			if u.ID != targetID {
-				continue
-			}
-			attrs := core.CopyAttributes(u.Attributes)
-
-			health := 0
-			if h, ok := attrs["health"]; ok {
-				health = h.Base
-			}
-			maxHealth := health
-			if mh, ok := attrs["max_health"]; ok {
-				maxHealth = mh.Base
-			}
-			shields := 0
-			if s, ok := attrs["shields"]; ok {
-				shields = s.Base
-			}
-
-			switch effectType {
-			case entity.DieDamage:
-				remaining := value
-				if remaining > 0 && shields > 0 {
-					absorbed := min(remaining, shields)
-					remaining -= absorbed
-					shields -= absorbed
-				}
-				health = max(0, health-remaining)
-			case entity.DieShield:
-				shields += value
-			case entity.DieHeal:
-				health = min(health+value, maxHealth)
-			case entity.DieBlank:
-				// Blank dice have no effect
-			}
-
-			if h, ok := attrs["health"]; ok {
-				h.Base = health
-				attrs["health"] = h
-			}
-			if s, ok := attrs["shields"]; ok {
-				s.Base = shields
-				attrs["shields"] = s
-			} else if shields > 0 {
-				attrs["shields"] = core.Attribute{Name: "shields", Base: shields, Min: 0}
-			}
-
-			units[i].Attributes = attrs
-			break
-		}
-	}
-
-	updateInSlice(combat.PlayerUnits)
-	updateInSlice(combat.EnemyUnits)
-	return combat
 }
 
 // updateUnitHP updates a unit's health/shields in a slice by ID.

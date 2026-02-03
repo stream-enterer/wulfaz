@@ -231,6 +231,8 @@ func ComputeAITargets(combat model.CombatModel, seed int64) Cmd {
 				// Target lowest HP ally
 				validAllies := GetValidAlliedTargets(combat.EnemyUnits)
 				targetID = SelectLowestHP(validAllies)
+			case entity.DieBlank:
+				// Already handled by continue above, but listed for exhaustiveness
 			}
 
 			if targetID != "" {

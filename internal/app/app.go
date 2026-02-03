@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"log"
-	"math/rand/v2"
 	"slices"
 	"strings"
 	"time"
@@ -33,8 +32,7 @@ const (
 // App implements ebiten.Game and drives the TEA runtime
 type App struct {
 	model         tea.Model
-	registry      *template.Registry // Immutable after init; for shop/rewards later
-	rng           *rand.Rand
+	registry      *template.Registry   // Immutable after init; for shop/rewards later
 	hitRegions    []renderer.HitRegion // Updated each frame for input handling
 	pendingTimers []pendingTimer       // Timers requested by commands
 	gameUI        *layout.GameUI       // 3-column UI layout
@@ -42,8 +40,6 @@ type App struct {
 
 // New creates a new App with units loaded from templates
 func New(seed int64) *App {
-	rng := rand.New(rand.NewPCG(uint64(seed), uint64(seed>>32)))
-
 	// Load templates
 	reg := template.NewRegistry()
 	if err := template.LoadUnitsFromDir("data/templates/units", reg); err != nil {
@@ -62,7 +58,6 @@ func New(seed int64) *App {
 			// F-155: PlayerRoster initialized below after App created
 		},
 		registry: reg,
-		rng:      rng,
 		gameUI:   layout.NewGameUI(renderer.GetFace()),
 	}
 
@@ -184,6 +179,8 @@ func (a *App) syncUIState() {
 					a.gameUI.SetUnlockButtonVisible(true)
 				}
 			}
+		case model.DicePhaseNone, model.DicePhaseRoundEnd:
+			// No hint during these phases
 		}
 		a.gameUI.SetHintText(hint)
 

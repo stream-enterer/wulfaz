@@ -31,11 +31,6 @@ func offsetY(y float32) float32 {
 	return y + float32(centerOffset.Y)
 }
 
-// offsetRect returns rectangle offset into center area
-func offsetRect(r image.Rectangle) image.Rectangle {
-	return r.Add(centerOffset)
-}
-
 const (
 	// Board layout
 	BoardSlots  = 10
