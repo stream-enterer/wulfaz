@@ -524,7 +524,9 @@ func RenderEbiten(screen *ebiten.Image, m tea.Model, centerRect image.Rectangle)
 	centerOffset = centerRect.Min
 	centerWidth = centerRect.Dx()
 
-	screen.Fill(colorBackground)
+	// Fill only the center area (not sidebars)
+	vector.FillRect(screen, float32(centerRect.Min.X), float32(centerRect.Min.Y),
+		float32(centerRect.Dx()), float32(centerRect.Dy()), colorBackground, false)
 
 	switch m.Phase {
 	case tea.PhaseMenu:
@@ -544,15 +546,19 @@ func RenderEbiten(screen *ebiten.Image, m tea.Model, centerRect image.Rectangle)
 }
 
 func renderMenu(screen *ebiten.Image) {
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-	DrawTextCentered(screen, "=== WULFAZ ===", w/2, h/2-20)
-	DrawTextCentered(screen, "Press SPACE to start", w/2, h/2+10)
+	// Center text in the center panel area
+	cx := centerOffset.X + centerWidth/2
+	cy := centerOffset.Y + screen.Bounds().Dy()/2
+	DrawTextCentered(screen, "=== WULFAZ ===", cx, cy-20)
+	DrawTextCentered(screen, "Press SPACE to start", cx, cy+10)
 }
 
 func renderGameOver(screen *ebiten.Image) {
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-	DrawTextCentered(screen, "=== GAME OVER ===", w/2, h/2-10)
-	DrawTextCentered(screen, "Press ESC to quit", w/2, h/2+20)
+	// Center text in the center panel area
+	cx := centerOffset.X + centerWidth/2
+	cy := centerOffset.Y + screen.Bounds().Dy()/2
+	DrawTextCentered(screen, "=== GAME OVER ===", cx, cy-10)
+	DrawTextCentered(screen, "Press ESC to quit", cx, cy+20)
 }
 
 func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
