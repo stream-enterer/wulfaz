@@ -27,10 +27,12 @@ type GameUI struct {
 	centerPanel *widget.Container
 
 	// Left sidebar text widgets
+	leftSidebar  *widget.Container
 	roundText    *widget.Text
 	keysText     *widget.Text
 	hintText     *widget.Text
 	unlockButton *widget.Button
+	buttonShown  bool
 
 	// Right sidebar
 	logText *widget.Text
@@ -90,13 +92,13 @@ func NewGameUI(face *text.Face) *GameUI {
 			}
 		}),
 	)
-	// Start hidden
-	g.unlockButton.GetWidget().Visibility = widget.Visibility_Hide
+	// Store reference to left sidebar for adding/removing button
+	g.leftSidebar = leftSidebar
 
 	leftSidebar.AddChild(g.roundText)
 	leftSidebar.AddChild(g.keysText)
 	leftSidebar.AddChild(g.hintText)
-	leftSidebar.AddChild(g.unlockButton)
+	// Button not added initially - will be added via SetUnlockButtonVisible
 
 	// Center panel - transparent passthrough
 	g.centerPanel = widget.NewContainer(
@@ -177,11 +179,15 @@ func (g *GameUI) GetCenterOffset() image.Point {
 	return g.CenterRect.Min
 }
 
-// SetUnlockButtonVisible shows or hides the unlock button
+// SetUnlockButtonVisible shows or hides the unlock button by adding/removing from container
 func (g *GameUI) SetUnlockButtonVisible(visible bool) {
-	if visible {
-		g.unlockButton.GetWidget().Visibility = widget.Visibility_Show
-	} else {
-		g.unlockButton.GetWidget().Visibility = widget.Visibility_Hide
+	if visible == g.buttonShown {
+		return
 	}
+	if visible {
+		g.leftSidebar.AddChild(g.unlockButton)
+	} else {
+		g.leftSidebar.RemoveChild(g.unlockButton)
+	}
+	g.buttonShown = visible
 }
