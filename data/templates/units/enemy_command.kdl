@@ -8,26 +8,10 @@ unit id="enemy_command" {
     }
     dice {
         die {
-            face "damage" 1
-            face "damage" 1
             face "damage" 2
             face "damage" 3
-            face "blank"
-            face "blank"
-        }
-        die {
-            face "shield" 1
-            face "shield" 1
             face "shield" 2
-            face "shield" 3
-            face "blank"
-            face "blank"
-        }
-        die {
-            face "heal" 1
-            face "heal" 1
             face "heal" 2
-            face "heal" 3
             face "blank"
             face "blank"
         }

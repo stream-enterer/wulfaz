@@ -56,16 +56,10 @@ const (
 	CommandGap        = 20            // Gap between board and command unit
 
 	// Dice box rendering
-	DieBoxSize   = 24
-	DieBoxMargin = 4
+	DieBoxSize = 24
 
 	// Die detail rendering
-	dieContentPadding         = 4 // Used in drawRedX for X positioning
-	commandDiceAreaYOffset    = 16
-	commandDiceTopYOffset     = 14
-	diagonalDiceMargin        = 15
-	diagonalDiceTopYOffset    = 20
-	diagonalDiceBottomYOffset = 20
+	dieContentPadding = 4 // Used in drawRedX for X positioning
 
 	// Text rendering
 	unitIDTruncateWidth = 80
@@ -81,15 +75,15 @@ const (
 )
 
 var (
-	colorBackground   = color.RGBA{30, 30, 50, 255}
-	colorPlayer       = color.RGBA{60, 100, 200, 255}
-	colorEnemy        = color.RGBA{200, 60, 60, 255}
-	colorOrangeLock   = color.RGBA{255, 165, 0, 255} // Locked die
-	colorGreenSelect  = color.RGBA{0, 255, 0, 255}   // Selected die
-	colorRedUsed      = color.RGBA{255, 0, 0, 255}   // Activated/used die
-	colorDieBox    = color.RGBA{40, 40, 40, 255} // Die background
-	colorGrayBlank = color.RGBA{40, 40, 40, 255} // Blank die border (#282828)
-	colorDeadUnit  = color.RGBA{60, 60, 60, 180} // F-124: Greyed out dead unit
+	colorBackground  = color.RGBA{30, 30, 50, 255}
+	colorPlayer      = color.RGBA{60, 100, 200, 255}
+	colorEnemy       = color.RGBA{200, 60, 60, 255}
+	colorOrangeLock  = color.RGBA{255, 165, 0, 255} // Locked die
+	colorGreenSelect = color.RGBA{0, 255, 0, 255}   // Selected die
+	colorRedUsed     = color.RGBA{255, 0, 0, 255}   // Activated/used die
+	colorDieBox      = color.RGBA{40, 40, 40, 255}  // Die background
+	colorGrayBlank   = color.RGBA{40, 40, 40, 255}  // Blank die border (#282828)
+	colorDeadUnit    = color.RGBA{60, 60, 60, 180}  // F-124: Greyed out dead unit
 
 	// Wave 7: Arrow colors
 	colorArrowDamage = color.RGBA{255, 80, 80, 220}  // Red
@@ -154,31 +148,30 @@ func separateCommandUnit(units []entity.Unit) (*entity.Unit, []entity.Unit) {
 // getDieState returns die outline state: 0=normal, 1=locked, 2=selected, 3=activated, 4=blank
 // Priority: activated > selected > locked > blank > normal
 // Exception: during execution phase, blank dice always show blank state (not locked)
-func getDieState(unitID string, dieIdx int, combat model.CombatModel, isPlayerCmd bool) int {
-	rolled := combat.RolledDice[unitID]
-	if rolled == nil || dieIdx >= len(rolled) {
+func getDieState(unitID string, combat model.CombatModel, isPlayerUnit bool) int {
+	rolled, exists := combat.RolledDice[unitID]
+	if !exists {
 		return 0
 	}
-	rd := rolled[dieIdx]
 
 	// Check activated first (highest priority)
-	if activated := combat.ActivatedDice[unitID]; activated != nil && dieIdx < len(activated) && activated[dieIdx] {
+	if combat.ActivatedDice[unitID] {
 		return 3 // red
 	}
-	// Check selected (only for player command)
-	if isPlayerCmd && combat.SelectedUnitID == unitID && combat.SelectedDieIndex == dieIdx {
+	// Check selected (only for player units)
+	if isPlayerUnit && combat.SelectedUnitID == unitID {
 		return 2 // green
 	}
 	// During execution/round-end phases, blank dice should show blank state (not locked orange)
-	if (combat.DicePhase == model.DicePhaseExecution || combat.DicePhase == model.DicePhaseRoundEnd) && rd.Type() == entity.DieBlank {
+	if (combat.DicePhase == model.DicePhaseExecution || combat.DicePhase == model.DicePhaseRoundEnd) && rolled.Type() == entity.DieBlank {
 		return 4 // gray for blank
 	}
 	// Check locked
-	if rd.Locked {
+	if rolled.Locked {
 		return 1 // orange
 	}
 	// Blank faces get gray state
-	if rd.Type() == entity.DieBlank {
+	if rolled.Type() == entity.DieBlank {
 		return 4 // gray for blank
 	}
 	return 0 // white
@@ -228,73 +221,24 @@ func drawRedX(screen *ebiten.Image, x, y float32) {
 	vector.StrokeLine(screen, x+DieBoxSize-dieContentPadding, y+dieContentPadding, x+dieContentPadding, y+DieBoxSize-dieContentPadding, 2, colorRedUsed, false)
 }
 
-// drawCommandDice draws 3-die pyramid for command unit, returns hit regions.
-func drawCommandDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY float32, combat model.CombatModel, isPlayerCmd bool) []HitRegion {
+// drawUnitDice draws single centered die for any unit.
+func drawUnitDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY, cardW, cardH float32, combat model.CombatModel, isPlayerUnit bool) []HitRegion {
 	var regions []HitRegion
-	rolled := combat.RolledDice[unit.ID]
-	if len(rolled) == 0 {
+	if !unit.HasDie {
 		return regions
 	}
 
-	// Pyramid layout centered in 128x112 card
-	diceAreaY := cardY + commandDiceAreaYOffset
-	topDieX := cardX + (CommandUnitWidth-DieBoxSize)/2
-	topDieY := diceAreaY + commandDiceTopYOffset
-	bottomLeftX := cardX + (CommandUnitWidth-2*DieBoxSize-DieBoxMargin)/2
-	bottomRightX := bottomLeftX + DieBoxSize + DieBoxMargin
-	bottomY := topDieY + DieBoxSize + DieBoxMargin
-
-	positions := []struct{ x, y float32 }{
-		{topDieX, topDieY},      // Die 0: top
-		{bottomLeftX, bottomY},  // Die 1: bottom-left
-		{bottomRightX, bottomY}, // Die 2: bottom-right
-	}
-
-	for i, pos := range positions {
-		if i >= len(rolled) {
-			break
-		}
-		state := getDieState(unit.ID, i, combat, isPlayerCmd)
-		rect := drawDieBox(screen, pos.x, pos.y, rolled[i].CurrentFace(), state)
-		regions = append(regions, HitRegion{Rect: rect, Type: "die", UnitID: unit.ID, DieIndex: i})
-	}
-
-	return regions
-}
-
-// drawUnitDice draws dice for non-command units (small=1, medium=2).
-func drawUnitDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY, cardW float32, combat model.CombatModel) []HitRegion {
-	var regions []HitRegion
-	rolled := combat.RolledDice[unit.ID]
-	if len(rolled) == 0 {
+	rolled, exists := combat.RolledDice[unit.ID]
+	if !exists {
 		return regions
 	}
 
-	cw := GetCombatWidth(unit)
-
-	if cw == 1 && len(rolled) >= 1 {
-		// Small unit: 1 die centered
-		dieX := cardX + (cardW-DieBoxSize)/2
-		dieY := cardY + (SlotHeight-DieBoxSize)/2
-		state := getDieState(unit.ID, 0, combat, false)
-		rect := drawDieBox(screen, dieX, dieY, rolled[0].CurrentFace(), state)
-		regions = append(regions, HitRegion{Rect: rect, Type: "die", UnitID: unit.ID, DieIndex: 0})
-	} else if cw >= 2 && len(rolled) >= 2 {
-		// Medium+ unit: 2 dice diagonal
-		margin := float32(diagonalDiceMargin)
-		die1X := cardX + margin
-		die1Y := cardY + diagonalDiceTopYOffset
-		die2X := cardX + cardW - margin - DieBoxSize
-		die2Y := cardY + SlotHeight - diagonalDiceBottomYOffset - DieBoxSize
-
-		state0 := getDieState(unit.ID, 0, combat, false)
-		rect0 := drawDieBox(screen, die1X, die1Y, rolled[0].CurrentFace(), state0)
-		regions = append(regions, HitRegion{Rect: rect0, Type: "die", UnitID: unit.ID, DieIndex: 0})
-
-		state1 := getDieState(unit.ID, 1, combat, false)
-		rect1 := drawDieBox(screen, die2X, die2Y, rolled[1].CurrentFace(), state1)
-		regions = append(regions, HitRegion{Rect: rect1, Type: "die", UnitID: unit.ID, DieIndex: 1})
-	}
+	// Single die centered in card
+	dieX := cardX + (cardW-DieBoxSize)/2
+	dieY := cardY + (cardH-DieBoxSize)/2
+	state := getDieState(unit.ID, combat, isPlayerUnit)
+	rect := drawDieBox(screen, dieX, dieY, rolled.CurrentFace(), state)
+	regions = append(regions, HitRegion{Rect: rect, Type: "die", UnitID: unit.ID, DieIndex: 0})
 
 	return regions
 }
@@ -488,7 +432,7 @@ func drawBoardFrame(screen *ebiten.Image, x, y float32) {
 }
 
 // drawUnitsOnBoard renders units left-aligned within the board and returns hit regions.
-func drawUnitsOnBoard(screen *ebiten.Image, units []entity.Unit, boardX, boardY float32, c color.RGBA, combat model.CombatModel) []HitRegion {
+func drawUnitsOnBoard(screen *ebiten.Image, units []entity.Unit, boardX, boardY float32, c color.RGBA, combat model.CombatModel, isPlayerSide bool) []HitRegion {
 	var regions []HitRegion
 	currentX := boardX + float32(BoardMargin)
 	unitY := boardY + float32(BoardMargin)
@@ -502,8 +446,8 @@ func drawUnitsOnBoard(screen *ebiten.Image, units []entity.Unit, boardX, boardY 
 		unitRect := image.Rect(int(currentX), int(unitY), int(currentX+w), int(unitY)+SlotHeight)
 		regions = append(regions, HitRegion{Rect: unitRect, Type: "unit", UnitID: unit.ID, DieIndex: -1})
 
-		// Draw dice on unit
-		diceRegions := drawUnitDice(screen, unit, currentX, unitY, w, combat)
+		// Draw die on unit
+		diceRegions := drawUnitDice(screen, unit, currentX, unitY, w, SlotHeight, combat, isPlayerSide)
 		regions = append(regions, diceRegions...)
 
 		currentX += w + UnitGap
@@ -575,18 +519,18 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 		cmdY := offsetY(float32(enemyBoardY - CommandGap - CommandUnitHeight))
 		rect := drawCommandUnit(screen, *enemyCmd, colorEnemy, cmdX, cmdY)
 		regions = append(regions, HitRegion{Rect: rect, Type: "unit", UnitID: enemyCmd.ID, DieIndex: -1})
-		diceRegions := drawCommandDice(screen, *enemyCmd, cmdX, cmdY, combat, false)
+		diceRegions := drawUnitDice(screen, *enemyCmd, cmdX, cmdY, CommandUnitWidth, CommandUnitHeight, combat, false)
 		regions = append(regions, diceRegions...)
 	}
 
 	// Enemy board
 	drawBoardFrame(screen, boardX, offsetY(enemyBoardY))
-	boardRegions := drawUnitsOnBoard(screen, enemyBoard, boardX, offsetY(enemyBoardY), colorEnemy, combat)
+	boardRegions := drawUnitsOnBoard(screen, enemyBoard, boardX, offsetY(enemyBoardY), colorEnemy, combat, false)
 	regions = append(regions, boardRegions...)
 
 	// Player board
 	drawBoardFrame(screen, boardX, offsetY(playerBoardY))
-	boardRegions = drawUnitsOnBoard(screen, playerBoard, boardX, offsetY(playerBoardY), colorPlayer, combat)
+	boardRegions = drawUnitsOnBoard(screen, playerBoard, boardX, offsetY(playerBoardY), colorPlayer, combat, true)
 	regions = append(regions, boardRegions...)
 
 	// Player command unit BELOW player board
@@ -595,8 +539,8 @@ func renderCombat(screen *ebiten.Image, combat model.CombatModel) []HitRegion {
 		cmdY := offsetY(float32(playerBoardY + SlotHeight + 2*BoardMargin + CommandGap))
 		rect := drawCommandUnit(screen, *playerCmd, colorPlayer, cmdX, cmdY)
 		regions = append(regions, HitRegion{Rect: rect, Type: "unit", UnitID: playerCmd.ID, DieIndex: -1})
-		diceRegions := drawCommandDice(screen, *playerCmd, cmdX, cmdY, combat, true)
-		regions = append(regions, diceRegions...) // Die regions added AFTER unit region
+		diceRegions := drawUnitDice(screen, *playerCmd, cmdX, cmdY, CommandUnitWidth, CommandUnitHeight, combat, true)
+		regions = append(regions, diceRegions...)
 	}
 
 	// Draw targeting arrows (Wave 7)

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"slices"
 	"time"
 
 	"wulfaz/internal/core"
@@ -154,18 +153,14 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleDiceEffectApplied(msg)
 	case PlayerCommandDone:
 		return m.handlePlayerCommandDone(msg)
-	case EnemyCommandAdvanceClicked:
-		return m.handleEnemyCommandAdvanceClicked(msg)
 	case DicePhaseAdvanced:
 		return m.handleDicePhaseAdvanced(msg)
 
-	// Wave 3: Combat phase messages
-	case EnemyCommandResolved:
-		return m.handleEnemyCommandResolved(msg)
-	case ExecutionStarted:
-		return m.handleExecutionStarted(msg)
-	case PositionResolved:
-		return m.handlePositionResolved(msg)
+	// AI targeting and execution
+	case AITargetsComputed:
+		return m.handleAITargetsComputed(msg)
+	case AllAttacksResolved:
+		return m.handleAllAttacksResolved(msg)
 	case ExecutionComplete:
 		return m.handleExecutionComplete(msg)
 	case RoundEnded:
@@ -579,7 +574,8 @@ func applyModifications(unit entity.Unit, mods ModifiedUnit) entity.Unit {
 		Parts:      unit.Parts,
 		Triggers:   unit.Triggers,
 		Abilities:  unit.Abilities,
-		Dice:       unit.Dice,
+		Die:        unit.Die,
+		HasDie:     unit.HasDie,
 		Pilot:      unit.Pilot,
 		HasPilot:   unit.HasPilot,
 		Position:   unit.Position,
@@ -624,9 +620,8 @@ func (m Model) isValidDiceInteraction(unitID string, requiredPhase model.DicePha
 	if m.Combat.DicePhase != requiredPhase {
 		return false
 	}
-	// Validate unit is player's command unit
-	cmd := FindPlayerCommandUnit(m.Combat)
-	return cmd != nil && cmd.ID == unitID
+	// Validate unit is a player unit
+	return m.Combat.IsPlayerUnit(unitID)
 }
 
 // findLowestHPAliveUnit returns ID of alive unit with lowest HP (or "").
@@ -658,46 +653,6 @@ func findUnitByID(combat model.CombatModel, unitID string) *entity.Unit {
 		}
 	}
 	return nil
-}
-
-// buildFiringOrder creates left-to-right position list.
-// Excludes Position < 0 (off-board command units) and dead units.
-func buildFiringOrder(combat model.CombatModel) []model.FiringPosition {
-	// Map position -> units at that position
-	playerAtPos := make(map[int][]string)
-	enemyAtPos := make(map[int][]string)
-	positionSet := make(map[int]bool)
-
-	for _, u := range combat.PlayerUnits {
-		if u.Position >= 0 && u.IsAlive() {
-			playerAtPos[u.Position] = append(playerAtPos[u.Position], u.ID)
-			positionSet[u.Position] = true
-		}
-	}
-	for _, u := range combat.EnemyUnits {
-		if u.Position >= 0 && u.IsAlive() {
-			enemyAtPos[u.Position] = append(enemyAtPos[u.Position], u.ID)
-			positionSet[u.Position] = true
-		}
-	}
-
-	// Sort positions left-to-right
-	var positions []int
-	for pos := range positionSet {
-		positions = append(positions, pos)
-	}
-	slices.Sort(positions)
-
-	// Build firing order
-	var order []model.FiringPosition
-	for _, pos := range positions {
-		order = append(order, model.FiringPosition{
-			Position:    pos,
-			PlayerUnits: playerAtPos[pos],
-			EnemyUnits:  enemyAtPos[pos],
-		})
-	}
-	return order
 }
 
 // buildHPSnapshot creates map of unitID -> {health, shields} for simultaneous resolution.
@@ -813,43 +768,41 @@ func updateUnitHP(units []entity.Unit, unitID string, newHP, newShields int) {
 	}
 }
 
-// allCommandDiceActivated checks if all player command dice are activated.
+// allPlayerDiceActivated checks if all player unit dice are activated.
 // Blank faces are skipped - they don't need activation.
-func allCommandDiceActivated(combat model.CombatModel) bool {
-	cmd := FindPlayerCommandUnit(combat)
-	if cmd == nil {
-		return true
-	}
-	rolled := combat.RolledDice[cmd.ID]
-	activated := combat.ActivatedDice[cmd.ID]
-	if rolled == nil {
-		return true
-	}
-	for i, rd := range rolled {
-		// Skip blank faces - they don't need activation
-		if rd.Type() == entity.DieBlank {
+func allPlayerDiceActivated(combat model.CombatModel) bool {
+	for _, u := range combat.PlayerUnits {
+		if !u.IsAlive() || !u.HasDie {
 			continue
 		}
-		if activated == nil || i >= len(activated) || !activated[i] {
+		rolled, exists := combat.RolledDice[u.ID]
+		if !exists {
+			continue
+		}
+		// Skip blank faces - they don't need activation
+		if rolled.Type() == entity.DieBlank {
+			continue
+		}
+		activated := combat.ActivatedDice[u.ID]
+		if !activated {
 			return false
 		}
 	}
 	return true
 }
 
-// AllCommandDiceLocked checks if all player command dice are locked.
+// AllPlayerDiceLocked checks if all player unit dice are locked.
 // Exported for use by renderer and app packages.
-func AllCommandDiceLocked(combat model.CombatModel) bool {
-	cmd := FindPlayerCommandUnit(combat)
-	if cmd == nil {
-		return true
-	}
-	rolled := combat.RolledDice[cmd.ID]
-	if len(rolled) == 0 {
-		return true // No dice = trivially locked
-	}
-	for _, rd := range rolled {
-		if !rd.Locked {
+func AllPlayerDiceLocked(combat model.CombatModel) bool {
+	for _, u := range combat.PlayerUnits {
+		if !u.IsAlive() || !u.HasDie {
+			continue
+		}
+		rolled, exists := combat.RolledDice[u.ID]
+		if !exists {
+			continue
+		}
+		if !rolled.Locked {
 			return false
 		}
 	}
@@ -863,43 +816,35 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 	combat.Round = msg.Round
 	combat.DicePhase = model.DicePhasePreview
 	combat.RerollsRemaining = model.DefaultRerollsPerRound
-	combat.RolledDice = make(map[string][]entity.RolledDie)
-	combat.ActivatedDice = make(map[string][]bool)
+	combat.RolledDice = make(map[string]entity.RolledDie)
+	combat.ActivatedDice = make(map[string]bool)
+	combat.PlayerTargets = make(map[string]string)
+	combat.EnemyTargets = make(map[string]string)
 	combat.SelectedUnitID = ""
-	combat.SelectedDieIndex = -1
 	combat.FloatingTexts = nil
 
 	// Announce new round in combat log
 	combat.Log = appendLogEntry(combat.Log, fmt.Sprintf("--- Round %d ---", msg.Round))
 
-	// Convert roll indices to RolledDie for all units
+	// Convert roll indices to RolledDie for all units (single die per unit)
 	allUnits := getAllUnits(combat)
 	for _, unit := range allUnits {
-		rolls, ok := msg.UnitRolls[unit.ID]
-		if !ok || len(unit.Dice) == 0 {
+		faceIdx, ok := msg.UnitRolls[unit.ID]
+		if !ok || !unit.HasDie || len(unit.Die.Faces) == 0 {
 			continue
 		}
-		rolled := make([]entity.RolledDie, len(unit.Dice))
-		for i, die := range unit.Dice {
-			faceIdx := 0
-			if i < len(rolls) {
-				faceIdx = rolls[i]
-			}
-			rolled[i] = entity.RolledDie{
-				Faces:     die.Faces, // Share reference (immutable template data)
-				FaceIndex: faceIdx,
-				Locked:    false,
-			}
+		combat.RolledDice[unit.ID] = entity.RolledDie{
+			Faces:     unit.Die.Faces, // Share reference (immutable template data)
+			FaceIndex: faceIdx,
+			Locked:    false,
 		}
-		combat.RolledDice[unit.ID] = rolled
-		combat.ActivatedDice[unit.ID] = make([]bool, len(unit.Dice))
+		combat.ActivatedDice[unit.ID] = false
 	}
 
-	// Compute all preview arrows: player (solid) and enemy (dashed)
-	combat.ActiveArrows = computeAllPreviewArrows(combat)
-
 	m.Combat = combat
-	return m, nil
+
+	// Compute AI targets for enemy units
+	return m, ComputeAITargets(m.Combat, m.Seed+int64(msg.Round)*7919)
 }
 
 func (m Model) handlePreviewDone(_ PreviewDone) (Model, Cmd) {
@@ -928,8 +873,9 @@ func (m Model) handleDieLockToggled(msg DieLockToggled) (Model, Cmd) {
 	combat := m.Combat
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
 
-	if dice, ok := combat.RolledDice[msg.UnitID]; ok && msg.DieIndex < len(dice) {
-		dice[msg.DieIndex].Locked = !dice[msg.DieIndex].Locked
+	if rolled, ok := combat.RolledDice[msg.UnitID]; ok {
+		rolled.Locked = !rolled.Locked
+		combat.RolledDice[msg.UnitID] = rolled
 	}
 
 	m.Combat = combat
@@ -937,10 +883,13 @@ func (m Model) handleDieLockToggled(msg DieLockToggled) (Model, Cmd) {
 }
 
 func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
-	if !m.isValidDiceInteraction(msg.UnitID, model.DicePhasePlayerCommand) {
+	// Validate game state
+	if m.Phase != PhaseCombat || m.Combat.Phase != model.CombatActive {
 		return m, nil
 	}
-	// Keep reroll count check (not part of isValidDiceInteraction)
+	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
 	if m.Combat.RerollsRemaining <= 0 {
 		return m, nil
 	}
@@ -949,17 +898,21 @@ func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
 	combat.RerollsRemaining--
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
 
-	dice := combat.RolledDice[msg.UnitID]
-	for i := range dice {
-		if !dice[i].Locked && i < len(msg.Results) {
-			dice[i].FaceIndex = msg.Results[i]
+	// Apply new face indices for all rerolled dice
+	for unitID, newFaceIdx := range msg.Results {
+		if rolled, ok := combat.RolledDice[unitID]; ok {
+			rolled.FaceIndex = newFaceIdx
+			combat.RolledDice[unitID] = rolled
 		}
 	}
 
-	// Auto-lock all dice if no rerolls remaining
+	// Auto-lock all player dice if no rerolls remaining
 	if combat.RerollsRemaining == 0 {
-		for i := range dice {
-			dice[i].Locked = true
+		for _, u := range combat.PlayerUnits {
+			if rolled, ok := combat.RolledDice[u.ID]; ok {
+				rolled.Locked = true
+				combat.RolledDice[u.ID] = rolled
+			}
 		}
 	}
 
@@ -971,20 +924,18 @@ func (m Model) handleDieSelected(msg DieSelected) (Model, Cmd) {
 	if !m.isValidDiceInteraction(msg.UnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
-	// Validate die index is within bounds
-	rolled := m.Combat.RolledDice[msg.UnitID]
-	if msg.DieIndex < 0 || msg.DieIndex >= len(rolled) {
+	// Check unit has a die
+	_, exists := m.Combat.RolledDice[msg.UnitID]
+	if !exists {
 		return m, nil
 	}
 	// Check die not already activated
-	activated := m.Combat.ActivatedDice[msg.UnitID]
-	if activated != nil && msg.DieIndex < len(activated) && activated[msg.DieIndex] {
+	if m.Combat.ActivatedDice[msg.UnitID] {
 		return m, nil
 	}
 
 	combat := m.Combat
 	combat.SelectedUnitID = msg.UnitID
-	combat.SelectedDieIndex = msg.DieIndex
 	m.Combat = combat
 	return m, nil
 }
@@ -1000,7 +951,6 @@ func (m Model) handleDieDeselected(_ DieDeselected) (Model, Cmd) {
 
 	combat := m.Combat
 	combat.SelectedUnitID = ""
-	combat.SelectedDieIndex = -1
 	m.Combat = combat
 	return m, nil
 }
@@ -1009,19 +959,18 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 	if !m.isValidDiceInteraction(msg.SourceUnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
-	// Validate source is selected die
-	if msg.SourceUnitID != m.Combat.SelectedUnitID || msg.DieIndex != m.Combat.SelectedDieIndex {
+	// Validate source is selected unit
+	if msg.SourceUnitID != m.Combat.SelectedUnitID {
 		return m, nil
 	}
 
-	rolled := m.Combat.RolledDice[msg.SourceUnitID]
-	if msg.DieIndex >= len(rolled) {
+	rolled, exists := m.Combat.RolledDice[msg.SourceUnitID]
+	if !exists {
 		return m, nil
 	}
-	die := rolled[msg.DieIndex]
 
 	// Block blank face activation
-	if die.Type() == entity.DieBlank {
+	if rolled.Type() == entity.DieBlank {
 		return m, nil
 	}
 
@@ -1031,26 +980,41 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 	targetIsEnemy := m.Combat.IsEnemyUnit(msg.TargetUnitID)
 	targetIsPlayer := m.Combat.IsPlayerUnit(msg.TargetUnitID)
 
-	if die.Type() == entity.DieDamage && !targetIsEnemy {
-		return m, nil // Invalid: damage must target enemy
+	if rolled.Type() == entity.DieDamage {
+		if !targetIsEnemy {
+			return m, nil // Invalid: damage must target enemy
+		}
+		// F-167: Validate target can be attacked (command only when all regular dead)
+		targetUnit := findUnitByID(m.Combat, msg.TargetUnitID)
+		if targetUnit != nil && !CanTargetUnit(*targetUnit, m.Combat.EnemyUnits) {
+			return m, nil
+		}
 	}
-	if (die.Type() == entity.DieShield || die.Type() == entity.DieHeal) && !targetIsPlayer {
+	if (rolled.Type() == entity.DieShield || rolled.Type() == entity.DieHeal) && !targetIsPlayer {
 		return m, nil // Invalid: shield/heal must target friendly
 	}
 
-	// Mark die as activated, clear selection
+	// Mark die as activated, store target, clear selection
 	combat := m.Combat
 	combat.ActivatedDice = entity.CopyActivatedMap(combat.ActivatedDice)
-	if combat.ActivatedDice[msg.SourceUnitID] == nil {
-		combat.ActivatedDice[msg.SourceUnitID] = make([]bool, len(rolled))
-	}
-	combat.ActivatedDice[msg.SourceUnitID][msg.DieIndex] = true
+	combat.PlayerTargets = entity.CopyTargetMap(combat.PlayerTargets)
+	combat.ActivatedDice[msg.SourceUnitID] = true
+	combat.PlayerTargets[msg.SourceUnitID] = msg.TargetUnitID
 	combat.SelectedUnitID = ""
-	combat.SelectedDieIndex = -1
 	m.Combat = combat
 
-	// Return Cmd to apply effect
-	return m, ApplyDiceEffect(msg.SourceUnitID, msg.TargetUnitID, die.Type(), die.Value(), m.Combat, msg.Timestamp)
+	// For damage, only store target - don't apply yet (simultaneous resolution)
+	// For shield/heal, apply immediately
+	if rolled.Type() == entity.DieDamage {
+		// Auto-advance when all player dice are activated
+		if allPlayerDiceActivated(m.Combat) {
+			return m, func() Msg { return PlayerCommandDone{} }
+		}
+		return m, nil
+	}
+
+	// Return Cmd to apply shield/heal effect immediately
+	return m, ApplyDiceEffect(msg.SourceUnitID, msg.TargetUnitID, rolled.Type(), rolled.Value(), m.Combat, msg.Timestamp)
 }
 
 func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
@@ -1146,8 +1110,8 @@ func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
 
 	m.Combat = combat
 
-	// Auto-advance when all command dice are activated (F-226)
-	if combat.DicePhase == model.DicePhasePlayerCommand && allCommandDiceActivated(m.Combat) {
+	// Auto-advance when all player dice are activated
+	if combat.DicePhase == model.DicePhasePlayerCommand && allPlayerDiceActivated(m.Combat) {
 		return m, func() Msg { return PlayerCommandDone{} }
 	}
 
@@ -1171,26 +1135,12 @@ func (m Model) handlePlayerCommandDone(_ PlayerCommandDone) (Model, Cmd) {
 	}
 
 	combat := m.Combat
-	combat.DicePhase = model.DicePhaseAwaitingEnemyCommand
+	combat.DicePhase = model.DicePhaseExecution
 	combat.SelectedUnitID = ""
-	combat.SelectedDieIndex = -1
 	m.Combat = combat
 
-	// Wait for player click before triggering enemy command
+	// Wait for player click to execute attacks
 	return m, nil
-}
-
-func (m Model) handleEnemyCommandAdvanceClicked(_ EnemyCommandAdvanceClicked) (Model, Cmd) {
-	if m.Combat.DicePhase != model.DicePhaseAwaitingEnemyCommand {
-		return m, nil
-	}
-
-	combat := m.Combat
-	combat.DicePhase = model.DicePhaseEnemyCommand
-	m.Combat = combat
-
-	// Trigger enemy command AI
-	return m, ExecuteEnemyCommand(m.Combat)
 }
 
 func (m Model) handleDicePhaseAdvanced(msg DicePhaseAdvanced) (Model, Cmd) {
@@ -1200,108 +1150,20 @@ func (m Model) handleDicePhaseAdvanced(msg DicePhaseAdvanced) (Model, Cmd) {
 	return m, nil
 }
 
-// ===== Wave 3: Combat Phase Handlers =====
+// ===== AI Targeting and Execution Handlers =====
 
-func (m Model) handleEnemyCommandResolved(msg EnemyCommandResolved) (Model, Cmd) {
+func (m Model) handleAITargetsComputed(msg AITargetsComputed) (Model, Cmd) {
 	combat := m.Combat
-	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
-	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
+	combat.EnemyTargets = entity.CopyTargetMap(msg.Targets)
 
-	// Track shield absorption for logging
-	type damageResult struct {
-		action         EnemyDiceAction
-		shieldAbsorbed int
-		healthDamage   int
-	}
-	var results []damageResult
+	// Build preview arrows showing AI intent
+	combat.ActiveArrows = computeAllPreviewArrows(combat)
 
-	// Apply each enemy action (damage/shield/heal)
-	for _, action := range msg.Actions {
-		// F-192: Skip if target died from earlier enemy dice this phase
-		target := findUnitByID(combat, action.TargetUnitID)
-		if target == nil || !target.IsAlive() {
-			combat.Log = appendLogEntry(combat.Log,
-				fmt.Sprintf("Enemy: %s skipped (target dead)", action.SourceUnitID))
-			continue
-		}
-
-		// Capture pre-state for damage logging
-		var shieldAbsorbed, healthDamage int
-		if action.Effect == entity.DieDamage {
-			oldShields := 0
-			if s, ok := target.Attributes["shields"]; ok {
-				oldShields = s.Base
-			}
-			oldHealth := 0
-			if h, ok := target.Attributes["health"]; ok {
-				oldHealth = h.Base
-			}
-
-			combat = applyDiceEffectToCombat(combat, action.TargetUnitID,
-				action.Effect, action.Value)
-
-			// Calculate what was absorbed
-			newTarget := findUnitByID(combat, action.TargetUnitID)
-			if newTarget != nil {
-				newShields := 0
-				if s, ok := newTarget.Attributes["shields"]; ok {
-					newShields = s.Base
-				}
-				newHealth := 0
-				if h, ok := newTarget.Attributes["health"]; ok {
-					newHealth = h.Base
-				}
-				shieldAbsorbed = oldShields - newShields
-				healthDamage = oldHealth - newHealth
-			}
-		} else {
-			combat = applyDiceEffectToCombat(combat, action.TargetUnitID,
-				action.Effect, action.Value)
-		}
-		results = append(results, damageResult{action, shieldAbsorbed, healthDamage})
-	}
-
-	// Add to combat log with shield absorption details
-	var logEntries []string
-	for _, r := range results {
-		if r.action.Effect == entity.DieDamage && r.shieldAbsorbed > 0 {
-			logEntries = append(logEntries, fmt.Sprintf("Enemy: %s -> %s: %d dmg (%d absorbed, %d to health)",
-				r.action.SourceUnitID, r.action.TargetUnitID, r.action.Value, r.shieldAbsorbed, r.healthDamage))
-		} else {
-			logEntries = append(logEntries, fmt.Sprintf("Enemy: %s -> %s: %s %d",
-				r.action.SourceUnitID, r.action.TargetUnitID, r.action.Effect, r.action.Value))
-		}
-	}
-	combat.Log = appendLogEntries(combat.Log, logEntries)
-
-	combat.DicePhase = model.DicePhaseExecution
 	m.Combat = combat
-
-	// Check if player command died from enemy dice
-	if victor := m.checkCombatEnd(); victor != VictorNone {
-		return m.applyCombatEnd()
-	}
-
-	return m, ExecuteExecution(m.Combat)
-}
-
-func (m Model) handleExecutionStarted(msg ExecutionStarted) (Model, Cmd) {
-	combat := m.Combat
-	combat.FiringOrder = msg.FiringOrder
-	combat.CurrentFiringIndex = 0
-	combat.DicePhase = model.DicePhaseExecution
-	combat.ActiveArrows = nil // No arrows during execution
-	m.Combat = combat
-
-	if len(msg.FiringOrder) == 0 {
-		return m, func() Msg { return ExecutionComplete{} }
-	}
-
-	// Wait for player click to advance
 	return m, nil
 }
 
-func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
+func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
 	combat := m.Combat
 	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
 	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
@@ -1316,8 +1178,6 @@ func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
 		combat.FloatingTexts = append(combat.FloatingTexts, texts...)
 	}
 
-	combat.CurrentFiringIndex++
-
 	// Log attacks with shield absorption details
 	var logEntries []string
 	for _, atk := range msg.Attacks {
@@ -1327,27 +1187,25 @@ func (m Model) handlePositionResolved(msg PositionResolved) (Model, Cmd) {
 		}
 		if atk.ShieldAbsorbed > 0 {
 			healthDmg := atk.Damage - atk.ShieldAbsorbed
-			logEntries = append(logEntries, fmt.Sprintf("Pos %d: %s -> %s: %d dmg (%d absorbed, %d to health)%s",
-				msg.Position, atk.AttackerID, atk.TargetID, atk.Damage, atk.ShieldAbsorbed, healthDmg, status))
-		} else {
-			logEntries = append(logEntries, fmt.Sprintf("Pos %d: %s -> %s: %d dmg%s",
-				msg.Position, atk.AttackerID, atk.TargetID, atk.Damage, status))
+			logEntries = append(logEntries, fmt.Sprintf("%s -> %s: %d dmg (%d absorbed, %d to health)%s",
+				atk.AttackerID, atk.TargetID, atk.Damage, atk.ShieldAbsorbed, healthDmg, status))
+		} else if atk.Damage > 0 {
+			logEntries = append(logEntries, fmt.Sprintf("%s -> %s: %d dmg%s",
+				atk.AttackerID, atk.TargetID, atk.Damage, status))
 		}
 	}
 	combat.Log = appendLogEntries(combat.Log, logEntries)
 
+	// Move to round end
+	combat.DicePhase = model.DicePhaseRoundEnd
 	m.Combat = combat
 
-	// Check victory immediately (will show texts during pause)
+	// Check victory
 	if victor := m.checkCombatEnd(); victor != VictorNone {
-		// Set phase to RoundEnd to prevent multiple timer starts from clicks
-		combat.DicePhase = model.DicePhaseRoundEnd
-		m.Combat = combat
 		return m, StartTimer(TimerRoundEnd, RoundEndPause)
 	}
 
-	// Wait for next click
-	return m, nil
+	return m, StartTimer(TimerRoundEnd, RoundEndPause)
 }
 
 // formatAttackTexts creates FloatingText entries for an attack.
@@ -1434,8 +1292,8 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 
 	// Reset phase state
 	combat.DicePhase = model.DicePhaseNone
-	combat.FiringOrder = nil
-	combat.CurrentFiringIndex = 0
+	combat.PlayerTargets = nil
+	combat.EnemyTargets = nil
 
 	m.Combat = combat
 
@@ -1467,21 +1325,19 @@ func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
 		return m, nil
 	}
 
-	cmd := FindPlayerCommandUnit(m.Combat)
-	if cmd == nil {
-		return m, nil
-	}
-
 	combat := m.Combat
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
+	combat.ActivatedDice = entity.CopyActivatedMap(combat.ActivatedDice)
+	combat.PlayerTargets = make(map[string]string)
 	combat.SelectedUnitID = ""
-	combat.SelectedDieIndex = -1
 
-	// Unlock all dice
-	if dice, ok := combat.RolledDice[cmd.ID]; ok {
-		for i := range dice {
-			dice[i].Locked = false
+	// Unlock all player dice and clear activated state
+	for _, u := range combat.PlayerUnits {
+		if rolled, ok := combat.RolledDice[u.ID]; ok {
+			rolled.Locked = false
+			combat.RolledDice[u.ID] = rolled
 		}
+		combat.ActivatedDice[u.ID] = false
 	}
 
 	m.Combat = combat
@@ -1505,7 +1361,7 @@ func (m Model) handleTimerFired(msg TimerFired) (Model, Cmd) {
 	return m, nil
 }
 
-// handleExecutionAdvanceClicked advances execution by one position on click.
+// handleExecutionAdvanceClicked executes all attacks simultaneously on click.
 func (m Model) handleExecutionAdvanceClicked(msg ExecutionAdvanceClicked) (Model, Cmd) {
 	if m.Combat.DicePhase != model.DicePhaseExecution {
 		return m, nil
@@ -1514,19 +1370,10 @@ func (m Model) handleExecutionAdvanceClicked(msg ExecutionAdvanceClicked) (Model
 
 	// Prune expired floating texts
 	combat.FloatingTexts = pruneExpiredTexts(combat.FloatingTexts, msg.Timestamp)
-
-	// Check if all positions resolved
-	if combat.CurrentFiringIndex >= len(combat.FiringOrder) {
-		// Set phase to RoundEnd to prevent multiple timer starts from clicks
-		combat.DicePhase = model.DicePhaseRoundEnd
-		m.Combat = combat
-		return m, StartTimer(TimerRoundEnd, RoundEndPause)
-	}
-
-	// Resolve current position
-	pos := combat.FiringOrder[combat.CurrentFiringIndex]
 	m.Combat = combat
-	return m, ResolvePosition(pos, combat, msg.Timestamp)
+
+	// Execute all attacks simultaneously
+	return m, ExecuteAllAttacks(m.Combat, msg.Timestamp)
 }
 
 // pruneExpiredTexts removes floating texts older than CombatTextDuration.
@@ -1548,79 +1395,40 @@ func computeAllPreviewArrows(combat model.CombatModel) []model.TargetingArrow {
 	return arrows
 }
 
-// computePlayerPreviewArrows shows where player BOARD units will attack.
-// NOTE: Player command dice are NOT shown because the player manually
-// chooses targets during PlayerCommand phase - showing auto-targeted arrows
-// would be misleading.
+// computePlayerPreviewArrows shows arrows from PlayerTargets map (if set).
 func computePlayerPreviewArrows(combat model.CombatModel) []model.TargetingArrow {
 	var arrows []model.TargetingArrow
 
-	// Player board units only (not command) → position-based targeting
-	for _, u := range combat.PlayerUnits {
-		if u.IsCommand() || !u.IsAlive() {
+	for sourceID, targetID := range combat.PlayerTargets {
+		rolled, exists := combat.RolledDice[sourceID]
+		if !exists {
 			continue
 		}
-		targetID := SelectTargetUnit(u, combat.EnemyUnits)
-		if targetID != "" {
-			arrows = append(arrows, model.TargetingArrow{
-				SourceUnitID: u.ID,
-				TargetUnitID: targetID,
-				EffectType:   entity.DieDamage,
-				IsDashed:     false,
-			})
-		}
+		arrows = append(arrows, model.TargetingArrow{
+			SourceUnitID: sourceID,
+			TargetUnitID: targetID,
+			EffectType:   rolled.Type(),
+			IsDashed:     false,
+		})
 	}
 	return arrows
 }
 
-// computeEnemyPreviewArrows builds dashed arrows showing enemy intent
+// computeEnemyPreviewArrows builds dashed arrows from EnemyTargets map.
 func computeEnemyPreviewArrows(combat model.CombatModel) []model.TargetingArrow {
 	var arrows []model.TargetingArrow
 
-	// Enemy command unit dice
-	for _, u := range combat.EnemyUnits {
-		if !u.IsCommand() {
+	for sourceID, targetID := range combat.EnemyTargets {
+		rolled, exists := combat.RolledDice[sourceID]
+		if !exists {
 			continue
 		}
-		rolled := combat.RolledDice[u.ID]
-		for _, rd := range rolled {
-			if rd.Type() == entity.DieBlank {
-				continue
-			}
-			var targetID string
-			switch rd.Type() {
-			case entity.DieDamage:
-				targetID = findLowestHPAliveUnit(combat.PlayerUnits)
-			case entity.DieShield, entity.DieHeal:
-				targetID = findLowestHPAliveUnit(combat.EnemyUnits)
-			case entity.DieBlank:
-				// Blank dice are skipped earlier, but handle for exhaustiveness
-			}
-			if targetID != "" {
-				arrows = append(arrows, model.TargetingArrow{
-					SourceUnitID: u.ID,
-					TargetUnitID: targetID,
-					EffectType:   rd.Type(),
-					IsDashed:     true,
-				})
-			}
-		}
-	}
-
-	// Enemy board units → positional targeting
-	for _, u := range combat.EnemyUnits {
-		if u.IsCommand() || !u.IsAlive() {
-			continue
-		}
-		targetID := SelectTargetUnit(u, combat.PlayerUnits)
-		if targetID != "" {
-			arrows = append(arrows, model.TargetingArrow{
-				SourceUnitID: u.ID,
-				TargetUnitID: targetID,
-				EffectType:   entity.DieDamage,
-				IsDashed:     true,
-			})
-		}
+		arrows = append(arrows, model.TargetingArrow{
+			SourceUnitID: sourceID,
+			TargetUnitID: targetID,
+			EffectType:   rolled.Type(),
+			IsDashed:     true,
+		})
 	}
 
 	return arrows

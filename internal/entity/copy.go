@@ -124,18 +124,6 @@ func CopyDie(d Die) Die {
 	return Die{Faces: faces}
 }
 
-// CopyDice copies a slice of Dice.
-func CopyDice(dice []Die) []Die {
-	if dice == nil {
-		return nil
-	}
-	result := make([]Die, len(dice))
-	for i, d := range dice {
-		result[i] = CopyDie(d)
-	}
-	return result
-}
-
 // CopyRolledDie creates a deep copy of a RolledDie.
 func CopyRolledDie(rd RolledDie) RolledDie {
 	var faces []DieFace
@@ -150,50 +138,44 @@ func CopyRolledDie(rd RolledDie) RolledDie {
 	}
 }
 
-// CopyRolledDice copies a slice of RolledDie.
-func CopyRolledDice(dice []RolledDie) []RolledDie {
-	if dice == nil {
+// CopyRolledDiceMap copies a map of unit ID to single rolled die.
+func CopyRolledDiceMap(m map[string]RolledDie) map[string]RolledDie {
+	if m == nil {
 		return nil
 	}
-	result := make([]RolledDie, len(dice))
-	for i, d := range dice {
-		result[i] = CopyRolledDie(d)
+	result := make(map[string]RolledDie, len(m))
+	for k, v := range m {
+		result[k] = CopyRolledDie(v)
 	}
 	return result
 }
 
-// CopyRolledDiceMap copies a map of unit ID to rolled dice.
-func CopyRolledDiceMap(m map[string][]RolledDie) map[string][]RolledDie {
+// CopyActivatedMap copies a map of unit ID to activated flag.
+func CopyActivatedMap(m map[string]bool) map[string]bool {
 	if m == nil {
 		return nil
 	}
-	result := make(map[string][]RolledDie, len(m))
+	result := make(map[string]bool, len(m))
 	for k, v := range m {
-		result[k] = CopyRolledDice(v)
+		result[k] = v
 	}
 	return result
 }
 
-// CopyActivatedMap copies a map of unit ID to activated dice flags.
-func CopyActivatedMap(m map[string][]bool) map[string][]bool {
+// CopyTargetMap copies a map of source unit ID to target unit ID.
+func CopyTargetMap(m map[string]string) map[string]string {
 	if m == nil {
 		return nil
 	}
-	result := make(map[string][]bool, len(m))
+	result := make(map[string]string, len(m))
 	for k, v := range m {
-		if v == nil {
-			result[k] = nil
-		} else {
-			flags := make([]bool, len(v))
-			copy(flags, v)
-			result[k] = flags
-		}
+		result[k] = v
 	}
 	return result
 }
 
 // CopyUnit creates a deep copy with a new ID.
-// Copies: Tags, Attributes, Parts, Triggers, Abilities, Dice, Pilot, Position.
+// Copies: Tags, Attributes, Parts, Triggers, Abilities, Die, Pilot, Position.
 func CopyUnit(u Unit, newID string) Unit {
 	return Unit{
 		ID:         newID,
@@ -203,7 +185,8 @@ func CopyUnit(u Unit, newID string) Unit {
 		Parts:      CopyParts(u.Parts),
 		Triggers:   core.CopyTriggers(u.Triggers),
 		Abilities:  core.CopyAbilities(u.Abilities),
-		Dice:       CopyDice(u.Dice),
+		Die:        CopyDie(u.Die),
+		HasDie:     u.HasDie,
 		Pilot:      CopyPilot(u.Pilot),
 		HasPilot:   u.HasPilot,
 		Position:   u.Position,

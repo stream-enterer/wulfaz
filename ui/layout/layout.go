@@ -102,7 +102,7 @@ func NewGameUI(face *text.Face) *GameUI {
 
 	// Center panel - transparent passthrough
 	g.centerPanel = widget.NewContainer(
-		// No background - game renders here
+	// No background - game renders here
 	)
 
 	// Right sidebar container

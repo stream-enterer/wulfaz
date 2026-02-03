@@ -316,17 +316,24 @@ func parseDie(node *document.Node, filename string) (entity.Die, error) {
 	return entity.Die{Faces: faces}, nil
 }
 
-// parseDice parses a "dice" block containing multiple die nodes.
-func parseDice(node *document.Node, filename string) ([]entity.Die, error) {
-	var dice []entity.Die
-	for _, dieNode := range findChildren(node, "die") {
-		die, err := parseDie(dieNode, filename)
-		if err != nil {
-			return nil, err
-		}
-		dice = append(dice, die)
+// parseUnitDie parses a "dice" block containing exactly one die node.
+func parseUnitDie(node *document.Node, filename string) (entity.Die, bool, error) {
+	dieNodes := findChildren(node, "die")
+	if len(dieNodes) == 0 {
+		return entity.Die{}, false, nil
 	}
-	return dice, nil
+	if len(dieNodes) > 1 {
+		return entity.Die{}, false, &ParseError{
+			File:    filename,
+			Node:    "dice",
+			Message: "unit can have at most one die",
+		}
+	}
+	die, err := parseDie(dieNodes[0], filename)
+	if err != nil {
+		return entity.Die{}, false, err
+	}
+	return die, true, nil
 }
 
 // Component parsers
@@ -751,13 +758,14 @@ func parseUnit(node *document.Node, filename string) (entity.Unit, error) {
 		unit.Triggers = triggers
 	}
 
-	// Parse dice
+	// Parse die (single die per unit)
 	if diceNode := findChild(node, "dice"); diceNode != nil {
-		dice, err := parseDice(diceNode, filename)
+		die, hasDie, err := parseUnitDie(diceNode, filename)
 		if err != nil {
 			return entity.Unit{}, err
 		}
-		unit.Dice = dice
+		unit.Die = die
+		unit.HasDie = hasDie
 	}
 
 	return unit, nil

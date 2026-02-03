@@ -48,47 +48,50 @@ func Batch(cmds ...Cmd) Cmd {
 	}
 }
 
-// RollAllDice creates a Cmd that rolls dice for all units.
+// RollAllDice creates a Cmd that rolls the single die for each unit.
 // RNG happens here (in Cmd), results passed via Msg (TEA compliance).
 func RollAllDice(seed int64, round int, allUnits []entity.Unit) Cmd {
 	return func() Msg {
 		rng := rand.New(rand.NewSource(seed))
-		rolls := make(map[string][]int)
+		rolls := make(map[string]int)
 
 		for _, unit := range allUnits {
-			if len(unit.Dice) == 0 {
+			if !unit.HasDie || len(unit.Die.Faces) == 0 {
 				continue
 			}
-			unitRolls := make([]int, len(unit.Dice))
-			for i, die := range unit.Dice {
-				if len(die.Faces) > 0 {
-					unitRolls[i] = rng.Intn(len(die.Faces))
-				}
-			}
-			rolls[unit.ID] = unitRolls
+			rolls[unit.ID] = rng.Intn(len(unit.Die.Faces))
 		}
 
 		return RoundStarted{Round: round, UnitRolls: rolls}
 	}
 }
 
-// RerollUnlockedDice creates a Cmd that rerolls unlocked dice.
-func RerollUnlockedDice(seed int64, unitID string, current []entity.RolledDie) Cmd {
+// RerollAllUnlockedDice creates a Cmd that rerolls all unlocked player dice.
+func RerollAllUnlockedDice(seed int64, combat model.CombatModel) Cmd {
 	return func() Msg {
 		rng := rand.New(rand.NewSource(seed))
-		results := make([]int, len(current))
+		results := make(map[string]int)
 
-		for i, rd := range current {
-			if rd.Locked {
-				// Keep locked dice at same face index
-				results[i] = rd.FaceIndex
-			} else if len(rd.Faces) > 0 {
-				// Reroll unlocked dice
-				results[i] = rng.Intn(len(rd.Faces))
+		for _, unit := range combat.PlayerUnits {
+			if !unit.HasDie || len(unit.Die.Faces) == 0 {
+				continue
 			}
+
+			rolled, exists := combat.RolledDice[unit.ID]
+			if !exists {
+				continue
+			}
+
+			if rolled.Locked {
+				// Skip locked dice
+				continue
+			}
+
+			// Reroll unlocked die
+			results[unit.ID] = rng.Intn(len(unit.Die.Faces))
 		}
 
-		return RerollRequested{UnitID: unitID, Results: results}
+		return RerollRequested{Results: results}
 	}
 }
 
@@ -171,149 +174,157 @@ func AdvanceDicePhase(next model.DicePhase) Cmd {
 	}
 }
 
-// ===== Wave 3: Combat Phase Commands =====
-
-// ExecuteEnemyCommand runs simple enemy AI for command dice.
-// Damage -> lowest HP player unit; Shield/Heal -> lowest HP enemy unit.
-// Blank faces are skipped.
-func ExecuteEnemyCommand(combat model.CombatModel) Cmd {
+// ComputeAITargets computes targets for all enemy units.
+// Regular units: random valid target (filtered for doomed)
+// Commander: lowest HP target
+// Shield/Heal: lowest HP ally
+func ComputeAITargets(combat model.CombatModel, seed int64) Cmd {
 	return func() Msg {
-		enemyCmd := findEnemyCommandUnit(combat)
-		if enemyCmd == nil {
-			return EnemyCommandResolved{Actions: nil}
-		}
+		rng := rand.New(rand.NewSource(seed))
+		targets := make(map[string]string)
 
-		rolled := combat.RolledDice[enemyCmd.ID]
-		var actions []EnemyDiceAction
+		// Track incoming damage to filter doomed targets
+		incoming := make(map[string]int)
 
-		for i, rd := range rolled {
-			// Skip blank faces
-			if rd.Type() == entity.DieBlank {
+		for _, enemy := range combat.EnemyUnits {
+			if !enemy.IsAlive() || !enemy.HasDie {
+				continue
+			}
+
+			rolled, exists := combat.RolledDice[enemy.ID]
+			if !exists {
+				continue
+			}
+
+			face := rolled.CurrentFace()
+			if face.Type == entity.DieBlank {
 				continue
 			}
 
 			var targetID string
-			switch rd.Type() {
+
+			switch face.Type {
 			case entity.DieDamage:
-				targetID = findLowestHPAliveUnit(combat.PlayerUnits)
+				validTargets := GetValidEnemyTargets(combat.PlayerUnits)
+				if len(validTargets) == 0 {
+					continue
+				}
+
+				// Filter doomed targets for regular units
+				if !enemy.IsCommand() {
+					validTargets = FilterDoomedTargets(validTargets, incoming, combat)
+				}
+
+				// Commander uses lowest HP, regular units use random
+				if enemy.IsCommand() {
+					targetID = SelectLowestHP(validTargets)
+				} else {
+					targetID = SelectRandomTarget(validTargets, rng)
+				}
+
+				// Track incoming damage
+				if targetID != "" {
+					incoming[targetID] += face.Value
+				}
+
 			case entity.DieShield, entity.DieHeal:
-				targetID = findLowestHPAliveUnit(combat.EnemyUnits)
-			case entity.DieBlank:
-				// Blank dice are skipped earlier, but handle for exhaustiveness
+				// Target lowest HP ally
+				validAllies := GetValidAlliedTargets(combat.EnemyUnits)
+				targetID = SelectLowestHP(validAllies)
 			}
 
 			if targetID != "" {
-				actions = append(actions, EnemyDiceAction{
-					SourceUnitID: enemyCmd.ID,
-					TargetUnitID: targetID,
-					DieIndex:     i,
-					Effect:       rd.Type(),
-					Value:        rd.Value(),
-				})
+				targets[enemy.ID] = targetID
 			}
 		}
-		return EnemyCommandResolved{Actions: actions}
+
+		return AITargetsComputed{Targets: targets}
 	}
 }
 
-// ExecuteExecution builds firing order and starts execution.
-func ExecuteExecution(combat model.CombatModel) Cmd {
-	return func() Msg {
-		order := buildFiringOrder(combat)
-		return ExecutionStarted{FiringOrder: order}
-	}
-}
-
-// ResolvePosition calculates attacks for units at one position.
-// Key: Collect ALL attacks first, THEN calculate final HP (simultaneous).
-func ResolvePosition(pos model.FiringPosition, combat model.CombatModel, timestamp int64) Cmd {
+// ExecuteAllAttacks resolves all attacks simultaneously from HP snapshot.
+func ExecuteAllAttacks(combat model.CombatModel, timestamp int64) Cmd {
 	return func() Msg {
 		var attacks []AttackResult
-		unitMap := buildUnitMap(combat)
 		hpSnapshot := buildHPSnapshot(combat)
 
-		playerCmd := FindPlayerCommandUnit(combat)
-		enemyCmd := findEnemyCommandUnit(combat)
-
-		// Player units attack enemy units
-		attacks = resolveAttacks(attacks, pos.PlayerUnits, combat.EnemyUnits, enemyCmd,
-			unitMap, combat.RolledDice, hpSnapshot)
-
-		// Enemy units attack player units
-		attacks = resolveAttacks(attacks, pos.EnemyUnits, combat.PlayerUnits, playerCmd,
-			unitMap, combat.RolledDice, hpSnapshot)
-
-		return PositionResolved{Position: pos.Position, Attacks: attacks, Timestamp: timestamp}
-	}
-}
-
-// resolveAttacks calculates damage from attackerIDs to targets with overflow.
-// Each die attack is resolved separately with MTG-style overflow.
-// Gap damage only hits command if ALL enemy units are dead (F-167).
-func resolveAttacks(
-	attacks []AttackResult,
-	attackerIDs []string,
-	targets []entity.Unit,
-	targetCmd *entity.Unit,
-	unitMap map[string]entity.Unit,
-	rolledDice map[string][]entity.RolledDie,
-	hpSnapshot map[string][2]int,
-) []AttackResult {
-	for _, uid := range attackerIDs {
-		attacker, ok := unitMap[uid]
-		if !ok || !attacker.IsAlive() {
-			continue
-		}
-		rolled := rolledDice[uid]
-
-		for dieIdx, rd := range rolled {
-			// Skip non-damage (this also skips blanks since blank != damage)
-			if rd.Type() != entity.DieDamage {
+		// Collect all damage from player units
+		for _, unit := range combat.PlayerUnits {
+			if !unit.IsAlive() || !unit.HasDie {
 				continue
 			}
 
-			// Try overflow damage to overlapping enemies
-			results := ApplyDamageWithOverflow(attacker, rd.Value(), targets, hpSnapshot)
-
-			if len(results) > 0 {
-				// Convert overflow results to AttackResults
-				for _, r := range results {
-					attacks = append(attacks, AttackResult{
-						AttackerID:     uid,
-						TargetID:       r.TargetID,
-						DieIndex:       dieIdx,
-						Damage:         r.Damage,
-						ShieldAbsorbed: r.ShieldAbsorbed,
-						NewHealth:      r.NewHP,
-						NewShields:     r.NewShields,
-						TargetDead:     r.Killed,
-					})
-				}
-			} else if !AnyAliveUnits(targets) && targetCmd != nil && targetCmd.IsAlive() {
-				// Gap case: F-166 + F-167
-				// Only hit command if ALL enemy units are dead
-				hp, shields := hpSnapshot[targetCmd.ID][0], hpSnapshot[targetCmd.ID][1]
-				remaining := rd.Value()
-				absorbed := min(remaining, shields)
-				remaining -= absorbed
-				shields -= absorbed
-				hp = max(0, hp-remaining)
-
-				attacks = append(attacks, AttackResult{
-					AttackerID:     uid,
-					TargetID:       targetCmd.ID,
-					DieIndex:       dieIdx,
-					Damage:         rd.Value(),
-					ShieldAbsorbed: absorbed,
-					NewHealth:      hp,
-					NewShields:     shields,
-					TargetDead:     hp <= 0,
-				})
-				hpSnapshot[targetCmd.ID] = [2]int{hp, shields}
+			targetID, hasTarget := combat.PlayerTargets[unit.ID]
+			if !hasTarget {
+				continue
 			}
-			// Else: gap but units exist elsewhere - damage wasted
+
+			rolled, exists := combat.RolledDice[unit.ID]
+			if !exists {
+				continue
+			}
+
+			face := rolled.CurrentFace()
+			if face.Type != entity.DieDamage {
+				continue
+			}
+
+			attacks = resolveDamage(attacks, unit.ID, targetID, face.Value, hpSnapshot)
 		}
+
+		// Collect all damage from enemy units
+		for _, unit := range combat.EnemyUnits {
+			if !unit.IsAlive() || !unit.HasDie {
+				continue
+			}
+
+			targetID, hasTarget := combat.EnemyTargets[unit.ID]
+			if !hasTarget {
+				continue
+			}
+
+			rolled, exists := combat.RolledDice[unit.ID]
+			if !exists {
+				continue
+			}
+
+			face := rolled.CurrentFace()
+			if face.Type != entity.DieDamage {
+				continue
+			}
+
+			attacks = resolveDamage(attacks, unit.ID, targetID, face.Value, hpSnapshot)
+		}
+
+		return AllAttacksResolved{Attacks: attacks, Timestamp: timestamp}
 	}
+}
+
+// resolveDamage applies damage from snapshot and records result.
+func resolveDamage(attacks []AttackResult, attackerID, targetID string, damage int, hpSnapshot map[string][2]int) []AttackResult {
+	hp, shields := hpSnapshot[targetID][0], hpSnapshot[targetID][1]
+
+	// Shields absorb first
+	absorbed := min(damage, shields)
+	remaining := damage - absorbed
+	shields -= absorbed
+
+	// Then HP
+	hp = max(0, hp-remaining)
+
+	attacks = append(attacks, AttackResult{
+		AttackerID:     attackerID,
+		TargetID:       targetID,
+		Damage:         damage,
+		ShieldAbsorbed: absorbed,
+		NewHealth:      hp,
+		NewShields:     shields,
+		TargetDead:     hp <= 0,
+	})
+
+	// Update snapshot
+	hpSnapshot[targetID] = [2]int{hp, shields}
+
 	return attacks
 }
 

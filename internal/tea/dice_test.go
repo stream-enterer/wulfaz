@@ -14,21 +14,22 @@ func TestHandleRoundStarted(t *testing.T) {
 		Combat: model.CombatModel{
 			PlayerUnits: []entity.Unit{{
 				ID: "unit1",
-				Dice: []entity.Die{{Faces: []entity.DieFace{
+				Die: entity.Die{Faces: []entity.DieFace{
 					{Type: entity.DieDamage, Value: 2},
 					{Type: entity.DieDamage, Value: 2},
 					{Type: entity.DieDamage, Value: 3},
 					{Type: entity.DieDamage, Value: 4},
 					{Type: entity.DieBlank, Value: 0},
 					{Type: entity.DieBlank, Value: 0},
-				}}},
+				}},
+				HasDie: true,
 			}},
 		},
 	}
 
 	msg := RoundStarted{
 		Round:     1,
-		UnitRolls: map[string][]int{"unit1": {2}}, // face index 2 = value 3
+		UnitRolls: map[string]int{"unit1": 2}, // face index 2 = value 3
 	}
 
 	newM, _ := m.Update(msg)
@@ -43,15 +44,15 @@ func TestHandleRoundStarted(t *testing.T) {
 		t.Errorf("RerollsRemaining = %d, want %d", newM.Combat.RerollsRemaining, model.DefaultRerollsPerRound)
 	}
 
-	rolled := newM.Combat.RolledDice["unit1"]
-	if len(rolled) != 1 {
-		t.Fatalf("expected 1 rolled die, got %d", len(rolled))
+	rolled, exists := newM.Combat.RolledDice["unit1"]
+	if !exists {
+		t.Fatal("expected rolled die for unit1")
 	}
-	if rolled[0].Value() != 3 {
-		t.Errorf("rolled[0].Value() = %d, want 3", rolled[0].Value())
+	if rolled.Value() != 3 {
+		t.Errorf("rolled.Value() = %d, want 3", rolled.Value())
 	}
-	if rolled[0].FaceIndex != 2 {
-		t.Errorf("rolled[0].FaceIndex = %d, want 2", rolled[0].FaceIndex)
+	if rolled.FaceIndex != 2 {
+		t.Errorf("rolled.FaceIndex = %d, want 2", rolled.FaceIndex)
 	}
 }
 
@@ -91,37 +92,36 @@ func TestHandleDiceEffectApplied_DamageWithShields(t *testing.T) {
 
 func TestHandleDiceActivated_TargetValidation(t *testing.T) {
 	playerCmd := entity.Unit{
-		ID:   "player_cmd",
-		Tags: []core.Tag{"command"},
-		Dice: []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
+		ID:     "player_cmd",
+		Tags:   []core.Tag{"command"},
+		Die:    entity.Die{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}},
+		HasDie: true,
 	}
 
 	m := Model{
 		Version: 1,
 		Combat: model.CombatModel{
-			PlayerUnits:      []entity.Unit{playerCmd},
-			EnemyUnits:       []entity.Unit{{ID: "enemy"}},
-			DicePhase:        model.DicePhasePlayerCommand,
-			SelectedUnitID:   "player_cmd",
-			SelectedDieIndex: 0,
-			RolledDice: map[string][]entity.RolledDie{
-				"player_cmd": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0}},
+			PlayerUnits:    []entity.Unit{playerCmd},
+			EnemyUnits:     []entity.Unit{{ID: "enemy"}},
+			DicePhase:      model.DicePhasePlayerCommand,
+			SelectedUnitID: "player_cmd",
+			RolledDice: map[string]entity.RolledDie{
+				"player_cmd": {Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0},
 			},
-			ActivatedDice: map[string][]bool{"player_cmd": {false}},
+			ActivatedDice: map[string]bool{"player_cmd": false},
 		},
 	}
 
 	// Damage die targeting friendly = invalid, should be no-op
 	msg := DiceActivated{
 		SourceUnitID: "player_cmd",
-		DieIndex:     0,
 		TargetUnitID: "player_cmd", // friendly target
 	}
 
 	newM, cmd := m.Update(msg)
 
 	// Should not activate (invalid target)
-	if newM.Combat.ActivatedDice["player_cmd"][0] {
+	if newM.Combat.ActivatedDice["player_cmd"] {
 		t.Error("damage die should not activate on friendly target")
 	}
 	if cmd != nil {
@@ -131,9 +131,10 @@ func TestHandleDiceActivated_TargetValidation(t *testing.T) {
 
 func TestHandleDieLockToggled(t *testing.T) {
 	playerCmd := entity.Unit{
-		ID:   "player_cmd",
-		Tags: []core.Tag{"command"},
-		Dice: []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
+		ID:     "player_cmd",
+		Tags:   []core.Tag{"command"},
+		Die:    entity.Die{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}},
+		HasDie: true,
 	}
 
 	m := Model{
@@ -143,71 +144,63 @@ func TestHandleDieLockToggled(t *testing.T) {
 			PlayerUnits: []entity.Unit{playerCmd},
 			Phase:       model.CombatActive,
 			DicePhase:   model.DicePhasePlayerCommand,
-			RolledDice: map[string][]entity.RolledDie{
-				"player_cmd": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0, Locked: false}},
+			RolledDice: map[string]entity.RolledDie{
+				"player_cmd": {Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0, Locked: false},
 			},
 		},
 	}
 
-	msg := DieLockToggled{UnitID: "player_cmd", DieIndex: 0}
+	msg := DieLockToggled{UnitID: "player_cmd"}
 	newM, _ := m.Update(msg)
 
-	if !newM.Combat.RolledDice["player_cmd"][0].Locked {
+	if !newM.Combat.RolledDice["player_cmd"].Locked {
 		t.Error("die should be locked after toggle")
 	}
 
 	// Toggle again
 	newM2, _ := newM.Update(msg)
-	if newM2.Combat.RolledDice["player_cmd"][0].Locked {
+	if newM2.Combat.RolledDice["player_cmd"].Locked {
 		t.Error("die should be unlocked after second toggle")
 	}
 }
 
-func TestHandleDieSelected_BoundsCheck(t *testing.T) {
+func TestHandleDieSelected(t *testing.T) {
 	playerCmd := entity.Unit{
-		ID:   "player_cmd",
-		Tags: []core.Tag{"command"},
-		Dice: []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
+		ID:     "player_cmd",
+		Tags:   []core.Tag{"command"},
+		Die:    entity.Die{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}},
+		HasDie: true,
 	}
 
 	m := Model{
 		Version: 1,
 		Phase:   PhaseCombat,
 		Combat: model.CombatModel{
-			PlayerUnits:      []entity.Unit{playerCmd},
-			Phase:            model.CombatActive,
-			DicePhase:        model.DicePhasePlayerCommand,
-			SelectedUnitID:   "",
-			SelectedDieIndex: -1,
-			RolledDice: map[string][]entity.RolledDie{
-				"player_cmd": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0}},
+			PlayerUnits:    []entity.Unit{playerCmd},
+			Phase:          model.CombatActive,
+			DicePhase:      model.DicePhasePlayerCommand,
+			SelectedUnitID: "",
+			RolledDice: map[string]entity.RolledDie{
+				"player_cmd": {Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0},
 			},
-			ActivatedDice: map[string][]bool{"player_cmd": {false}},
+			ActivatedDice: map[string]bool{"player_cmd": false},
 		},
 	}
 
-	// Out of bounds index should be rejected
-	msg := DieSelected{UnitID: "player_cmd", DieIndex: 99}
+	// Non-existent unit should be rejected
+	msg := DieSelected{UnitID: "nonexistent"}
 	newM, _ := m.Update(msg)
 
-	if newM.Combat.SelectedDieIndex != -1 {
-		t.Errorf("SelectedDieIndex = %d, want -1 (invalid index should be rejected)", newM.Combat.SelectedDieIndex)
+	if newM.Combat.SelectedUnitID != "" {
+		t.Errorf("SelectedUnitID = %q, want empty (invalid unit should be rejected)", newM.Combat.SelectedUnitID)
 	}
 
-	// Negative index should be rejected
-	msg2 := DieSelected{UnitID: "player_cmd", DieIndex: -1}
+	// Valid unit should be accepted
+	msg2 := DieSelected{UnitID: "player_cmd"}
 	newM2, _ := m.Update(msg2)
 
-	if newM2.Combat.SelectedDieIndex != -1 {
-		t.Errorf("SelectedDieIndex = %d, want -1 (negative index should be rejected)", newM2.Combat.SelectedDieIndex)
-	}
-
-	// Valid index should be accepted
-	msg3 := DieSelected{UnitID: "player_cmd", DieIndex: 0}
-	newM3, _ := m.Update(msg3)
-
-	if newM3.Combat.SelectedDieIndex != 0 {
-		t.Errorf("SelectedDieIndex = %d, want 0", newM3.Combat.SelectedDieIndex)
+	if newM2.Combat.SelectedUnitID != "player_cmd" {
+		t.Errorf("SelectedUnitID = %q, want player_cmd", newM2.Combat.SelectedUnitID)
 	}
 }
 
@@ -238,19 +231,22 @@ func TestHandlePlayerCommandDone(t *testing.T) {
 
 	newM, cmd := m.Update(PlayerCommandDone{})
 
-	if newM.Combat.DicePhase != model.DicePhaseEnemyCommand {
-		t.Errorf("DicePhase = %v, want EnemyCommand", newM.Combat.DicePhase)
+	if newM.Combat.DicePhase != model.DicePhaseExecution {
+		t.Errorf("DicePhase = %v, want Execution", newM.Combat.DicePhase)
 	}
-	if cmd == nil {
-		t.Error("expected cmd to advance phase")
+	// In the new system, we wait for player click to execute attacks
+	// So no cmd is returned - the UI shows the Execution phase and waits
+	if cmd != nil {
+		t.Error("expected nil cmd (waits for player click to execute)")
 	}
 }
 
 func TestDieLockToggled_RequiresCombatActive(t *testing.T) {
 	playerCmd := entity.Unit{
-		ID:   "player_cmd",
-		Tags: []core.Tag{"command"},
-		Dice: []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
+		ID:     "player_cmd",
+		Tags:   []core.Tag{"command"},
+		Die:    entity.Die{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}},
+		HasDie: true,
 	}
 
 	m := Model{
@@ -260,17 +256,17 @@ func TestDieLockToggled_RequiresCombatActive(t *testing.T) {
 			PlayerUnits: []entity.Unit{playerCmd},
 			Phase:       model.CombatPaused, // PAUSED
 			DicePhase:   model.DicePhasePlayerCommand,
-			RolledDice: map[string][]entity.RolledDie{
-				"player_cmd": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0, Locked: false}},
+			RolledDice: map[string]entity.RolledDie{
+				"player_cmd": {Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0, Locked: false},
 			},
 		},
 	}
 
-	msg := DieLockToggled{UnitID: "player_cmd", DieIndex: 0}
+	msg := DieLockToggled{UnitID: "player_cmd"}
 	newM, _ := m.Update(msg)
 
 	// Should NOT toggle - combat is paused
-	if newM.Combat.RolledDice["player_cmd"][0].Locked {
+	if newM.Combat.RolledDice["player_cmd"].Locked {
 		t.Error("die should NOT be locked when combat is paused")
 	}
 }
@@ -284,7 +280,7 @@ func TestDieLockToggled_RequiresPhaseCombat(t *testing.T) {
 		},
 	}
 
-	msg := DieLockToggled{UnitID: "player_cmd", DieIndex: 0}
+	msg := DieLockToggled{UnitID: "player_cmd"}
 	newM, _ := m.Update(msg)
 
 	// Should be no-op - not in combat phase
@@ -298,17 +294,16 @@ func TestDieDeselected_RequiresPhaseCombat(t *testing.T) {
 		Version: 1,
 		Phase:   PhaseInterCombat, // Wrong phase
 		Combat: model.CombatModel{
-			Phase:            model.CombatActive,
-			DicePhase:        model.DicePhasePlayerCommand,
-			SelectedUnitID:   "player_cmd",
-			SelectedDieIndex: 1,
+			Phase:          model.CombatActive,
+			DicePhase:      model.DicePhasePlayerCommand,
+			SelectedUnitID: "player_cmd",
 		},
 	}
 
 	newM, _ := m.Update(DieDeselected{})
 
 	// Should be no-op - not in combat phase
-	if newM.Combat.SelectedDieIndex != 1 {
+	if newM.Combat.SelectedUnitID != "player_cmd" {
 		t.Error("should not deselect when not in PhaseCombat")
 	}
 }
@@ -318,17 +313,16 @@ func TestDieDeselected_RequiresCombatActive(t *testing.T) {
 		Version: 1,
 		Phase:   PhaseCombat,
 		Combat: model.CombatModel{
-			Phase:            model.CombatPaused, // Paused
-			DicePhase:        model.DicePhasePlayerCommand,
-			SelectedUnitID:   "player_cmd",
-			SelectedDieIndex: 1,
+			Phase:          model.CombatPaused, // Paused
+			DicePhase:      model.DicePhasePlayerCommand,
+			SelectedUnitID: "player_cmd",
 		},
 	}
 
 	newM, _ := m.Update(DieDeselected{})
 
 	// Should be no-op - combat is paused
-	if newM.Combat.SelectedDieIndex != 1 {
+	if newM.Combat.SelectedUnitID != "player_cmd" {
 		t.Error("should not deselect when combat is paused")
 	}
 }
@@ -390,8 +384,8 @@ func TestUnlockAllDice_RequiresPhaseCombat(t *testing.T) {
 
 // ===== F-191: Zero-Dice Unit Handling Tests =====
 
-func TestRoundStarted_ZeroDiceUnit(t *testing.T) {
-	// Setup: Create combat with a unit that has empty Dice slice
+func TestRoundStarted_NoDiceUnit(t *testing.T) {
+	// Setup: Create combat with a unit that has HasDie=false
 	m := Model{
 		Version: 1,
 		Phase:   PhaseCombat,
@@ -403,15 +397,16 @@ func TestRoundStarted_ZeroDiceUnit(t *testing.T) {
 					ID:       "player_cmd",
 					Position: -1,
 					Tags:     []core.Tag{"command"},
-					Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
+					Die:      entity.Die{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}},
+					HasDie:   true,
 					Attributes: map[string]core.Attribute{
 						"health": {Base: 100},
 					},
 				},
 				{
-					ID:       "zero_dice_unit",
+					ID:       "no_dice_unit",
 					Position: 0,
-					Dice:     []entity.Die{}, // Empty dice slice
+					HasDie:   false, // No die
 					Attributes: map[string]core.Attribute{
 						"health": {Base: 50},
 					},
@@ -422,7 +417,8 @@ func TestRoundStarted_ZeroDiceUnit(t *testing.T) {
 					ID:       "enemy_cmd",
 					Position: -1,
 					Tags:     []core.Tag{"command"},
-					Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
+					Die:      entity.Die{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}},
+					HasDie:   true,
 					Attributes: map[string]core.Attribute{
 						"health": {Base: 100},
 					},
@@ -431,68 +427,59 @@ func TestRoundStarted_ZeroDiceUnit(t *testing.T) {
 		},
 	}
 
-	// Verify: RollAllDice doesn't panic, unit is skipped gracefully
+	// Verify: RoundStarted doesn't panic, unit is skipped gracefully
 	msg := RoundStarted{
 		Round:     1,
-		UnitRolls: map[string][]int{"player_cmd": {0}, "enemy_cmd": {0}}, // No rolls for zero_dice_unit
+		UnitRolls: map[string]int{"player_cmd": 0, "enemy_cmd": 0}, // No rolls for no_dice_unit
 	}
 
 	newM, _ := m.Update(msg)
 
-	// Zero-dice unit should have no rolled dice
-	if rolled, ok := newM.Combat.RolledDice["zero_dice_unit"]; ok && len(rolled) > 0 {
-		t.Errorf("zero_dice_unit should have no rolled dice, got %d", len(rolled))
+	// No-dice unit should have no rolled dice
+	if _, ok := newM.Combat.RolledDice["no_dice_unit"]; ok {
+		t.Error("no_dice_unit should have no rolled dice entry")
 	}
 
 	// Other units should have rolled dice
-	if len(newM.Combat.RolledDice["player_cmd"]) != 1 {
-		t.Errorf("player_cmd should have 1 rolled die, got %d", len(newM.Combat.RolledDice["player_cmd"]))
+	if _, ok := newM.Combat.RolledDice["player_cmd"]; !ok {
+		t.Error("player_cmd should have rolled die")
 	}
 }
 
-func TestEnemyCommand_ZeroDiceEnemyCmd(t *testing.T) {
-	// Setup: Enemy command unit with no dice
-	m := Model{
-		Version: 1,
-		Phase:   PhaseCombat,
-		Combat: model.CombatModel{
-			Phase:     model.CombatActive,
-			DicePhase: model.DicePhaseEnemyCommand,
-			PlayerUnits: []entity.Unit{
-				{
-					ID:       "player_cmd",
-					Position: -1,
-					Tags:     []core.Tag{"command"},
-					Attributes: map[string]core.Attribute{
-						"health": {Base: 100},
-					},
-				},
-			},
-			EnemyUnits: []entity.Unit{
-				{
-					ID:       "enemy_cmd",
-					Position: -1,
-					Tags:     []core.Tag{"command"},
-					Dice:     []entity.Die{}, // No dice
-					Attributes: map[string]core.Attribute{
-						"health": {Base: 100},
-					},
-				},
-			},
-			RolledDice: map[string][]entity.RolledDie{}, // No rolled dice for enemy
-		},
+// ===== F-167: Command Unit Targeting Tests =====
+
+func TestF167_CommandUnitProtection(t *testing.T) {
+	// When regular enemies are alive, command cannot be targeted
+	enemies := []entity.Unit{
+		{ID: "enemy_cmd", Tags: []core.Tag{"command"}, Attributes: map[string]core.Attribute{"health": {Base: 100}}},
+		{ID: "enemy_regular", Attributes: map[string]core.Attribute{"health": {Base: 50}}},
 	}
 
-	// EnemyCommandResolved with empty actions should work fine
-	msg := EnemyCommandResolved{Actions: []EnemyDiceAction{}}
+	validTargets := GetValidEnemyTargets(enemies)
 
-	newM, cmd := m.Update(msg)
-
-	// Should advance to execution phase without crashing
-	if newM.Combat.DicePhase != model.DicePhaseExecution {
-		t.Errorf("DicePhase = %v, want Execution", newM.Combat.DicePhase)
+	// Should only include regular enemy, not command
+	if len(validTargets) != 1 {
+		t.Fatalf("expected 1 valid target, got %d", len(validTargets))
 	}
-	if cmd == nil {
-		t.Error("expected cmd to advance to execution")
+	if validTargets[0].ID != "enemy_regular" {
+		t.Errorf("expected enemy_regular, got %s", validTargets[0].ID)
+	}
+}
+
+func TestF167_CommandTargetableWhenAlone(t *testing.T) {
+	// When all regular enemies are dead, command can be targeted
+	enemies := []entity.Unit{
+		{ID: "enemy_cmd", Tags: []core.Tag{"command"}, Attributes: map[string]core.Attribute{"health": {Base: 100}}},
+		{ID: "enemy_dead", Attributes: map[string]core.Attribute{"health": {Base: 0}}}, // Dead
+	}
+
+	validTargets := GetValidEnemyTargets(enemies)
+
+	// Should include command since all regular enemies are dead
+	if len(validTargets) != 1 {
+		t.Fatalf("expected 1 valid target, got %d", len(validTargets))
+	}
+	if validTargets[0].ID != "enemy_cmd" {
+		t.Errorf("expected enemy_cmd, got %s", validTargets[0].ID)
 	}
 }

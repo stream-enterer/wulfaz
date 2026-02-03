@@ -32,16 +32,11 @@ func TestParseDieType(t *testing.T) {
 	}
 }
 
-func TestParseDice(t *testing.T) {
-	kdlStr := `dice {
+func TestParseUnitDie(t *testing.T) {
+	kdlStr := `unit {
         die {
             face "damage" 5
             face "damage" 8
-            face "blank"
-        }
-        die {
-            face "shield" 5
-            face "shield" 12
             face "blank"
         }
     }`
@@ -50,24 +45,40 @@ func TestParseDice(t *testing.T) {
 		t.Fatalf("parse KDL: %v", err)
 	}
 
-	dice, err := parseDice(doc.Nodes[0], "test.kdl")
+	die, hasDie, err := parseUnitDie(doc.Nodes[0], "test.kdl")
 	if err != nil {
-		t.Fatalf("parseDice: %v", err)
+		t.Fatalf("parseUnitDie: %v", err)
 	}
 
-	if len(dice) != 2 {
-		t.Fatalf("expected 2 dice, got %d", len(dice))
+	if !hasDie {
+		t.Fatal("expected hasDie=true")
 	}
-	if len(dice[0].Faces) != 3 {
-		t.Fatalf("expected 3 faces on die 0, got %d", len(dice[0].Faces))
+	if len(die.Faces) != 3 {
+		t.Fatalf("expected 3 faces, got %d", len(die.Faces))
 	}
-	if dice[0].Faces[0].Type != entity.DieDamage || dice[0].Faces[0].Value != 5 {
-		t.Errorf("dice[0].Faces[0] = %+v, want damage/5", dice[0].Faces[0])
+	if die.Faces[0].Type != entity.DieDamage || die.Faces[0].Value != 5 {
+		t.Errorf("die.Faces[0] = %+v, want damage/5", die.Faces[0])
 	}
-	if dice[0].Faces[2].Type != entity.DieBlank {
-		t.Errorf("dice[0].Faces[2].Type = %v, want blank", dice[0].Faces[2].Type)
+	if die.Faces[2].Type != entity.DieBlank {
+		t.Errorf("die.Faces[2].Type = %v, want blank", die.Faces[2].Type)
 	}
-	if dice[1].Faces[0].Type != entity.DieShield || dice[1].Faces[0].Value != 5 {
-		t.Errorf("dice[1].Faces[0] = %+v, want shield/5", dice[1].Faces[0])
+}
+
+func TestParseUnitDie_NoDie(t *testing.T) {
+	kdlStr := `unit {
+        health 100
+    }`
+	doc, err := kdl.Parse(strings.NewReader(kdlStr))
+	if err != nil {
+		t.Fatalf("parse KDL: %v", err)
+	}
+
+	_, hasDie, err := parseUnitDie(doc.Nodes[0], "test.kdl")
+	if err != nil {
+		t.Fatalf("parseUnitDie: %v", err)
+	}
+
+	if hasDie {
+		t.Error("expected hasDie=false for unit without die")
 	}
 }

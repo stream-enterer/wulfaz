@@ -8,18 +8,10 @@ unit id="medium_mech" {
     }
     dice {
         die {
-            face "damage" 1
-            face "damage" 2
             face "damage" 2
             face "damage" 3
-            face "blank"
-            face "blank"
-        }
-        die {
-            face "damage" 1
-            face "damage" 2
-            face "damage" 2
-            face "damage" 3
+            face "damage" 4
+            face "damage" 5
             face "blank"
             face "blank"
         }

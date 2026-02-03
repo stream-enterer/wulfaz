@@ -33,7 +33,7 @@ const (
 // App implements ebiten.Game and drives the TEA runtime
 type App struct {
 	model         tea.Model
-	registry      *template.Registry   // Immutable after init; for shop/rewards later
+	registry      *template.Registry // Immutable after init; for shop/rewards later
 	rng           *rand.Rand
 	hitRegions    []renderer.HitRegion // Updated each frame for input handling
 	pendingTimers []pendingTimer       // Timers requested by commands
@@ -171,12 +171,10 @@ func (a *App) syncUIState() {
 		switch combat.DicePhase {
 		case model.DicePhaseExecution:
 			hint = "Click to continue..."
-		case model.DicePhaseAwaitingEnemyCommand:
-			hint = "Click to continue..."
 		case model.DicePhasePreview:
 			hint = "Click to continue..."
 		case model.DicePhasePlayerCommand:
-			allLocked := tea.AllCommandDiceLocked(combat)
+			allLocked := tea.AllPlayerDiceLocked(combat)
 			if !allLocked {
 				hint = fmt.Sprintf("LClick die to lock/unlock\nR - Reroll unlocked (%d/2)", combat.RerollsRemaining)
 			} else {
@@ -359,22 +357,12 @@ func (a *App) pollCombatInput() {
 		return
 	}
 
-	// AWAITING ENEMY COMMAND PHASE: click to trigger enemy command
-	if combat.DicePhase == model.DicePhaseAwaitingEnemyCommand {
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			a.dispatch(tea.EnemyCommandAdvanceClicked{})
-		}
-		return
-	}
-
 	// PLAYER COMMAND PHASE
 	if combat.DicePhase == model.DicePhasePlayerCommand {
-		// R key = reroll unlocked dice
+		// R key = reroll all unlocked player dice
 		if inpututil.IsKeyJustPressed(ebiten.KeyR) && combat.RerollsRemaining > 0 {
-			playerCmd := tea.FindPlayerCommandUnit(combat)
-			if playerCmd != nil && !tea.AllCommandDiceLocked(combat) {
-				rolled := combat.RolledDice[playerCmd.ID]
-				cmd := tea.RerollUnlockedDice(a.model.Seed+int64(combat.Round)*100, playerCmd.ID, rolled)
+			if !tea.AllPlayerDiceLocked(combat) {
+				cmd := tea.RerollAllUnlockedDice(a.model.Seed+int64(combat.Round)*100, combat)
 				a.dispatch(cmd())
 			}
 		}
@@ -403,37 +391,36 @@ func (a *App) handleLeftClick(mx, my int) {
 
 	combat := a.model.Combat
 	pt := image.Point{mx, my}
-	playerCmd := tea.FindPlayerCommandUnit(combat)
-	allLocked := tea.AllCommandDiceLocked(combat)
+	allLocked := tea.AllPlayerDiceLocked(combat)
 
-	// Check dice
+	// Check dice - now any player unit die is interactive
 	for _, region := range a.hitRegions {
 		if region.Type != "die" || !pt.In(region.Rect) {
 			continue
 		}
-		// Only player command dice are interactive
-		if playerCmd == nil || region.UnitID != playerCmd.ID {
+		// Only player unit dice are interactive
+		if !combat.IsPlayerUnit(region.UnitID) {
 			continue
 		}
 		// Check if already activated
-		if activated := combat.ActivatedDice[region.UnitID]; activated != nil && region.DieIndex < len(activated) && activated[region.DieIndex] {
+		if combat.ActivatedDice[region.UnitID] {
 			continue // Can't interact with used dice
 		}
 
 		if !allLocked {
 			// LOCK PHASE: toggle lock
-			a.dispatch(tea.DieLockToggled{UnitID: region.UnitID, DieIndex: region.DieIndex})
+			a.dispatch(tea.DieLockToggled{UnitID: region.UnitID})
 		} else {
 			// ACTIVATION PHASE: check for blank before allowing selection
-			rolled := combat.RolledDice[region.UnitID]
-			if region.DieIndex < len(rolled) && rolled[region.DieIndex].Type() == entity.DieBlank {
+			rolled, exists := combat.RolledDice[region.UnitID]
+			if !exists || rolled.Type() == entity.DieBlank {
 				continue // Can't activate blank - skip this die
 			}
 			// Toggle selection
-			if combat.SelectedUnitID == region.UnitID && combat.SelectedDieIndex == region.DieIndex {
+			if combat.SelectedUnitID == region.UnitID {
 				a.dispatch(tea.DieDeselected{})
 			} else {
-				a.dispatch(tea.DieSelected{UnitID: region.UnitID, DieIndex: region.DieIndex})
+				a.dispatch(tea.DieSelected{UnitID: region.UnitID})
 			}
 		}
 		return
@@ -445,31 +432,30 @@ func (a *App) handleLeftClick(mx, my int) {
 			if region.Type != "unit" || !pt.In(region.Rect) {
 				continue
 			}
-			rolled := combat.RolledDice[combat.SelectedUnitID]
-			if combat.SelectedDieIndex < len(rolled) {
-				die := rolled[combat.SelectedDieIndex]
-				// Validate target based on die type
-				switch die.Type() {
-				case entity.DieDamage:
-					if !combat.IsEnemyUnit(region.UnitID) {
-						continue // Damage must target enemy
-					}
-				case entity.DieShield, entity.DieHeal:
-					if !combat.IsPlayerUnit(region.UnitID) {
-						continue // Shield/Heal must target friendly
-					}
-				case entity.DieBlank:
-					continue // Blank dice cannot be activated
-				}
-				a.dispatch(tea.DiceActivated{
-					SourceUnitID: combat.SelectedUnitID,
-					DieIndex:     combat.SelectedDieIndex,
-					TargetUnitID: region.UnitID,
-					Value:        die.Value(),
-					Effect:       die.Type(),
-					Timestamp:    time.Now().UnixNano(),
-				})
+			rolled, exists := combat.RolledDice[combat.SelectedUnitID]
+			if !exists {
+				continue
 			}
+			// Validate target based on die type
+			switch rolled.Type() {
+			case entity.DieDamage:
+				if !combat.IsEnemyUnit(region.UnitID) {
+					continue // Damage must target enemy
+				}
+			case entity.DieShield, entity.DieHeal:
+				if !combat.IsPlayerUnit(region.UnitID) {
+					continue // Shield/Heal must target friendly
+				}
+			case entity.DieBlank:
+				continue // Blank dice cannot be activated
+			}
+			a.dispatch(tea.DiceActivated{
+				SourceUnitID: combat.SelectedUnitID,
+				TargetUnitID: region.UnitID,
+				Value:        rolled.Value(),
+				Effect:       rolled.Type(),
+				Timestamp:    time.Now().UnixNano(),
+			})
 			return
 		}
 	}

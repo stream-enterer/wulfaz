@@ -14,13 +14,11 @@ const (
 type DicePhase int
 
 const (
-	DicePhaseNone                 DicePhase = iota
-	DicePhasePreview                        // All dice rolled, player sees enemy plan
-	DicePhasePlayerCommand                  // Player manipulates their command dice
-	DicePhaseAwaitingEnemyCommand           // Player done, click to trigger enemy command
-	DicePhaseEnemyCommand                   // Enemy activates their command dice
-	DicePhaseExecution                      // Units fire in position order
-	DicePhaseRoundEnd                       // Shields expire, round cleanup
+	DicePhaseNone          DicePhase = iota
+	DicePhasePreview                 // All dice rolled, player sees AI targets as preview
+	DicePhasePlayerCommand           // Player manipulates all player unit dice
+	DicePhaseExecution               // All attacks resolve simultaneously
+	DicePhaseRoundEnd                // Shields expire, round cleanup
 )
 
 // DefaultRerollsPerRound is the number of rerolls the player gets per round.
@@ -47,29 +45,19 @@ type CombatModel struct {
 	Log         []string
 	Victor      string // "player", "enemy", "draw", or ""
 
-	// Dice phase fields (Wave 2)
-	Round            int                           // Current round number (1-indexed)
-	DicePhase        DicePhase                     // Current dice phase
-	RolledDice       map[string][]entity.RolledDie // UnitID -> rolled dice with results
-	RerollsRemaining int                           // Player's rerolls left this round
-	SelectedUnitID   string                        // Unit whose die is selected (empty if none)
-	SelectedDieIndex int                           // Index of selected die (-1 if none)
-	ActivatedDice    map[string][]bool             // UnitID -> which dice have been activated
-
-	// Execution phase fields (Wave 3)
-	FiringOrder        []FiringPosition // Positions to resolve in order
-	CurrentFiringIndex int              // Index into FiringOrder
+	// Dice phase fields
+	Round            int                         // Current round number (1-indexed)
+	DicePhase        DicePhase                   // Current dice phase
+	RolledDice       map[string]entity.RolledDie // UnitID -> single rolled die
+	RerollsRemaining int                         // Player's rerolls left this round
+	SelectedUnitID   string                      // Unit whose die is selected (empty if none)
+	ActivatedDice    map[string]bool             // UnitID -> whether die has been activated
+	PlayerTargets    map[string]string           // SourceUnitID -> TargetUnitID (player's assignments)
+	EnemyTargets     map[string]string           // SourceUnitID -> TargetUnitID (AI's assignments)
 
 	// Visualization state (Wave 7)
 	ActiveArrows  []TargetingArrow // Arrows to render
 	FloatingTexts []FloatingText   // Combat text to render
-}
-
-// FiringPosition groups units at same board position for simultaneous resolution
-type FiringPosition struct {
-	Position    int      // Board position (0-9)
-	PlayerUnits []string // Unit IDs of player units at this position
-	EnemyUnits  []string // Unit IDs of enemy units at this position
 }
 
 // TargetingArrow represents a line from attacker to target

@@ -120,10 +120,10 @@ type FollowUpEvent struct {
 // ===== Dice Phase Messages (Wave 2) =====
 
 // RoundStarted signals a new round began with pre-rolled dice.
-// UnitRolls maps UnitID -> face indices (not values) for deterministic replay.
+// UnitRolls maps UnitID -> face index (single die per unit).
 type RoundStarted struct {
 	Round     int
-	UnitRolls map[string][]int // UnitID -> []faceIndex
+	UnitRolls map[string]int // UnitID -> faceIndex
 }
 
 func (RoundStarted) isMsg() {}
@@ -133,27 +133,24 @@ type PreviewDone struct{}
 
 func (PreviewDone) isMsg() {}
 
-// DieLockToggled signals a die's lock state was toggled.
+// DieLockToggled signals the unit's die lock state was toggled.
 type DieLockToggled struct {
-	UnitID   string
-	DieIndex int
+	UnitID string
 }
 
 func (DieLockToggled) isMsg() {}
 
-// RerollRequested signals player wants to reroll unlocked dice.
+// RerollRequested signals player wants to reroll all unlocked player dice.
 // Carries pre-rolled results (RNG in Cmd, not Update).
 type RerollRequested struct {
-	UnitID  string
-	Results []int // New face indices for ALL dice (locked dice get same index)
+	Results map[string]int // UnitID -> new face index (only unlocked units)
 }
 
 func (RerollRequested) isMsg() {}
 
-// DieSelected signals player selected a die for activation.
+// DieSelected signals player selected a unit's die for activation.
 type DieSelected struct {
-	UnitID   string
-	DieIndex int
+	UnitID string
 }
 
 func (DieSelected) isMsg() {}
@@ -166,7 +163,6 @@ func (DieDeselected) isMsg() {}
 // DiceActivated signals a die effect was activated on a target.
 type DiceActivated struct {
 	SourceUnitID string
-	DieIndex     int
 	TargetUnitID string
 	Value        int            // The die's result value
 	Effect       entity.DieType // damage/shield/heal
@@ -201,45 +197,27 @@ type DicePhaseAdvanced struct {
 
 func (DicePhaseAdvanced) isMsg() {}
 
-// ===== Wave 3: Combat Phase Messages =====
+// ===== AI Targeting Messages =====
 
-// EnemyCommandResolved signals enemy AI finished activating command dice.
-type EnemyCommandResolved struct {
-	Actions []EnemyDiceAction
+// AITargetsComputed signals AI has computed targets for all enemy units.
+type AITargetsComputed struct {
+	Targets map[string]string // EnemyUnitID -> PlayerTargetID
 }
 
-func (EnemyCommandResolved) isMsg() {}
+func (AITargetsComputed) isMsg() {}
 
-// EnemyDiceAction records one enemy command die activation.
-type EnemyDiceAction struct {
-	SourceUnitID string
-	TargetUnitID string
-	DieIndex     int
-	Effect       entity.DieType
-	Value        int
-}
-
-// ExecutionStarted signals execution phase began with firing order.
-type ExecutionStarted struct {
-	FiringOrder []model.FiringPosition
-}
-
-func (ExecutionStarted) isMsg() {}
-
-// PositionResolved signals one position's attacks calculated.
-type PositionResolved struct {
-	Position  int
+// AllAttacksResolved signals all attacks have been resolved simultaneously.
+type AllAttacksResolved struct {
 	Attacks   []AttackResult
-	Timestamp int64 // Unix nanoseconds for floating text
+	Timestamp int64
 }
 
-func (PositionResolved) isMsg() {}
+func (AllAttacksResolved) isMsg() {}
 
 // AttackResult records one attack's outcome.
 type AttackResult struct {
 	AttackerID     string
 	TargetID       string
-	DieIndex       int
 	Damage         int
 	ShieldAbsorbed int // How much was absorbed by shields
 	NewHealth      int
@@ -287,11 +265,6 @@ type ExecutionAdvanceClicked struct {
 }
 
 func (ExecutionAdvanceClicked) isMsg() {}
-
-// EnemyCommandAdvanceClicked signals player clicked to trigger enemy command phase.
-type EnemyCommandAdvanceClicked struct{}
-
-func (EnemyCommandAdvanceClicked) isMsg() {}
 
 // ===== Drag-and-Drop Messages =====
 
