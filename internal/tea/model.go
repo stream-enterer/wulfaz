@@ -1010,6 +1010,11 @@ func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
 
 	m.Combat = combat
 
+	// Check if combat ended (command unit killed by dice effect)
+	if victor := m.checkCombatEnd(); victor != VictorNone {
+		return m.applyCombatEnd()
+	}
+
 	// Auto-advance when all player dice are activated
 	if combat.DicePhase == model.DicePhasePlayerCommand && allPlayerDiceActivated(m.Combat) {
 		return m, func() Msg { return PlayerCommandDone{} }

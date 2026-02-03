@@ -483,3 +483,59 @@ func TestF167_CommandTargetableWhenAlone(t *testing.T) {
 		t.Errorf("expected enemy_cmd, got %s", validTargets[0].ID)
 	}
 }
+
+func TestHandleDiceEffectApplied_KillsEnemyCommand_EndsCombat(t *testing.T) {
+	enemyCmd := entity.Unit{
+		ID:   "enemy_cmd",
+		Tags: []core.Tag{"command"},
+		Attributes: map[string]core.Attribute{
+			"health": {Name: "health", Base: 10},
+		},
+	}
+	playerCmd := entity.Unit{
+		ID:   "player_cmd",
+		Tags: []core.Tag{"command"},
+		Attributes: map[string]core.Attribute{
+			"health": {Name: "health", Base: 50},
+		},
+	}
+
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:       model.CombatActive,
+			DicePhase:   model.DicePhasePlayerCommand,
+			PlayerUnits: []entity.Unit{playerCmd},
+			EnemyUnits:  []entity.Unit{enemyCmd},
+		},
+	}
+
+	// Dice effect kills enemy command (health -> 0)
+	msg := DiceEffectApplied{
+		SourceUnitID: "player_cmd",
+		TargetUnitID: "enemy_cmd",
+		Effect:       entity.DieDamage,
+		Value:        10,
+		NewHealth:    0,
+		NewShields:   0,
+	}
+
+	newM, cmd := m.Update(msg)
+
+	// Combat should be resolved with player victory
+	if newM.Combat.Phase != model.CombatResolved {
+		t.Errorf("Combat.Phase = %v, want CombatResolved", newM.Combat.Phase)
+	}
+	if newM.Combat.Victor != "player" {
+		t.Errorf("Combat.Victor = %q, want %q", newM.Combat.Victor, "player")
+	}
+	// Should return CombatEnded command
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd")
+	}
+	result := cmd()
+	if _, ok := result.(CombatEnded); !ok {
+		t.Errorf("Cmd returned %T, want CombatEnded", result)
+	}
+}
