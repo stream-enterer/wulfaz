@@ -1003,17 +1003,7 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 	combat.SelectedUnitID = ""
 	m.Combat = combat
 
-	// For damage, only store target - don't apply yet (simultaneous resolution)
-	// For shield/heal, apply immediately
-	if rolled.Type() == entity.DieDamage {
-		// Auto-advance when all player dice are activated
-		if allPlayerDiceActivated(m.Combat) {
-			return m, func() Msg { return PlayerCommandDone{} }
-		}
-		return m, nil
-	}
-
-	// Return Cmd to apply shield/heal effect immediately
+	// Return Cmd to apply effect immediately
 	return m, ApplyDiceEffect(msg.SourceUnitID, msg.TargetUnitID, rolled.Type(), rolled.Value(), m.Combat, msg.Timestamp)
 }
 

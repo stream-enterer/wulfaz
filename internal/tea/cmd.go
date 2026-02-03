@@ -248,30 +248,6 @@ func ExecuteAllAttacks(combat model.CombatModel, timestamp int64) Cmd {
 		var attacks []AttackResult
 		hpSnapshot := buildHPSnapshot(combat)
 
-		// Collect all damage from player units
-		for _, unit := range combat.PlayerUnits {
-			if !unit.IsAlive() || !unit.HasDie {
-				continue
-			}
-
-			targetID, hasTarget := combat.PlayerTargets[unit.ID]
-			if !hasTarget {
-				continue
-			}
-
-			rolled, exists := combat.RolledDice[unit.ID]
-			if !exists {
-				continue
-			}
-
-			face := rolled.CurrentFace()
-			if face.Type != entity.DieDamage {
-				continue
-			}
-
-			attacks = resolveDamage(attacks, unit.ID, targetID, face.Value, hpSnapshot)
-		}
-
 		// Collect all damage from enemy units
 		for _, unit := range combat.EnemyUnits {
 			if !unit.IsAlive() || !unit.HasDie {
