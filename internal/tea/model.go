@@ -772,6 +772,11 @@ func (m Model) handlePreviewDone(_ PreviewDone) (Model, Cmd) {
 	combat.DicePhase = model.DicePhasePlayerCommand
 	combat.ActiveArrows = nil // Clear preview arrows (Wave 7)
 	m.Combat = combat
+
+	// Auto-advance if player has no actionable dice (all blank)
+	if allPlayerDiceActivated(m.Combat) {
+		return m, func() Msg { return PlayerCommandDone{} }
+	}
 	return m, nil
 }
 
@@ -827,6 +832,11 @@ func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
 	}
 
 	m.Combat = combat
+
+	// Auto-advance if player has no actionable dice after rerolls exhausted
+	if m.Combat.RerollsRemaining == 0 && allPlayerDiceActivated(m.Combat) {
+		return m, func() Msg { return PlayerCommandDone{} }
+	}
 	return m, nil
 }
 

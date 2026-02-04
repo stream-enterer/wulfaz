@@ -539,3 +539,66 @@ func TestHandleDiceEffectApplied_KillsEnemyCommand_EndsCombat(t *testing.T) {
 		t.Errorf("Cmd returned %T, want CombatEnded", result)
 	}
 }
+
+func TestHandlePreviewDone_AllBlankDice(t *testing.T) {
+	playerCmd := entity.Unit{
+		ID:     "player_cmd",
+		HasDie: true,
+	}
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:       model.CombatActive,
+			DicePhase:   model.DicePhasePreview,
+			PlayerUnits: []entity.Unit{playerCmd},
+			RolledDice: map[string]entity.RolledDie{
+				// Empty Faces slice makes CurrentFace() return DieBlank
+				"player_cmd": {Faces: nil, FaceIndex: 0},
+			},
+		},
+	}
+
+	_, cmd := m.Update(PreviewDone{})
+
+	// Should return PlayerCommandDone cmd to auto-advance
+	if cmd == nil {
+		t.Fatal("expected cmd to auto-advance, got nil")
+	}
+	if _, ok := cmd().(PlayerCommandDone); !ok {
+		t.Error("expected PlayerCommandDone msg")
+	}
+}
+
+func TestHandleRerollRequested_AllBlankAfterReroll(t *testing.T) {
+	// Setup: 1 reroll remaining, will become 0 after this reroll
+	// Die has only blank face, so reroll result is blank
+	blankFaces := []entity.DieFace{{Type: entity.DieBlank}}
+	playerCmd := entity.Unit{
+		ID:     "player_cmd",
+		HasDie: true,
+	}
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:            model.CombatActive,
+			DicePhase:        model.DicePhasePlayerCommand,
+			PlayerUnits:      []entity.Unit{playerCmd},
+			RerollsRemaining: 1,
+			RolledDice: map[string]entity.RolledDie{
+				"player_cmd": {Faces: blankFaces, FaceIndex: 0, Locked: false},
+			},
+		},
+	}
+
+	_, cmd := m.Update(RerollRequested{Results: map[string]int{"player_cmd": 0}})
+
+	// Should return PlayerCommandDone cmd to auto-advance
+	if cmd == nil {
+		t.Fatal("expected cmd to auto-advance, got nil")
+	}
+	if _, ok := cmd().(PlayerCommandDone); !ok {
+		t.Error("expected PlayerCommandDone msg")
+	}
+}
