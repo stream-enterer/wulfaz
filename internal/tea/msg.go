@@ -247,6 +247,11 @@ type DieUnlocked struct {
 
 func (DieUnlocked) isMsg() {}
 
+// UnlockAllDiceRequested signals player wants to unlock all dice to return to lock phase.
+type UnlockAllDiceRequested struct{}
+
+func (UnlockAllDiceRequested) isMsg() {}
+
 // AllDiceLocked signals player pressed ENTER to lock all remaining dice.
 type AllDiceLocked struct{}
 

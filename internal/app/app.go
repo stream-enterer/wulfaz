@@ -395,10 +395,14 @@ func (a *App) pollCombatInput() {
 			}
 		}
 
-		// Backspace = Undo (only when all dice locked)
+		// Backspace = Undo or Unlock All (only when all dice locked)
 		if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
 			if tea.AllPlayerDiceLocked(combat) {
-				a.dispatch(tea.UndoRequested{})
+				if len(combat.UndoStack) >= 2 {
+					a.dispatch(tea.UndoRequested{})
+				} else if combat.RerollsRemaining > 0 {
+					a.dispatch(tea.UnlockAllDiceRequested{})
+				}
 			}
 		}
 

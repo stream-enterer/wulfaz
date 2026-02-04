@@ -168,6 +168,8 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleUndoRequested(msg)
 	case DieUnlocked:
 		return m.handleDieUnlocked(msg)
+	case UnlockAllDiceRequested:
+		return m.handleUnlockAllDiceRequested(msg)
 	case AllDiceLocked:
 		return m.handleAllDiceLocked(msg)
 	case EndTurnRequested:
@@ -1417,25 +1419,16 @@ func (m Model) handleUndoRequested(_ UndoRequested) (Model, Cmd) {
 	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
 		return m, nil
 	}
-	if len(m.Combat.UndoStack) == 0 {
+	// Need at least one action to undo
+	if len(m.Combat.UndoStack) < 2 {
 		return m, nil
 	}
 
 	combat := m.Combat
-	var snapshot model.UndoSnapshot
-	var newStack []model.UndoSnapshot
-
-	if len(combat.UndoStack) == 1 {
-		// Only initial snapshot - restore to it (acts as "unlock all")
-		// Keep the snapshot in stack so it can be used again
-		snapshot = combat.UndoStack[0]
-		newStack = combat.UndoStack
-	} else {
-		// Pop last snapshot, restore to previous
-		newStack = make([]model.UndoSnapshot, len(combat.UndoStack)-1)
-		copy(newStack, combat.UndoStack[:len(combat.UndoStack)-1])
-		snapshot = newStack[len(newStack)-1]
-	}
+	// Pop last snapshot, restore previous
+	newStack := make([]model.UndoSnapshot, len(combat.UndoStack)-1)
+	copy(newStack, combat.UndoStack[:len(combat.UndoStack)-1])
+	snapshot := newStack[len(newStack)-1]
 
 	combat.RolledDice = entity.CopyRolledDiceMap(snapshot.RolledDice)
 	combat.RerollsRemaining = snapshot.RerollsRemaining
@@ -1469,6 +1462,41 @@ func (m Model) handleDieUnlocked(msg DieUnlocked) (Model, Cmd) {
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
 	rolled.Locked = false
 	combat.RolledDice[msg.UnitID] = rolled
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleUnlockAllDiceRequested(_ UnlockAllDiceRequested) (Model, Cmd) {
+	if m.Phase != PhaseCombat {
+		return m, nil
+	}
+	if m.Combat.Phase != model.CombatActive {
+		return m, nil
+	}
+	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
+	if m.Combat.RerollsRemaining <= 0 {
+		return m, nil
+	}
+
+	combat := m.Combat
+	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
+
+	// Unlock all non-activated player dice
+	for _, u := range combat.PlayerUnits {
+		if !u.IsAlive() || !u.HasDie {
+			continue
+		}
+		if rolled, ok := combat.RolledDice[u.ID]; ok && !combat.ActivatedDice[u.ID] {
+			rolled.Locked = false
+			combat.RolledDice[u.ID] = rolled
+		}
+	}
+
+	// Clear selection and confirmation state (returning to lock phase)
+	combat.SelectedUnitID = ""
+	combat.EndTurnConfirmPending = false
 	m.Combat = combat
 	return m, nil
 }

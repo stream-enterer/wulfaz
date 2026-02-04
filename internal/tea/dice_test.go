@@ -386,8 +386,8 @@ func TestUndoRequested_RequiresPhaseCombat(t *testing.T) {
 	}
 }
 
-func TestUndoRequested_UnlocksAllWithSingleSnapshot(t *testing.T) {
-	// When there's only the initial snapshot, undo should restore to it (unlock all)
+func TestUndoRequested_RequiresMultipleSnapshots(t *testing.T) {
+	// With only the initial snapshot, undo should be no-op
 	m := Model{
 		Version: 1,
 		Phase:   PhaseCombat,
@@ -403,26 +403,139 @@ func TestUndoRequested_UnlocksAllWithSingleSnapshot(t *testing.T) {
 			},
 			ActivatedDice: map[string]bool{"p1": false},
 			UndoStack: []model.UndoSnapshot{
-				{
-					RolledDice: map[string]entity.RolledDie{
-						"p1": {Locked: false, Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 3}}, FaceIndex: 0},
-					},
-					RerollsRemaining: 2,
-					ActivatedDice:    map[string]bool{"p1": false},
-				},
+				{RerollsRemaining: 2},
 			},
 		},
 	}
 
 	newM, _ := m.Update(UndoRequested{})
 
-	// Should restore to initial snapshot (unlocked dice)
-	if newM.Combat.RolledDice["p1"].Locked {
-		t.Error("undo with single snapshot should unlock dice")
+	// Should be no-op - only 1 snapshot
+	if !newM.Combat.RolledDice["p1"].Locked {
+		t.Error("undo with single snapshot should be no-op")
 	}
-	// Stack should remain at 1
+	// Stack should remain unchanged
 	if len(newM.Combat.UndoStack) != 1 {
-		t.Error("undo stack should remain at 1 after restoring to initial")
+		t.Errorf("undo stack should remain unchanged, got %d", len(newM.Combat.UndoStack))
+	}
+}
+
+func TestUnlockAllDiceRequested_UnlocksAllDice(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:            model.CombatActive,
+			DicePhase:        model.DicePhasePlayerCommand,
+			RerollsRemaining: 2,
+			PlayerUnits: []entity.Unit{
+				{ID: "p1", Position: 0, HasDie: true, Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+				{ID: "p2", Position: 1, HasDie: true, Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+			},
+			RolledDice: map[string]entity.RolledDie{
+				"p1": {Locked: true, Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 3}}, FaceIndex: 0},
+				"p2": {Locked: true, Faces: []entity.DieFace{{Type: entity.DieShield, Value: 2}}, FaceIndex: 0},
+			},
+			ActivatedDice: map[string]bool{"p1": false, "p2": false},
+			UndoStack:     []model.UndoSnapshot{{RerollsRemaining: 2}}, // Initial snapshot
+		},
+	}
+
+	newM, _ := m.Update(UnlockAllDiceRequested{})
+
+	if newM.Combat.RolledDice["p1"].Locked {
+		t.Error("p1 die should be unlocked")
+	}
+	if newM.Combat.RolledDice["p2"].Locked {
+		t.Error("p2 die should be unlocked")
+	}
+	// Undo stack should be unchanged
+	if len(newM.Combat.UndoStack) != 1 {
+		t.Errorf("undo stack should remain unchanged, got %d", len(newM.Combat.UndoStack))
+	}
+}
+
+func TestUnlockAllDiceRequested_SkipsActivatedDice(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:            model.CombatActive,
+			DicePhase:        model.DicePhasePlayerCommand,
+			RerollsRemaining: 2,
+			PlayerUnits: []entity.Unit{
+				{ID: "p1", Position: 0, HasDie: true, Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+				{ID: "p2", Position: 1, HasDie: true, Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+			},
+			RolledDice: map[string]entity.RolledDie{
+				"p1": {Locked: true, Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 3}}, FaceIndex: 0},
+				"p2": {Locked: true, Faces: []entity.DieFace{{Type: entity.DieShield, Value: 2}}, FaceIndex: 0},
+			},
+			ActivatedDice: map[string]bool{"p1": true, "p2": false}, // p1 already activated
+		},
+	}
+
+	newM, _ := m.Update(UnlockAllDiceRequested{})
+
+	// p1 should remain locked (activated)
+	if !newM.Combat.RolledDice["p1"].Locked {
+		t.Error("activated die p1 should remain locked")
+	}
+	// p2 should be unlocked (not activated)
+	if newM.Combat.RolledDice["p2"].Locked {
+		t.Error("p2 die should be unlocked")
+	}
+}
+
+func TestUnlockAllDiceRequested_RequiresRerolls(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:            model.CombatActive,
+			DicePhase:        model.DicePhasePlayerCommand,
+			RerollsRemaining: 0, // No rerolls
+			PlayerUnits: []entity.Unit{
+				{ID: "p1", Position: 0, HasDie: true, Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+			},
+			RolledDice: map[string]entity.RolledDie{
+				"p1": {Locked: true, Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 3}}, FaceIndex: 0},
+			},
+			ActivatedDice: map[string]bool{"p1": false},
+		},
+	}
+
+	newM, _ := m.Update(UnlockAllDiceRequested{})
+
+	// Should be no-op - no rerolls
+	if !newM.Combat.RolledDice["p1"].Locked {
+		t.Error("should not unlock when no rerolls remaining")
+	}
+}
+
+func TestUnlockAllDiceRequested_ClearsSelection(t *testing.T) {
+	m := Model{
+		Version: 1,
+		Phase:   PhaseCombat,
+		Combat: model.CombatModel{
+			Phase:            model.CombatActive,
+			DicePhase:        model.DicePhasePlayerCommand,
+			RerollsRemaining: 2,
+			SelectedUnitID:   "p1", // Has selection
+			PlayerUnits: []entity.Unit{
+				{ID: "p1", Position: 0, HasDie: true, Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+			},
+			RolledDice: map[string]entity.RolledDie{
+				"p1": {Locked: true, Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 3}}, FaceIndex: 0},
+			},
+			ActivatedDice: map[string]bool{"p1": false},
+		},
+	}
+
+	newM, _ := m.Update(UnlockAllDiceRequested{})
+
+	if newM.Combat.SelectedUnitID != "" {
+		t.Error("unlock-all should clear selection")
 	}
 }
 
