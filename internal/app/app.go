@@ -61,11 +61,6 @@ func New(seed int64) *App {
 		gameUI:   layout.NewGameUI(renderer.GetFace()),
 	}
 
-	// Set up unlock button callback
-	a.gameUI.OnUnlockClicked = func() {
-		a.dispatch(tea.UnlockAllDice{})
-	}
-
 	// Build initial roster and store in model
 	a.model.PlayerRoster = a.buildInitialRoster()
 
@@ -118,9 +113,6 @@ func (a *App) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 // syncUIState updates the sidebar UI widgets from the current model state
 func (a *App) syncUIState() {
-	// Default: hide unlock button
-	a.gameUI.SetUnlockButtonVisible(false)
-
 	switch a.model.Phase {
 	case tea.PhaseMenu:
 		a.gameUI.SetRoundText("WULFAZ")
@@ -161,7 +153,7 @@ func (a *App) syncUIState() {
 		a.gameUI.SetRoundText(fmt.Sprintf("Round: %d", combat.Round))
 		a.gameUI.SetKeysText("SPACE=Pause  ESC=Quit")
 
-		// Phase-specific hints and unlock button
+		// Phase-specific hints
 		hint := ""
 		switch combat.DicePhase {
 		case model.DicePhaseExecution:
@@ -169,7 +161,6 @@ func (a *App) syncUIState() {
 		case model.DicePhasePreview:
 			hint = "Click to continue..."
 		case model.DicePhasePlayerCommand:
-			// During confirmation, show only the prompt and hide unlock button
 			if combat.EndTurnConfirmPending {
 				diceWord := "dice"
 				if combat.UsableDiceRemaining == 1 {
@@ -177,18 +168,25 @@ func (a *App) syncUIState() {
 				}
 				hint = fmt.Sprintf("End turn and skip %d %s? (y/n)",
 					combat.UsableDiceRemaining, diceWord)
-				a.gameUI.SetUnlockButtonVisible(false)
 			} else {
 				allLocked := tea.AllPlayerDiceLocked(combat)
 				if !allLocked {
-					hint = fmt.Sprintf("LClick die to lock/unlock\nR - Reroll unlocked (%d/2)\nENTER - Done Rolling",
-						combat.RerollsRemaining)
+					hint = fmt.Sprintf("LClick die to lock/unlock\nR - Reroll unlocked (%d/%d)\nENTER - Done Rolling",
+						combat.RerollsRemaining, combat.InitialRerolls)
 				} else {
-					hint = "LClick die to select\nLClick target to activate\nRClick to cancel\nENTER - End turn"
-					// Show unlock button if rerolls remaining
+					// Build hint based on available actions
+					undoDepth := len(combat.UndoStack) - 1
+					lines := []string{"LClick die to select", "LClick target to activate"}
 					if combat.RerollsRemaining > 0 {
-						a.gameUI.SetUnlockButtonVisible(true)
+						lines = append(lines, "RClick die to unlock")
 					}
+					if undoDepth > 0 {
+						lines = append(lines, fmt.Sprintf("BKSP - Undo (%d/%d rolls)", undoDepth, combat.InitialRerolls))
+					} else if len(combat.UndoStack) >= 1 && combat.RerollsRemaining > 0 {
+						lines = append(lines, "BKSP - Unlock all")
+					}
+					lines = append(lines, "ENTER - End turn")
+					hint = strings.Join(lines, "\n")
 				}
 			}
 		case model.DicePhaseNone, model.DicePhaseRoundEnd:
@@ -397,16 +395,36 @@ func (a *App) pollCombatInput() {
 			}
 		}
 
+		// Backspace = Undo (only when all dice locked)
+		if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
+			if tea.AllPlayerDiceLocked(combat) {
+				a.dispatch(tea.UndoRequested{})
+			}
+		}
+
 		// Left-click = lock toggle OR select/target (depending on lock state)
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			mx, my := ebiten.CursorPosition()
 			a.handleLeftClick(mx, my)
 		}
 
-		// Right-click = cancel selection (only in activation mode)
+		// Right-click = cancel selection OR unlock die (depending on state)
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
 			if combat.SelectedUnitID != "" {
+				// Cancel selection first (takes priority)
 				a.dispatch(tea.DieDeselected{})
+			} else if tea.AllPlayerDiceLocked(combat) && combat.RerollsRemaining > 0 {
+				// Try to unlock a die
+				mx, my := ebiten.CursorPosition()
+				pt := image.Point{mx, my}
+				for _, region := range a.hitRegions {
+					if region.Type == "die" && pt.In(region.Rect) {
+						if combat.IsPlayerUnit(region.UnitID) && !combat.ActivatedDice[region.UnitID] {
+							a.dispatch(tea.DieUnlocked{UnitID: region.UnitID})
+						}
+						break
+					}
+				}
 			}
 		}
 	}
@@ -414,7 +432,7 @@ func (a *App) pollCombatInput() {
 
 // handleLeftClick processes left-click for lock toggle or selection/targeting
 func (a *App) handleLeftClick(mx, my int) {
-	// Ignore clicks outside game area (ebitenui handles sidebar clicks including unlock button)
+	// Ignore clicks outside game area (ebitenui handles sidebar clicks)
 	if !a.gameUI.IsMouseInGameArea(mx, my) {
 		return
 	}

@@ -37,6 +37,18 @@ type FloatingText struct {
 	YOffset   int    // Stack position (0, 1, 2, max 3)
 }
 
+// UndoSnapshot stores state at an undo point during DicePhasePlayerCommand.
+type UndoSnapshot struct {
+	RolledDice       map[string]entity.RolledDie
+	RerollsRemaining int
+	ActivatedDice    map[string]bool
+	PlayerTargets    map[string]string
+	SelectedUnitID   string
+	PlayerUnits      []entity.Unit
+	Log              []string
+	FloatingTexts    []FloatingText
+}
+
 type CombatModel struct {
 	// Existing fields
 	PlayerUnits []entity.Unit
@@ -62,6 +74,10 @@ type CombatModel struct {
 	// Visualization state (Wave 7)
 	ActiveArrows  []TargetingArrow // Arrows to render
 	FloatingTexts []FloatingText   // Combat text to render
+
+	// Undo system
+	UndoStack      []UndoSnapshot // Snapshots for undo, cleared on phase exit
+	InitialRerolls int            // RerollsRemaining at phase entry (for display)
 }
 
 // TargetingArrow represents a line from attacker to target

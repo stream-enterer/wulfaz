@@ -235,10 +235,17 @@ type RoundEnded struct{}
 
 func (RoundEnded) isMsg() {}
 
-// UnlockAllDice signals player wants to unlock all dice to re-enter lock phase.
-type UnlockAllDice struct{}
+// UndoRequested signals player wants to undo the last action.
+type UndoRequested struct{}
 
-func (UnlockAllDice) isMsg() {}
+func (UndoRequested) isMsg() {}
+
+// DieUnlocked signals a specific die was unlocked via right-click.
+type DieUnlocked struct {
+	UnitID string
+}
+
+func (DieUnlocked) isMsg() {}
 
 // AllDiceLocked signals player pressed ENTER to lock all remaining dice.
 type AllDiceLocked struct{}

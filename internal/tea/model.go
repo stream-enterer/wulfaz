@@ -164,8 +164,10 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleExecutionComplete(msg)
 	case RoundEnded:
 		return m.handleRoundEnded(msg)
-	case UnlockAllDice:
-		return m.handleUnlockAllDice(msg)
+	case UndoRequested:
+		return m.handleUndoRequested(msg)
+	case DieUnlocked:
+		return m.handleDieUnlocked(msg)
 	case AllDiceLocked:
 		return m.handleAllDiceLocked(msg)
 	case EndTurnRequested:
@@ -526,6 +528,46 @@ func copyUnitSlice(units []entity.Unit) []entity.Unit {
 	return copied
 }
 
+func copyStringSlice(s []string) []string {
+	if s == nil {
+		return nil
+	}
+	result := make([]string, len(s))
+	copy(result, s)
+	return result
+}
+
+func copyFloatingTexts(texts []model.FloatingText) []model.FloatingText {
+	if texts == nil {
+		return nil
+	}
+	result := make([]model.FloatingText, len(texts))
+	copy(result, texts)
+	return result
+}
+
+func copyUndoStack(stack []model.UndoSnapshot) []model.UndoSnapshot {
+	if stack == nil {
+		return nil
+	}
+	result := make([]model.UndoSnapshot, len(stack))
+	copy(result, stack)
+	return result
+}
+
+func createUndoSnapshot(combat model.CombatModel) model.UndoSnapshot {
+	return model.UndoSnapshot{
+		RolledDice:       entity.CopyRolledDiceMap(combat.RolledDice),
+		RerollsRemaining: combat.RerollsRemaining,
+		ActivatedDice:    entity.CopyActivatedMap(combat.ActivatedDice),
+		PlayerTargets:    entity.CopyTargetMap(combat.PlayerTargets),
+		SelectedUnitID:   combat.SelectedUnitID,
+		PlayerUnits:      DeepCopyUnits(combat.PlayerUnits),
+		Log:              copyStringSlice(combat.Log),
+		FloatingTexts:    copyFloatingTexts(combat.FloatingTexts),
+	}
+}
+
 // DeepCopyUnits creates deep copies of units preserving their IDs.
 // Exported for use by app package when building combat from roster.
 func DeepCopyUnits(units []entity.Unit) []entity.Unit {
@@ -804,6 +846,11 @@ func (m Model) handlePreviewDone(_ PreviewDone) (Model, Cmd) {
 	combat := m.Combat
 	combat.DicePhase = model.DicePhasePlayerCommand
 	combat.ActiveArrows = nil // Clear preview arrows (Wave 7)
+
+	// Initialize undo system for this round
+	combat.InitialRerolls = combat.RerollsRemaining
+	combat.UndoStack = []model.UndoSnapshot{createUndoSnapshot(combat)}
+
 	m.Combat = combat
 
 	// Auto-advance if player has no actionable dice (all blank)
@@ -843,6 +890,9 @@ func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
 	}
 
 	combat := m.Combat
+	// Push undo snapshot before changes
+	combat.UndoStack = append(copyUndoStack(combat.UndoStack), createUndoSnapshot(combat))
+
 	combat.RerollsRemaining--
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
 
@@ -949,6 +999,9 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 
 	// Mark die as activated, store target, clear selection
 	combat := m.Combat
+	// Push undo snapshot before changes
+	combat.UndoStack = append(copyUndoStack(combat.UndoStack), createUndoSnapshot(combat))
+
 	combat.ActivatedDice = entity.CopyActivatedMap(combat.ActivatedDice)
 	combat.PlayerTargets = entity.CopyTargetMap(combat.PlayerTargets)
 	combat.ActivatedDice[msg.SourceUnitID] = true
@@ -1087,6 +1140,9 @@ func (m Model) handlePlayerCommandDone(_ PlayerCommandDone) (Model, Cmd) {
 	combat.SelectedUnitID = ""
 	combat.EndTurnConfirmPending = false
 	combat.UsableDiceRemaining = 0
+	// Clear undo stack when exiting phase
+	combat.UndoStack = nil
+	combat.InitialRerolls = 0
 	m.Combat = combat
 
 	// Wait for player click to execute attacks
@@ -1351,17 +1407,53 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 	return m, StartNextRound(m.Seed, combat.Round, getAllUnits(m.Combat))
 }
 
-func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
-	// Check game-level phase
+func (m Model) handleUndoRequested(_ UndoRequested) (Model, Cmd) {
 	if m.Phase != PhaseCombat {
 		return m, nil
 	}
-	// Only valid during PlayerCommand phase
+	if m.Combat.Phase != model.CombatActive {
+		return m, nil
+	}
 	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
 		return m, nil
 	}
-	// Reject when paused
-	if m.Combat.Phase != model.CombatActive {
+	if len(m.Combat.UndoStack) == 0 {
+		return m, nil
+	}
+
+	combat := m.Combat
+	var snapshot model.UndoSnapshot
+	var newStack []model.UndoSnapshot
+
+	if len(combat.UndoStack) == 1 {
+		// Only initial snapshot - restore to it (acts as "unlock all")
+		// Keep the snapshot in stack so it can be used again
+		snapshot = combat.UndoStack[0]
+		newStack = combat.UndoStack
+	} else {
+		// Pop last snapshot, restore to previous
+		newStack = make([]model.UndoSnapshot, len(combat.UndoStack)-1)
+		copy(newStack, combat.UndoStack[:len(combat.UndoStack)-1])
+		snapshot = newStack[len(newStack)-1]
+	}
+
+	combat.RolledDice = entity.CopyRolledDiceMap(snapshot.RolledDice)
+	combat.RerollsRemaining = snapshot.RerollsRemaining
+	combat.ActivatedDice = entity.CopyActivatedMap(snapshot.ActivatedDice)
+	combat.PlayerTargets = entity.CopyTargetMap(snapshot.PlayerTargets)
+	combat.SelectedUnitID = snapshot.SelectedUnitID
+	combat.PlayerUnits = DeepCopyUnits(snapshot.PlayerUnits)
+	combat.Log = copyStringSlice(snapshot.Log)
+	combat.FloatingTexts = copyFloatingTexts(snapshot.FloatingTexts)
+	combat.UndoStack = newStack
+	combat.EndTurnConfirmPending = false
+
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleDieUnlocked(msg DieUnlocked) (Model, Cmd) {
+	if !m.isValidDiceInteraction(msg.UnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
 	if m.Combat.RerollsRemaining <= 0 {
@@ -1369,22 +1461,14 @@ func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
 	}
 
 	combat := m.Combat
-	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
-	combat.ActivatedDice = entity.CopyActivatedMap(combat.ActivatedDice)
-	combat.PlayerTargets = make(map[string]string)
-	combat.SelectedUnitID = ""
-	combat.EndTurnConfirmPending = false
-	combat.UsableDiceRemaining = 0
-
-	// Unlock all player dice and clear activated state
-	for _, u := range combat.PlayerUnits {
-		if rolled, ok := combat.RolledDice[u.ID]; ok {
-			rolled.Locked = false
-			combat.RolledDice[u.ID] = rolled
-		}
-		combat.ActivatedDice[u.ID] = false
+	rolled, exists := combat.RolledDice[msg.UnitID]
+	if !exists || !rolled.Locked || combat.ActivatedDice[msg.UnitID] {
+		return m, nil
 	}
 
+	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
+	rolled.Locked = false
+	combat.RolledDice[msg.UnitID] = rolled
 	m.Combat = combat
 	return m, nil
 }

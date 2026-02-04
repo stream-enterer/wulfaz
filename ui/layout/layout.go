@@ -27,18 +27,13 @@ type GameUI struct {
 	centerPanel *widget.Container
 
 	// Left sidebar text widgets
-	leftSidebar  *widget.Container
-	roundText    *widget.Text
-	keysText     *widget.Text
-	hintText     *widget.Text
-	unlockButton *widget.Button
-	buttonShown  bool
+	leftSidebar *widget.Container
+	roundText   *widget.Text
+	keysText    *widget.Text
+	hintText    *widget.Text
 
 	// Right sidebar
 	logText *widget.Text
-
-	// Callbacks (set by app)
-	OnUnlockClicked func()
 }
 
 func NewGameUI(face *text.Face) *GameUI {
@@ -72,33 +67,11 @@ func NewGameUI(face *text.Face) *GameUI {
 		widget.TextOpts.MaxWidth(float64(LeftSidebarWidth-20)),
 	)
 
-	// Unlock button (hidden by default)
-	buttonColor := color.RGBA{60, 60, 80, 255}
-	g.unlockButton = widget.NewButton(
-		widget.ButtonOpts.WidgetOpts(
-			widget.WidgetOpts.MinSize(80, 24),
-		),
-		widget.ButtonOpts.Image(&widget.ButtonImage{
-			Idle:    eimage.NewNineSliceColor(buttonColor),
-			Hover:   eimage.NewNineSliceColor(color.RGBA{80, 80, 100, 255}),
-			Pressed: eimage.NewNineSliceColor(color.RGBA{40, 40, 60, 255}),
-		}),
-		widget.ButtonOpts.Text("Unlock", face, &widget.ButtonTextColor{
-			Idle: textColor,
-		}),
-		widget.ButtonOpts.ClickedHandler(func(args *widget.ButtonClickedEventArgs) {
-			if g.OnUnlockClicked != nil {
-				g.OnUnlockClicked()
-			}
-		}),
-	)
-	// Store reference to left sidebar for adding/removing button
 	g.leftSidebar = leftSidebar
 
 	leftSidebar.AddChild(g.roundText)
 	leftSidebar.AddChild(g.keysText)
 	leftSidebar.AddChild(g.hintText)
-	// Button not added initially - will be added via SetUnlockButtonVisible
 
 	// Center panel - transparent passthrough
 	g.centerPanel = widget.NewContainer(
@@ -179,15 +152,3 @@ func (g *GameUI) GetCenterOffset() image.Point {
 	return g.CenterRect.Min
 }
 
-// SetUnlockButtonVisible shows or hides the unlock button by adding/removing from container
-func (g *GameUI) SetUnlockButtonVisible(visible bool) {
-	if visible == g.buttonShown {
-		return
-	}
-	if visible {
-		g.leftSidebar.AddChild(g.unlockButton)
-	} else {
-		g.leftSidebar.RemoveChild(g.unlockButton)
-	}
-	g.buttonShown = visible
-}
