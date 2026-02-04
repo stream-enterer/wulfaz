@@ -151,4 +151,3 @@ func (g *GameUI) IsMouseInGameArea(x, y int) bool {
 func (g *GameUI) GetCenterOffset() image.Point {
 	return g.CenterRect.Min
 }
-

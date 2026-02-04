@@ -892,9 +892,6 @@ func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
 	}
 
 	combat := m.Combat
-	// Push undo snapshot before changes
-	combat.UndoStack = append(copyUndoStack(combat.UndoStack), createUndoSnapshot(combat))
-
 	combat.RerollsRemaining--
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
 
@@ -915,6 +912,9 @@ func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
 			}
 		}
 	}
+
+	// Reset undo stack - rerolls are not undoable, only activations are
+	combat.UndoStack = []model.UndoSnapshot{createUndoSnapshot(combat)}
 
 	m.Combat = combat
 
