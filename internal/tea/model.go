@@ -806,9 +806,6 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 	combat.EndTurnConfirmPending = false
 	combat.UsableDiceRemaining = 0
 
-	// Announce new round in combat log
-	combat.Log = appendLogEntry(combat.Log, fmt.Sprintf("--- Round %d ---", msg.Round))
-
 	// Convert roll indices to RolledDie for all units (single die per unit)
 	allUnits := getAllUnits(combat)
 	for _, unit := range allUnits {
@@ -844,6 +841,9 @@ func (m Model) handlePreviewDone(_ PreviewDone) (Model, Cmd) {
 	combat := m.Combat
 	combat.DicePhase = model.DicePhasePlayerCommand
 	combat.ActiveArrows = nil // Clear preview arrows (Wave 7)
+
+	// Announce new round in combat log
+	combat.Log = appendLogEntry(combat.Log, fmt.Sprintf("--- Round %d ---", combat.Round))
 
 	// Initialize undo system for this round
 	combat.InitialRerolls = combat.RerollsRemaining
