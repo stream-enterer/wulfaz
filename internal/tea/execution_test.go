@@ -303,20 +303,13 @@ func TestAllAttacksResolved_VictoryCheck(t *testing.T) {
 
 	newM, cmd := m.Update(msg)
 
-	// Should return timer request for round end pause on victory
-	if cmd == nil {
-		t.Fatal("expected timer cmd, got nil")
-	}
-	timerReq, ok := cmd().(StartTimerRequested)
-	if !ok {
-		t.Fatalf("expected StartTimerRequested, got %T", cmd())
-	}
-	if timerReq.ID != TimerRoundEnd {
-		t.Errorf("timer ID = %s, want %s", timerReq.ID, TimerRoundEnd)
+	// Should return nil (waiting for click, not timer)
+	if cmd != nil {
+		t.Fatalf("expected nil cmd, got %T", cmd())
 	}
 
-	// Step 2: TimerFired triggers victory check
-	newM, cmd = newM.Update(TimerFired{ID: TimerRoundEnd})
+	// Step 2: RoundEndClicked triggers victory check
+	newM, cmd = newM.Update(RoundEndClicked{})
 
 	// Combat should end
 	if newM.Combat.Phase != model.CombatResolved {

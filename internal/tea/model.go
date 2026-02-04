@@ -3,7 +3,6 @@ package tea
 import (
 	"fmt"
 	"maps"
-	"time"
 
 	"wulfaz/internal/core"
 	"wulfaz/internal/effect"
@@ -12,11 +11,10 @@ import (
 	"wulfaz/internal/model"
 )
 
-// Wave 7: Constants for floating text and timing
+// Wave 7: Constants for floating text
 const (
-	CombatTextDuration = 1500 * time.Millisecond
-	RoundEndPause      = 2 * time.Second
-	MaxTextStack       = 3 // Cap stacking to prevent overflow
+	CombatTextDuration = 1500000000 // 1.5 seconds in nanoseconds
+	MaxTextStack       = 3          // Cap stacking to prevent overflow
 )
 
 // Color constants as uint32 (0xRRGGBBAA)
@@ -179,13 +177,11 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 	case EndTurnCanceled:
 		return m.handleEndTurnCanceled(msg)
 
-	// Wave 7: Timer messages
-	case TimerFired:
-		return m.handleTimerFired(msg)
-
 	// Wave 7: Click-through execution
 	case ExecutionAdvanceClicked:
 		return m.handleExecutionAdvanceClicked(msg)
+	case RoundEndClicked:
+		return m.handleRoundEndClicked(msg)
 
 	// Drag-and-drop messages
 	case UnitDragStarted:
@@ -1301,12 +1297,8 @@ func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
 	combat.DicePhase = model.DicePhaseRoundEnd
 	m.Combat = combat
 
-	// Check victory
-	if victor := m.checkCombatEnd(); victor != VictorNone {
-		return m, StartTimer(TimerRoundEnd, RoundEndPause)
-	}
-
-	return m, StartTimer(TimerRoundEnd, RoundEndPause)
+	// Wait for click to continue
+	return m, nil
 }
 
 // formatAttackTexts creates FloatingText entries for an attack.
@@ -1501,23 +1493,6 @@ func (m Model) handleUnlockAllDiceRequested(_ UnlockAllDiceRequested) (Model, Cm
 	return m, nil
 }
 
-// ===== Wave 7: Timer Handlers =====
-
-func (m Model) handleTimerFired(msg TimerFired) (Model, Cmd) {
-	if msg.ID == TimerRoundEnd {
-		// Check victory after pause
-		if victor := m.checkCombatEnd(); victor != VictorNone {
-			return m.applyCombatEnd()
-		}
-		// Trigger round end flow (clears shields, removes dead, starts next round)
-		combat := m.Combat
-		combat.FloatingTexts = nil // Clear texts for new round
-		m.Combat = combat
-		return m, func() Msg { return ExecutionComplete{} }
-	}
-	return m, nil
-}
-
 // handleExecutionAdvanceClicked executes all attacks simultaneously on click.
 func (m Model) handleExecutionAdvanceClicked(msg ExecutionAdvanceClicked) (Model, Cmd) {
 	if m.Combat.DicePhase != model.DicePhaseExecution {
@@ -1543,6 +1518,22 @@ func pruneExpiredTexts(texts []model.FloatingText, nowNano int64) []model.Floati
 		}
 	}
 	return result
+}
+
+// handleRoundEndClicked advances past round end when player clicks.
+func (m Model) handleRoundEndClicked(_ RoundEndClicked) (Model, Cmd) {
+	if m.Combat.DicePhase != model.DicePhaseRoundEnd {
+		return m, nil
+	}
+	// Check victory before starting next round
+	if victor := m.checkCombatEnd(); victor != VictorNone {
+		return m.applyCombatEnd()
+	}
+	// Clear floating texts and trigger round end flow
+	combat := m.Combat
+	combat.FloatingTexts = nil
+	m.Combat = combat
+	return m, func() Msg { return ExecutionComplete{} }
 }
 
 // computeAllPreviewArrows shows both player (solid) and enemy (dashed) arrows.

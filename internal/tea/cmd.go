@@ -2,23 +2,10 @@ package tea
 
 import (
 	"math/rand"
-	"time"
 
 	"wulfaz/internal/entity"
 	"wulfaz/internal/model"
 )
-
-// Timer IDs
-const (
-	TimerRoundEnd = "round_end" // 2 second end-of-round pause
-)
-
-// StartTimer creates a Cmd that requests a timer from the runtime.
-func StartTimer(id string, duration time.Duration) Cmd {
-	return func() Msg {
-		return StartTimerRequested{ID: id, Duration: duration}
-	}
-}
 
 type Cmd func() Msg
 

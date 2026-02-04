@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"log"
-	"slices"
 	"strings"
 	"time"
 
@@ -19,11 +18,6 @@ import (
 	"wulfaz/ui/renderer"
 )
 
-type pendingTimer struct {
-	fireAt time.Time
-	id     string
-}
-
 const (
 	screenWidth  = 1280
 	screenHeight = 720
@@ -31,11 +25,10 @@ const (
 
 // App implements ebiten.Game and drives the TEA runtime
 type App struct {
-	model         tea.Model
-	registry      *template.Registry   // Immutable after init; for shop/rewards later
-	hitRegions    []renderer.HitRegion // Updated each frame for input handling
-	pendingTimers []pendingTimer       // Timers requested by commands
-	gameUI        *layout.GameUI       // 3-column UI layout
+	model      tea.Model
+	registry   *template.Registry   // Immutable after init; for shop/rewards later
+	hitRegions []renderer.HitRegion // Updated each frame for input handling
+	gameUI     *layout.GameUI       // 3-column UI layout
 }
 
 // New creates a new App with units loaded from templates
@@ -77,16 +70,6 @@ func (a *App) Update() error {
 
 	// Update ebitenui
 	a.gameUI.Update()
-
-	// Check for expired timers
-	now := time.Now()
-	for i := len(a.pendingTimers) - 1; i >= 0; i-- {
-		if now.After(a.pendingTimers[i].fireAt) {
-			id := a.pendingTimers[i].id
-			a.pendingTimers = slices.Delete(a.pendingTimers, i, i+1)
-			a.dispatch(tea.TimerFired{ID: id})
-		}
-	}
 
 	a.pollInput()
 
@@ -189,8 +172,10 @@ func (a *App) syncUIState() {
 					hint = strings.Join(lines, "\n")
 				}
 			}
-		case model.DicePhaseNone, model.DicePhaseRoundEnd:
-			// No hint during these phases
+		case model.DicePhaseRoundEnd:
+			hint = "Click to continue..."
+		case model.DicePhaseNone:
+			// No hint
 		}
 		a.gameUI.SetHintText(hint)
 
@@ -364,6 +349,14 @@ func (a *App) pollCombatInput() {
 		return
 	}
 
+	// ROUND END PHASE: click to advance to next round
+	if combat.DicePhase == model.DicePhaseRoundEnd {
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			a.dispatch(tea.RoundEndClicked{})
+		}
+		return
+	}
+
 	// PLAYER COMMAND PHASE
 	if combat.DicePhase == model.DicePhasePlayerCommand {
 		// Confirmation blocks all other input
@@ -528,22 +521,8 @@ func (a *App) dispatch(msg tea.Msg) {
 		return
 	}
 
-	// Intercept timer requests - don't pass to Update
-	if req, ok := msg.(tea.StartTimerRequested); ok {
-		a.pendingTimers = append(a.pendingTimers, pendingTimer{
-			fireAt: time.Now().Add(req.Duration),
-			id:     req.ID,
-		})
-		return
-	}
-
 	var cmd tea.Cmd
 	a.model, cmd = a.model.Update(msg)
-
-	// Clear timers when combat ends
-	if _, ok := msg.(tea.CombatEnded); ok {
-		a.pendingTimers = nil
-	}
 
 	// Execute command if present
 	if cmd != nil {

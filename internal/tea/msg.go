@@ -1,8 +1,6 @@
 package tea
 
 import (
-	"time"
-
 	"wulfaz/internal/core"
 	"wulfaz/internal/entity"
 	"wulfaz/internal/model"
@@ -274,23 +272,7 @@ type EndTurnCanceled struct{}
 
 func (EndTurnCanceled) isMsg() {}
 
-// ===== Wave 7: Timer Messages =====
-
-// StartTimerRequested asks the runtime to start a timer.
-// App intercepts this in dispatch() - it never reaches Update().
-type StartTimerRequested struct {
-	ID       string
-	Duration time.Duration
-}
-
-func (StartTimerRequested) isMsg() {}
-
-// TimerFired signals a timer completed.
-type TimerFired struct {
-	ID string
-}
-
-func (TimerFired) isMsg() {}
+// ===== Wave 7: Click-through Messages =====
 
 // ExecutionAdvanceClicked signals player clicked to advance execution.
 // Timestamp is set by runtime (App layer) to maintain Update purity.
@@ -299,6 +281,11 @@ type ExecutionAdvanceClicked struct {
 }
 
 func (ExecutionAdvanceClicked) isMsg() {}
+
+// RoundEndClicked signals player clicked to advance past round end.
+type RoundEndClicked struct{}
+
+func (RoundEndClicked) isMsg() {}
 
 // ===== Drag-and-Drop Messages =====
 
