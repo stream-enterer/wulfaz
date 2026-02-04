@@ -169,14 +169,26 @@ func (a *App) syncUIState() {
 		case model.DicePhasePreview:
 			hint = "Click to continue..."
 		case model.DicePhasePlayerCommand:
-			allLocked := tea.AllPlayerDiceLocked(combat)
-			if !allLocked {
-				hint = fmt.Sprintf("LClick die to lock/unlock\nR - Reroll unlocked (%d/2)", combat.RerollsRemaining)
+			// During confirmation, show only the prompt and hide unlock button
+			if combat.EndTurnConfirmPending {
+				diceWord := "dice"
+				if combat.UsableDiceRemaining == 1 {
+					diceWord = "die"
+				}
+				hint = fmt.Sprintf("End turn and skip %d %s? (y/n)",
+					combat.UsableDiceRemaining, diceWord)
+				a.gameUI.SetUnlockButtonVisible(false)
 			} else {
-				hint = "LClick die to select\nLClick target to activate\nRClick to cancel"
-				// Show unlock button if rerolls remaining
-				if combat.RerollsRemaining > 0 {
-					a.gameUI.SetUnlockButtonVisible(true)
+				allLocked := tea.AllPlayerDiceLocked(combat)
+				if !allLocked {
+					hint = fmt.Sprintf("LClick die to lock/unlock\nR - Reroll unlocked (%d/2)\nENTER - Done Rolling",
+						combat.RerollsRemaining)
+				} else {
+					hint = "LClick die to select\nLClick target to activate\nRClick to cancel\nENTER - End turn"
+					// Show unlock button if rerolls remaining
+					if combat.RerollsRemaining > 0 {
+						a.gameUI.SetUnlockButtonVisible(true)
+					}
 				}
 			}
 		case model.DicePhaseNone, model.DicePhaseRoundEnd:
@@ -356,6 +368,27 @@ func (a *App) pollCombatInput() {
 
 	// PLAYER COMMAND PHASE
 	if combat.DicePhase == model.DicePhasePlayerCommand {
+		// Confirmation blocks all other input
+		if combat.EndTurnConfirmPending {
+			if inpututil.IsKeyJustPressed(ebiten.KeyY) {
+				a.dispatch(tea.EndTurnConfirmed{})
+			}
+			if inpututil.IsKeyJustPressed(ebiten.KeyN) {
+				a.dispatch(tea.EndTurnCanceled{})
+			}
+			return
+		}
+
+		// ENTER key = Done Rolling or End Turn
+		if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+			if !tea.AllPlayerDiceLocked(combat) {
+				a.dispatch(tea.AllDiceLocked{})
+			} else {
+				count := tea.CountUsablePlayerDice(combat)
+				a.dispatch(tea.EndTurnRequested{UsableDiceCount: count})
+			}
+		}
+
 		// R key = reroll all unlocked player dice
 		if inpututil.IsKeyJustPressed(ebiten.KeyR) && combat.RerollsRemaining > 0 {
 			if !tea.AllPlayerDiceLocked(combat) {

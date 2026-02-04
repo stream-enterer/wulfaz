@@ -166,6 +166,14 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleRoundEnded(msg)
 	case UnlockAllDice:
 		return m.handleUnlockAllDice(msg)
+	case AllDiceLocked:
+		return m.handleAllDiceLocked(msg)
+	case EndTurnRequested:
+		return m.handleEndTurnRequested(msg)
+	case EndTurnConfirmed:
+		return m.handleEndTurnConfirmed(msg)
+	case EndTurnCanceled:
+		return m.handleEndTurnCanceled(msg)
 
 	// Wave 7: Timer messages
 	case TimerFired:
@@ -719,6 +727,29 @@ func AllPlayerDiceLocked(combat model.CombatModel) bool {
 	return true
 }
 
+// CountUsablePlayerDice returns the count of unactivated non-blank dice.
+// Exported for use by app package when dispatching EndTurnRequested.
+func CountUsablePlayerDice(combat model.CombatModel) int {
+	count := 0
+	for _, u := range combat.PlayerUnits {
+		if !u.IsAlive() || !u.HasDie {
+			continue
+		}
+		rolled, exists := combat.RolledDice[u.ID]
+		if !exists {
+			continue
+		}
+		if rolled.Type() == entity.DieBlank {
+			continue
+		}
+		if combat.ActivatedDice[u.ID] {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
 // ===== Dice Phase Handlers (Wave 2) =====
 
 func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
@@ -732,6 +763,8 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 	combat.EnemyTargets = make(map[string]string)
 	combat.SelectedUnitID = ""
 	combat.FloatingTexts = nil
+	combat.EndTurnConfirmPending = false
+	combat.UsableDiceRemaining = 0
 
 	// Announce new round in combat log
 	combat.Log = appendLogEntry(combat.Log, fmt.Sprintf("--- Round %d ---", msg.Round))
@@ -1052,6 +1085,8 @@ func (m Model) handlePlayerCommandDone(_ PlayerCommandDone) (Model, Cmd) {
 	combat := m.Combat
 	combat.DicePhase = model.DicePhaseExecution
 	combat.SelectedUnitID = ""
+	combat.EndTurnConfirmPending = false
+	combat.UsableDiceRemaining = 0
 	m.Combat = combat
 
 	// Wait for player click to execute attacks
@@ -1061,6 +1096,99 @@ func (m Model) handlePlayerCommandDone(_ PlayerCommandDone) (Model, Cmd) {
 func (m Model) handleDicePhaseAdvanced(msg DicePhaseAdvanced) (Model, Cmd) {
 	combat := m.Combat
 	combat.DicePhase = msg.NewPhase
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleAllDiceLocked(_ AllDiceLocked) (Model, Cmd) {
+	if m.Phase != PhaseCombat {
+		return m, nil
+	}
+	if m.Combat.Phase != model.CombatActive {
+		return m, nil
+	}
+	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
+	if AllPlayerDiceLocked(m.Combat) {
+		return m, nil // Already all locked
+	}
+
+	combat := m.Combat
+	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
+
+	for _, u := range combat.PlayerUnits {
+		if !u.IsAlive() || !u.HasDie {
+			continue
+		}
+		if rolled, ok := combat.RolledDice[u.ID]; ok {
+			rolled.Locked = true
+			combat.RolledDice[u.ID] = rolled
+		}
+	}
+
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleEndTurnRequested(msg EndTurnRequested) (Model, Cmd) {
+	if m.Phase != PhaseCombat {
+		return m, nil
+	}
+	if m.Combat.Phase != model.CombatActive {
+		return m, nil
+	}
+	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
+		return m, nil
+	}
+	if !AllPlayerDiceLocked(m.Combat) {
+		return m, nil // Must lock all dice first
+	}
+
+	// Edge case: 0 usable dice - skip confirmation
+	if msg.UsableDiceCount == 0 {
+		combat := m.Combat
+		combat.Log = appendLogEntry(combat.Log, "ended turn early (no usable dice)")
+		m.Combat = combat
+		return m, func() Msg { return PlayerCommandDone{} }
+	}
+
+	// Enter confirmation state
+	combat := m.Combat
+	combat.EndTurnConfirmPending = true
+	combat.UsableDiceRemaining = msg.UsableDiceCount
+	m.Combat = combat
+	return m, nil
+}
+
+func (m Model) handleEndTurnConfirmed(_ EndTurnConfirmed) (Model, Cmd) {
+	if !m.Combat.EndTurnConfirmPending {
+		return m, nil
+	}
+
+	combat := m.Combat
+	combat.EndTurnConfirmPending = false
+	diceWord := "dice"
+	if combat.UsableDiceRemaining == 1 {
+		diceWord = "die"
+	}
+	combat.Log = appendLogEntry(combat.Log,
+		fmt.Sprintf("ended turn early (%d %s skipped)", combat.UsableDiceRemaining, diceWord))
+	combat.UsableDiceRemaining = 0
+	m.Combat = combat
+
+	return m, func() Msg { return PlayerCommandDone{} }
+}
+
+func (m Model) handleEndTurnCanceled(_ EndTurnCanceled) (Model, Cmd) {
+	if !m.Combat.EndTurnConfirmPending {
+		return m, nil
+	}
+
+	combat := m.Combat
+	combat.EndTurnConfirmPending = false
+	combat.Log = appendLogEntry(combat.Log, "canceled end turn")
+	combat.UsableDiceRemaining = 0
 	m.Combat = combat
 	return m, nil
 }
@@ -1245,6 +1373,8 @@ func (m Model) handleUnlockAllDice(_ UnlockAllDice) (Model, Cmd) {
 	combat.ActivatedDice = entity.CopyActivatedMap(combat.ActivatedDice)
 	combat.PlayerTargets = make(map[string]string)
 	combat.SelectedUnitID = ""
+	combat.EndTurnConfirmPending = false
+	combat.UsableDiceRemaining = 0
 
 	// Unlock all player dice and clear activated state
 	for _, u := range combat.PlayerUnits {

@@ -55,6 +55,10 @@ type CombatModel struct {
 	PlayerTargets    map[string]string           // SourceUnitID -> TargetUnitID (player's assignments)
 	EnemyTargets     map[string]string           // SourceUnitID -> TargetUnitID (AI's assignments)
 
+	// End turn confirmation state
+	EndTurnConfirmPending bool // True when waiting for y/n response
+	UsableDiceRemaining   int  // Cached count for display during confirmation
+
 	// Visualization state (Wave 7)
 	ActiveArrows  []TargetingArrow // Arrows to render
 	FloatingTexts []FloatingText   // Combat text to render

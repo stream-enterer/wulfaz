@@ -240,6 +240,28 @@ type UnlockAllDice struct{}
 
 func (UnlockAllDice) isMsg() {}
 
+// AllDiceLocked signals player pressed ENTER to lock all remaining dice.
+type AllDiceLocked struct{}
+
+func (AllDiceLocked) isMsg() {}
+
+// EndTurnRequested signals player pressed ENTER to request ending their turn.
+type EndTurnRequested struct {
+	UsableDiceCount int // Pre-computed count of usable dice remaining
+}
+
+func (EndTurnRequested) isMsg() {}
+
+// EndTurnConfirmed signals player confirmed ending turn (pressed 'y').
+type EndTurnConfirmed struct{}
+
+func (EndTurnConfirmed) isMsg() {}
+
+// EndTurnCanceled signals player canceled ending turn (pressed 'n').
+type EndTurnCanceled struct{}
+
+func (EndTurnCanceled) isMsg() {}
+
 // ===== Wave 7: Timer Messages =====
 
 // StartTimerRequested asks the runtime to start a timer.
