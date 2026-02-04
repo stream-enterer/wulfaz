@@ -219,7 +219,7 @@ func drawRedX(screen *ebiten.Image, x, y float32) {
 // drawUnitDice draws single centered die for any unit.
 func drawUnitDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY, cardW, cardH float32, combat model.CombatModel, isPlayerUnit bool) []HitRegion {
 	var regions []HitRegion
-	if !unit.HasDie {
+	if !unit.HasDie || !unit.IsAlive() {
 		return regions
 	}
 
