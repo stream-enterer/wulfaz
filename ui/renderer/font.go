@@ -13,11 +13,16 @@ import (
 //go:embed fonts/ark-pixel-12px-proportional-latin.otf
 var fontData []byte
 
+//go:embed fonts/ark-pixel-12px-monospaced-latin.otf
+var monoFontData []byte
+
 var arkPixelFace *text.GoTextFace
+var arkPixelMonoFace *text.GoTextFace
 
 // fontFace is a package-level interface variable for ebitenui compatibility.
 // ebitenui expects *text.Face, and arkPixelFace implements text.Face.
 var fontFace text.Face
+var monoFontFace text.Face
 
 // FontSize is the pixel height of the font (exported for layout calculations).
 const FontSize = 12
@@ -25,6 +30,11 @@ const FontSize = 12
 // GetFace returns the font face for external use (ebitenui widgets expect *text.Face).
 func GetFace() *text.Face {
 	return &fontFace
+}
+
+// GetMonoFace returns the monospaced font face for stats display.
+func GetMonoFace() *text.Face {
+	return &monoFontFace
 }
 
 // Shadow settings (matches ebitenutil debug font)
@@ -39,6 +49,13 @@ func init() {
 	}
 	arkPixelFace = &text.GoTextFace{Source: src, Size: FontSize}
 	fontFace = arkPixelFace // Initialize interface for ebitenui
+
+	monoSrc, err := text.NewGoTextFaceSource(bytes.NewReader(monoFontData))
+	if err != nil {
+		log.Fatalf("mono font load failed: %v", err)
+	}
+	arkPixelMonoFace = &text.GoTextFace{Source: monoSrc, Size: FontSize}
+	monoFontFace = arkPixelMonoFace
 }
 
 // DrawText renders white text at (x, y) where y is the TOP of the text.

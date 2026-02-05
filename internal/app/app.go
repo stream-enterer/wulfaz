@@ -25,10 +25,11 @@ const (
 
 // App implements ebiten.Game and drives the TEA runtime
 type App struct {
-	model      tea.Model
-	registry   *template.Registry   // Immutable after init; for shop/rewards later
-	hitRegions []renderer.HitRegion // Updated each frame for input handling
-	gameUI     *layout.GameUI       // 3-column UI layout
+	model         tea.Model
+	registry      *template.Registry   // Immutable after init; for shop/rewards later
+	hitRegions    []renderer.HitRegion // Updated each frame for input handling
+	gameUI        *layout.GameUI       // 3-column UI layout
+	hoveredUnitID string               // Currently hovered unit for stats display
 }
 
 // New creates a new App with units loaded from templates
@@ -51,7 +52,7 @@ func New(seed int64) *App {
 			// F-155: PlayerRoster initialized below after App created
 		},
 		registry: reg,
-		gameUI:   layout.NewGameUI(renderer.GetFace()),
+		gameUI:   layout.NewGameUI(renderer.GetFace(), renderer.GetMonoFace()),
 	}
 
 	// Build initial roster and store in model
@@ -65,8 +66,14 @@ func New(seed int64) *App {
 
 // Update handles input and game logic (implements ebiten.Game)
 func (a *App) Update() error {
+	// Update hover state before syncing UI
+	a.updateHoveredUnit()
+
 	// Sync UI state from model
 	a.syncUIState()
+
+	// Update stats display based on hover
+	a.syncStatsDisplay()
 
 	// Update ebitenui
 	a.gameUI.Update()

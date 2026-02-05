@@ -20,6 +20,8 @@ var (
 	sidebarColor = color.RGBA{25, 25, 40, 255}  // #191928
 	centerColor  = color.RGBA{30, 30, 50, 255}  // #1E1E32
 	textColor    = color.White
+	hpColor      = color.RGBA{255, 80, 80, 255}   // Red for HP
+	shieldColor  = color.RGBA{150, 150, 150, 255} // Grey for shields
 )
 
 type GameUI struct {
@@ -33,15 +35,25 @@ type GameUI struct {
 	hintText  *widget.Text
 
 	// Right sidebar
-	logText   *widget.Text
-	logScroll *widget.ScrollContainer
+	rightSidebar   *widget.Container // Parent container (for relayout calls)
+	statsContainer *widget.Container // Top section: name, HP, shields, dice
+	logContainer   *widget.Container // Bottom section: combat log
+
+	// Stats display (right sidebar top)
+	nameText   *widget.Text
+	hpText     *widget.Text
+	shieldText *widget.Text
+	diceText   *widget.Text
+
+	// Combat log (right sidebar bottom)
+	logText *widget.Text
 
 	// Header and footer
 	headerText *widget.Text
 	footerText *widget.Text
 }
 
-func NewGameUI(face *text.Face) *GameUI {
+func NewGameUI(face, monoFace *text.Face) *GameUI {
 	g := &GameUI{}
 
 	// Header container
@@ -92,7 +104,7 @@ func NewGameUI(face *text.Face) *GameUI {
 	// No background - game renders here
 	)
 
-	// Right sidebar - 2 row grid (top area + log area)
+	// Right sidebar - grid with 2 rows (stats top, log bottom)
 	rightSidebar := widget.NewContainer(
 		widget.ContainerOpts.BackgroundImage(eimage.NewNineSliceColor(sidebarColor)),
 		widget.ContainerOpts.WidgetOpts(
@@ -101,37 +113,64 @@ func NewGameUI(face *text.Face) *GameUI {
 		widget.ContainerOpts.Layout(widget.NewGridLayout(
 			widget.GridLayoutOpts.Columns(1),
 			widget.GridLayoutOpts.Stretch([]bool{true}, []bool{false, true}),
+			widget.GridLayoutOpts.Padding(widget.NewInsetsSimple(10)),
+			widget.GridLayoutOpts.Spacing(0, 10),
+		)),
+	)
+	g.rightSidebar = rightSidebar
+
+	// Stats container (top) - vertical stack
+	g.statsContainer = widget.NewContainer(
+		widget.ContainerOpts.Layout(widget.NewRowLayout(
+			widget.RowLayoutOpts.Direction(widget.DirectionVertical),
+			widget.RowLayoutOpts.Spacing(4),
 		)),
 	)
 
-	// Row 0: Future top content
-	rightTopArea := widget.NewContainer()
+	// Stats widgets
+	g.nameText = widget.NewText(
+		widget.TextOpts.Text("", face, textColor),
+		widget.TextOpts.MaxWidth(float64(RightSidebarWidth-20)),
+	)
+	g.hpText = widget.NewText(
+		widget.TextOpts.Text("", monoFace, hpColor),
+		widget.TextOpts.MaxWidth(float64(RightSidebarWidth-20)),
+	)
+	g.shieldText = widget.NewText(
+		widget.TextOpts.Text("", monoFace, shieldColor),
+		widget.TextOpts.MaxWidth(float64(RightSidebarWidth-20)),
+	)
+	g.diceText = widget.NewText(
+		widget.TextOpts.Text("", monoFace, textColor),
+		widget.TextOpts.MaxWidth(float64(RightSidebarWidth-20)),
+	)
 
-	// Row 1: Log area - scrollable container, auto-scrolls to bottom
-	logContent := widget.NewContainer(
-		widget.ContainerOpts.Layout(widget.NewRowLayout(
-			widget.RowLayoutOpts.Direction(widget.DirectionVertical),
-		)),
+	g.statsContainer.AddChild(g.nameText)
+	g.statsContainer.AddChild(g.hpText)
+	g.statsContainer.AddChild(g.shieldText)
+	g.statsContainer.AddChild(g.diceText)
+
+	// Log container (bottom) - anchor layout with log at bottom
+	g.logContainer = widget.NewContainer(
+		widget.ContainerOpts.Layout(widget.NewAnchorLayout()),
 	)
 
 	g.logText = widget.NewText(
 		widget.TextOpts.Text("", face, textColor),
 		widget.TextOpts.MaxWidth(float64(RightSidebarWidth-20)),
-	)
-	logContent.AddChild(g.logText)
-
-	g.logScroll = widget.NewScrollContainer(
-		widget.ScrollContainerOpts.Content(logContent),
-		widget.ScrollContainerOpts.StretchContentWidth(),
-		widget.ScrollContainerOpts.Padding(&widget.Insets{Left: 10, Right: 10, Top: 10, Bottom: 10}),
-		widget.ScrollContainerOpts.Image(&widget.ScrollContainerImage{
-			Idle: eimage.NewNineSliceColor(color.Transparent),
-			Mask: eimage.NewNineSliceColor(color.White),
-		}),
+		widget.TextOpts.WidgetOpts(
+			widget.WidgetOpts.LayoutData(widget.AnchorLayoutData{
+				VerticalPosition:   widget.AnchorLayoutPositionEnd,
+				HorizontalPosition: widget.AnchorLayoutPositionStart,
+			}),
+		),
 	)
 
-	rightSidebar.AddChild(rightTopArea) // Row 0: doesn't stretch vertically
-	rightSidebar.AddChild(g.logScroll)  // Row 1: stretches to fill, scrolls to bottom
+	g.logContainer.AddChild(g.logText)
+
+	// Add sections to right sidebar
+	rightSidebar.AddChild(g.statsContainer)
+	rightSidebar.AddChild(g.logContainer)
 
 	// Footer container
 	footer := widget.NewContainer(
@@ -200,7 +239,7 @@ func (g *GameUI) SetHintText(s string) {
 // SetLogText updates the combat log (newline-separated entries)
 func (g *GameUI) SetLogText(s string) {
 	g.logText.Label = s
-	g.logScroll.ScrollTop = 1.0 // Auto-scroll to bottom (terminal behavior)
+	g.rightSidebar.RequestRelayout()
 }
 
 // SetHeaderText updates the header text
@@ -221,4 +260,28 @@ func (g *GameUI) IsMouseInGameArea(x, y int) bool {
 // GetCenterOffset returns the top-left offset for game board rendering
 func (g *GameUI) GetCenterOffset() image.Point {
 	return g.CenterRect.Min
+}
+
+// SetNameText updates the unit name display
+func (g *GameUI) SetNameText(s string) {
+	g.nameText.Label = s
+	g.rightSidebar.RequestRelayout()
+}
+
+// SetHPText updates the HP bar display
+func (g *GameUI) SetHPText(s string) {
+	g.hpText.Label = s
+	g.rightSidebar.RequestRelayout()
+}
+
+// SetShieldText updates the shield display
+func (g *GameUI) SetShieldText(s string) {
+	g.shieldText.Label = s
+	g.rightSidebar.RequestRelayout()
+}
+
+// SetDiceText updates the dice net display
+func (g *GameUI) SetDiceText(s string) {
+	g.diceText.Label = s
+	g.rightSidebar.RequestRelayout()
 }
