@@ -34,10 +34,25 @@ type GameUI struct {
 
 	// Right sidebar
 	logText *widget.Text
+
+	// Header and footer
+	headerText *widget.Text
+	footerText *widget.Text
 }
 
 func NewGameUI(face *text.Face) *GameUI {
 	g := &GameUI{}
+
+	// Header container
+	header := widget.NewContainer(
+		widget.ContainerOpts.Layout(widget.NewRowLayout(
+			widget.RowLayoutOpts.Padding(widget.NewInsetsSimple(8)),
+		)),
+	)
+	g.headerText = widget.NewText(
+		widget.TextOpts.Text("Header test", face, textColor),
+	)
+	header.AddChild(g.headerText)
 
 	// Left sidebar container
 	leftSidebar := widget.NewContainer(
@@ -96,16 +111,39 @@ func NewGameUI(face *text.Face) *GameUI {
 	)
 	rightSidebar.AddChild(g.logText)
 
-	// Root container - 3 column grid
+	// Footer container
+	footer := widget.NewContainer(
+		widget.ContainerOpts.Layout(widget.NewRowLayout(
+			widget.RowLayoutOpts.Padding(widget.NewInsetsSimple(8)),
+		)),
+	)
+	g.footerText = widget.NewText(
+		widget.TextOpts.Text("Footer test", face, textColor),
+	)
+	footer.AddChild(g.footerText)
+
+	// Center wrapper - 1 column grid with 3 rows (header, game area, footer)
+	centerWrapper := widget.NewContainer(
+		widget.ContainerOpts.BackgroundImage(eimage.NewNineSliceColor(color.RGBA{30, 30, 50, 255})), // #1E1E32
+		widget.ContainerOpts.Layout(widget.NewGridLayout(
+			widget.GridLayoutOpts.Columns(1),
+			widget.GridLayoutOpts.Stretch([]bool{true}, []bool{false, true, false}),
+		)),
+	)
+	centerWrapper.AddChild(header)        // Row 0: doesn't stretch vertically
+	centerWrapper.AddChild(g.centerPanel) // Row 1: stretches to fill
+	centerWrapper.AddChild(footer)        // Row 2: doesn't stretch vertically
+
+	// Root container - 3 column grid (sidebars + center wrapper)
 	root := widget.NewContainer(
 		widget.ContainerOpts.Layout(widget.NewGridLayout(
 			widget.GridLayoutOpts.Columns(3),
 			widget.GridLayoutOpts.Stretch([]bool{false, true, false}, []bool{true}),
 		)),
 	)
-	root.AddChild(leftSidebar)
-	root.AddChild(g.centerPanel)
-	root.AddChild(rightSidebar)
+	root.AddChild(leftSidebar)   // Column 0: fixed width
+	root.AddChild(centerWrapper) // Column 1: stretches horizontally, contains header/center/footer
+	root.AddChild(rightSidebar)  // Column 2: fixed width
 
 	g.UI = &ebitenui.UI{Container: root}
 
