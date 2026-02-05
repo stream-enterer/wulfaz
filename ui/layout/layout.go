@@ -17,7 +17,8 @@ const (
 )
 
 var (
-	sidebarColor = color.RGBA{25, 25, 40, 255}
+	sidebarColor = color.RGBA{25, 25, 40, 255}  // #191928
+	centerColor  = color.RGBA{30, 30, 50, 255}  // #1E1E32
 	textColor    = color.White
 )
 
@@ -27,10 +28,9 @@ type GameUI struct {
 	centerPanel *widget.Container
 
 	// Left sidebar text widgets
-	leftSidebar *widget.Container
-	roundText   *widget.Text
-	keysText    *widget.Text
-	hintText    *widget.Text
+	roundText *widget.Text
+	keysText  *widget.Text
+	hintText  *widget.Text
 
 	// Right sidebar
 	logText *widget.Text
@@ -50,7 +50,7 @@ func NewGameUI(face *text.Face) *GameUI {
 		)),
 	)
 	g.headerText = widget.NewText(
-		widget.TextOpts.Text("Header test", face, textColor),
+		widget.TextOpts.Text("", face, textColor),
 	)
 	header.AddChild(g.headerText)
 
@@ -81,8 +81,6 @@ func NewGameUI(face *text.Face) *GameUI {
 		widget.TextOpts.Text("", face, textColor),
 		widget.TextOpts.MaxWidth(float64(LeftSidebarWidth-20)),
 	)
-
-	g.leftSidebar = leftSidebar
 
 	leftSidebar.AddChild(g.roundText)
 	leftSidebar.AddChild(g.keysText)
@@ -118,13 +116,13 @@ func NewGameUI(face *text.Face) *GameUI {
 		)),
 	)
 	g.footerText = widget.NewText(
-		widget.TextOpts.Text("Footer test", face, textColor),
+		widget.TextOpts.Text("", face, textColor),
 	)
 	footer.AddChild(g.footerText)
 
 	// Center wrapper - 1 column grid with 3 rows (header, game area, footer)
 	centerWrapper := widget.NewContainer(
-		widget.ContainerOpts.BackgroundImage(eimage.NewNineSliceColor(color.RGBA{30, 30, 50, 255})), // #1E1E32
+		widget.ContainerOpts.BackgroundImage(eimage.NewNineSliceColor(centerColor)),
 		widget.ContainerOpts.Layout(widget.NewGridLayout(
 			widget.GridLayoutOpts.Columns(1),
 			widget.GridLayoutOpts.Stretch([]bool{true}, []bool{false, true, false}),
@@ -178,6 +176,16 @@ func (g *GameUI) SetHintText(s string) {
 // SetLogText updates the combat log (newline-separated entries)
 func (g *GameUI) SetLogText(s string) {
 	g.logText.Label = s
+}
+
+// SetHeaderText updates the header text
+func (g *GameUI) SetHeaderText(s string) {
+	g.headerText.Label = s
+}
+
+// SetFooterText updates the footer text
+func (g *GameUI) SetFooterText(s string) {
+	g.footerText.Label = s
 }
 
 // IsMouseInGameArea returns true if the point is in the center game area
