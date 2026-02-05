@@ -33,7 +33,8 @@ type GameUI struct {
 	hintText  *widget.Text
 
 	// Right sidebar
-	logText *widget.Text
+	logText   *widget.Text
+	logScroll *widget.ScrollContainer
 
 	// Header and footer
 	headerText *widget.Text
@@ -91,15 +92,25 @@ func NewGameUI(face *text.Face) *GameUI {
 	// No background - game renders here
 	)
 
-	// Right sidebar container
+	// Right sidebar - 2 row grid (top area + log area)
 	rightSidebar := widget.NewContainer(
 		widget.ContainerOpts.BackgroundImage(eimage.NewNineSliceColor(sidebarColor)),
 		widget.ContainerOpts.WidgetOpts(
 			widget.WidgetOpts.MinSize(RightSidebarWidth, 0),
 		),
+		widget.ContainerOpts.Layout(widget.NewGridLayout(
+			widget.GridLayoutOpts.Columns(1),
+			widget.GridLayoutOpts.Stretch([]bool{true}, []bool{false, true}),
+		)),
+	)
+
+	// Row 0: Future top content
+	rightTopArea := widget.NewContainer()
+
+	// Row 1: Log area - scrollable container, auto-scrolls to bottom
+	logContent := widget.NewContainer(
 		widget.ContainerOpts.Layout(widget.NewRowLayout(
 			widget.RowLayoutOpts.Direction(widget.DirectionVertical),
-			widget.RowLayoutOpts.Padding(widget.NewInsetsSimple(10)),
 		)),
 	)
 
@@ -107,7 +118,20 @@ func NewGameUI(face *text.Face) *GameUI {
 		widget.TextOpts.Text("", face, textColor),
 		widget.TextOpts.MaxWidth(float64(RightSidebarWidth-20)),
 	)
-	rightSidebar.AddChild(g.logText)
+	logContent.AddChild(g.logText)
+
+	g.logScroll = widget.NewScrollContainer(
+		widget.ScrollContainerOpts.Content(logContent),
+		widget.ScrollContainerOpts.StretchContentWidth(),
+		widget.ScrollContainerOpts.Padding(&widget.Insets{Left: 10, Right: 10, Top: 10, Bottom: 10}),
+		widget.ScrollContainerOpts.Image(&widget.ScrollContainerImage{
+			Idle: eimage.NewNineSliceColor(color.Transparent),
+			Mask: eimage.NewNineSliceColor(color.White),
+		}),
+	)
+
+	rightSidebar.AddChild(rightTopArea) // Row 0: doesn't stretch vertically
+	rightSidebar.AddChild(g.logScroll)  // Row 1: stretches to fill, scrolls to bottom
 
 	// Footer container
 	footer := widget.NewContainer(
@@ -176,6 +200,7 @@ func (g *GameUI) SetHintText(s string) {
 // SetLogText updates the combat log (newline-separated entries)
 func (g *GameUI) SetLogText(s string) {
 	g.logText.Label = s
+	g.logScroll.ScrollTop = 1.0 // Auto-scroll to bottom (terminal behavior)
 }
 
 // SetHeaderText updates the header text
