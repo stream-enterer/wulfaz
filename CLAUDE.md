@@ -14,6 +14,10 @@ core ← entity ← model ← tea
 
 No import cycles. Templates in `data/templates/` as KDL 1.0 *NOT* 2.0.
 
+## Reference Docs
+
+`docs/ref/` contains source references: `ebiten/` (Ebitengine), `ebitenui/` (Ebitenui source), `ebitenui.github.io/` (Ebitenui docs).
+
 ---
 
 ## TEA Principles
