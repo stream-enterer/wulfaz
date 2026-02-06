@@ -3,6 +3,7 @@ package tea
 import (
 	"fmt"
 	"maps"
+	"slices"
 
 	"wulfaz/internal/core"
 	"wulfaz/internal/effect"
@@ -290,8 +291,8 @@ func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 
 	// Copy unit slices before modification (TEA immutability)
 	if len(msg.ModifiedUnits) > 0 {
-		combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
-		combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
+		combat.PlayerUnits = slices.Clone(combat.PlayerUnits)
+		combat.EnemyUnits = slices.Clone(combat.EnemyUnits)
 
 		// Apply modified units to combat model
 		for unitID, mods := range msg.ModifiedUnits {
@@ -517,52 +518,16 @@ func appendLogEntries(log []string, entries []string) []string {
 	return newLog
 }
 
-func copyUnitSlice(units []entity.Unit) []entity.Unit {
-	if units == nil {
-		return nil
-	}
-	copied := make([]entity.Unit, len(units))
-	copy(copied, units)
-	return copied
-}
-
-func copyStringSlice(s []string) []string {
-	if s == nil {
-		return nil
-	}
-	result := make([]string, len(s))
-	copy(result, s)
-	return result
-}
-
-func copyFloatingTexts(texts []model.FloatingText) []model.FloatingText {
-	if texts == nil {
-		return nil
-	}
-	result := make([]model.FloatingText, len(texts))
-	copy(result, texts)
-	return result
-}
-
-func copyUndoStack(stack []model.UndoSnapshot) []model.UndoSnapshot {
-	if stack == nil {
-		return nil
-	}
-	result := make([]model.UndoSnapshot, len(stack))
-	copy(result, stack)
-	return result
-}
-
 func createUndoSnapshot(combat model.CombatModel) model.UndoSnapshot {
 	return model.UndoSnapshot{
 		RolledDice:       entity.CopyRolledDiceMap(combat.RolledDice),
 		RerollsRemaining: combat.RerollsRemaining,
-		ActivatedDice:    entity.CopyActivatedMap(combat.ActivatedDice),
-		PlayerTargets:    entity.CopyTargetMap(combat.PlayerTargets),
+		ActivatedDice:    maps.Clone(combat.ActivatedDice),
+		PlayerTargets:    maps.Clone(combat.PlayerTargets),
 		SelectedUnitID:   combat.SelectedUnitID,
 		PlayerUnits:      DeepCopyUnits(combat.PlayerUnits),
-		Log:              copyStringSlice(combat.Log),
-		FloatingTexts:    copyFloatingTexts(combat.FloatingTexts),
+		Log:              slices.Clone(combat.Log),
+		FloatingTexts:    slices.Clone(combat.FloatingTexts),
 		ActiveArrows:     model.CopyArrows(combat.ActiveArrows),
 	}
 }
@@ -1014,11 +979,11 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 
 	combat := m.Combat
 	// Push undo snapshot before changes
-	combat.UndoStack = append(copyUndoStack(combat.UndoStack), createUndoSnapshot(combat))
+	combat.UndoStack = append(slices.Clone(combat.UndoStack), createUndoSnapshot(combat))
 
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
-	combat.ActivatedDice = entity.CopyActivatedMap(combat.ActivatedDice)
-	combat.PlayerTargets = entity.CopyTargetMap(combat.PlayerTargets)
+	combat.ActivatedDice = maps.Clone(combat.ActivatedDice)
+	combat.PlayerTargets = maps.Clone(combat.PlayerTargets)
 
 	// Mark compatible unfired dice as Fired
 	newDice := combat.RolledDice[msg.SourceUnitID]
@@ -1085,8 +1050,8 @@ func (m Model) handleUnitDiceEffectsApplied(msg UnitDiceEffectsApplied) (Model, 
 	combat := m.Combat
 
 	// Copy unit slices before modification
-	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
-	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
+	combat.PlayerUnits = slices.Clone(combat.PlayerUnits)
+	combat.EnemyUnits = slices.Clone(combat.EnemyUnits)
 
 	// Apply each result
 	for _, result := range msg.Results {
@@ -1342,8 +1307,8 @@ func (m Model) handleEndTurnCanceled(_ EndTurnCanceled) (Model, Cmd) {
 
 func (m Model) handleAITargetsComputed(msg AITargetsComputed) (Model, Cmd) {
 	combat := m.Combat
-	combat.EnemyTargets = entity.CopyTargetMap(msg.Targets)
-	combat.EnemyDefenseTargets = entity.CopyTargetMap(msg.DefenseTargets)
+	combat.EnemyTargets = maps.Clone(msg.Targets)
+	combat.EnemyDefenseTargets = maps.Clone(msg.DefenseTargets)
 
 	// Build preview arrows showing AI intent
 	combat.ActiveArrows = computeAllPreviewArrows(combat)
@@ -1354,8 +1319,8 @@ func (m Model) handleAITargetsComputed(msg AITargetsComputed) (Model, Cmd) {
 
 func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
 	combat := m.Combat
-	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
-	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
+	combat.PlayerUnits = slices.Clone(combat.PlayerUnits)
+	combat.EnemyUnits = slices.Clone(combat.EnemyUnits)
 
 	// Apply all attacks and create floating texts
 	for _, atk := range msg.Attacks {
@@ -1374,6 +1339,8 @@ func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
 			updateUnitShields(combat.EnemyUnits, result.TargetUnitID, result.NewShields)
 		case entity.DieHeal:
 			updateUnitHealth(combat.EnemyUnits, result.TargetUnitID, result.NewHealth)
+		case entity.DieDamage, entity.DieBlank:
+			// Defense results only use shield/heal effects
 		}
 
 		// Floating text
@@ -1395,6 +1362,8 @@ func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
 				StartedAt: msg.Timestamp,
 				YOffset:   offset,
 			})
+		case entity.DieDamage, entity.DieBlank:
+			// Defense results only use shield/heal effects
 		}
 	}
 
@@ -1490,8 +1459,8 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 		return m, nil
 	}
 	combat := m.Combat
-	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
-	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
+	combat.PlayerUnits = slices.Clone(combat.PlayerUnits)
+	combat.EnemyUnits = slices.Clone(combat.EnemyUnits)
 
 	// F-152: Remove dead units (HP <= 0) from combat
 	combat.PlayerUnits = removeDeadUnits(combat.PlayerUnits)
@@ -1553,12 +1522,12 @@ func (m Model) handleUndoRequested(_ UndoRequested) (Model, Cmd) {
 
 	combat.RolledDice = entity.CopyRolledDiceMap(snapshot.RolledDice)
 	combat.RerollsRemaining = snapshot.RerollsRemaining
-	combat.ActivatedDice = entity.CopyActivatedMap(snapshot.ActivatedDice)
-	combat.PlayerTargets = entity.CopyTargetMap(snapshot.PlayerTargets)
+	combat.ActivatedDice = maps.Clone(snapshot.ActivatedDice)
+	combat.PlayerTargets = maps.Clone(snapshot.PlayerTargets)
 	combat.SelectedUnitID = snapshot.SelectedUnitID
 	combat.PlayerUnits = DeepCopyUnits(snapshot.PlayerUnits)
-	combat.Log = copyStringSlice(snapshot.Log)
-	combat.FloatingTexts = copyFloatingTexts(snapshot.FloatingTexts)
+	combat.Log = slices.Clone(snapshot.Log)
+	combat.FloatingTexts = slices.Clone(snapshot.FloatingTexts)
 	combat.ActiveArrows = model.CopyArrows(snapshot.ActiveArrows)
 	combat.UndoStack = newStack
 	combat.EndTurnConfirmPending = false

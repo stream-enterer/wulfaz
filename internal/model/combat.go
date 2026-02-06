@@ -59,15 +59,15 @@ type CombatModel struct {
 	Victor      string // "player", "enemy", "draw", or ""
 
 	// Dice phase fields
-	Round                int                           // Current round number (1-indexed)
-	DicePhase            DicePhase                     // Current dice phase
-	RolledDice           map[string][]entity.RolledDie // UnitID -> rolled dice slice
-	RerollsRemaining     int                           // Player's rerolls left this round
-	SelectedUnitID       string                        // Unit whose die is selected (empty if none)
-	ActivatedDice        map[string]bool               // UnitID -> whether die has been activated
-	PlayerTargets        map[string]string              // SourceUnitID -> TargetUnitID (player's assignments)
-	EnemyTargets         map[string]string              // SourceUnitID -> TargetUnitID (AI's assignments)
-	EnemyDefenseTargets  map[string]string              // SourceUnitID -> AllyTargetID (AI shield/heal assignments)
+	Round               int                           // Current round number (1-indexed)
+	DicePhase           DicePhase                     // Current dice phase
+	RolledDice          map[string][]entity.RolledDie // UnitID -> rolled dice slice
+	RerollsRemaining    int                           // Player's rerolls left this round
+	SelectedUnitID      string                        // Unit whose die is selected (empty if none)
+	ActivatedDice       map[string]bool               // UnitID -> whether die has been activated
+	PlayerTargets       map[string]string             // SourceUnitID -> TargetUnitID (player's assignments)
+	EnemyTargets        map[string]string             // SourceUnitID -> TargetUnitID (AI's assignments)
+	EnemyDefenseTargets map[string]string             // SourceUnitID -> AllyTargetID (AI shield/heal assignments)
 
 	// End turn confirmation state
 	EndTurnConfirmPending bool // True when waiting for y/n response

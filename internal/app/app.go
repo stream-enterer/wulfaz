@@ -495,15 +495,16 @@ func (a *App) handleLeftClick(mx, my int) {
 			// Validate target based on compatible unfired dice
 			targetIsEnemy := combat.IsEnemyUnit(region.UnitID)
 			targetIsPlayer := combat.IsPlayerUnit(region.UnitID)
-			if targetIsEnemy {
+			switch {
+			case targetIsEnemy:
 				if !entity.HasUnfiredDieOfType(rolledDice, entity.DieDamage) {
 					continue // No unfired damage dice
 				}
-			} else if targetIsPlayer {
+			case targetIsPlayer:
 				if !entity.HasUnfiredDieOfType(rolledDice, entity.DieShield) && !entity.HasUnfiredDieOfType(rolledDice, entity.DieHeal) {
 					continue // No unfired shield/heal dice
 				}
-			} else {
+			default:
 				continue // Invalid target
 			}
 			a.dispatch(tea.DiceActivated{

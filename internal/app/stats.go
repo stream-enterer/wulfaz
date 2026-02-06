@@ -73,6 +73,8 @@ func (a *App) findUnit(unitID string) *entity.Unit {
 				return &a.model.PlayerRoster[i]
 			}
 		}
+	case tea.PhaseMenu, tea.PhaseGameOver:
+		// No units to look up in these phases
 	}
 	return nil
 }

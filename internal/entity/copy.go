@@ -175,30 +175,6 @@ func CopyRolledDiceMap(m map[string][]RolledDie) map[string][]RolledDie {
 	return result
 }
 
-// CopyActivatedMap copies a map of unit ID to activated flag.
-func CopyActivatedMap(m map[string]bool) map[string]bool {
-	if m == nil {
-		return nil
-	}
-	result := make(map[string]bool, len(m))
-	for k, v := range m {
-		result[k] = v
-	}
-	return result
-}
-
-// CopyTargetMap copies a map of source unit ID to target unit ID.
-func CopyTargetMap(m map[string]string) map[string]string {
-	if m == nil {
-		return nil
-	}
-	result := make(map[string]string, len(m))
-	for k, v := range m {
-		result[k] = v
-	}
-	return result
-}
-
 // CopyUnit creates a deep copy with a new ID.
 // Copies: Tags, Attributes, Parts, Triggers, Abilities, Die, Pilot, Position.
 func CopyUnit(u Unit, newID string) Unit {

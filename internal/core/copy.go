@@ -1,16 +1,6 @@
 package core
 
-// copyMap creates a shallow copy of map[string]any (sufficient for Params).
-func copyMap(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	result := make(map[string]any, len(m))
-	for k, v := range m {
-		result[k] = v
-	}
-	return result
-}
+import "maps"
 
 // CopyTags copies a tag slice.
 func CopyTags(tags []Tag) []Tag {
@@ -26,7 +16,7 @@ func CopyTags(tags []Tag) []Tag {
 func CopyCondition(c Condition) Condition {
 	return Condition{
 		Type:   c.Type,
-		Params: copyMap(c.Params),
+		Params: maps.Clone(c.Params),
 	}
 }
 
@@ -49,7 +39,7 @@ func CopyTrigger(t Trigger) Trigger {
 		Conditions:       CopyConditions(t.Conditions),
 		TargetConditions: CopyConditions(t.TargetConditions),
 		EffectName:       t.EffectName,
-		Params:           copyMap(t.Params),
+		Params:           maps.Clone(t.Params),
 		Priority:         t.Priority,
 	}
 }
@@ -70,7 +60,7 @@ func CopyTriggers(ts []Trigger) []Trigger {
 func CopyEffectRef(e EffectRef) EffectRef {
 	return EffectRef{
 		EffectName: e.EffectName,
-		Params:     copyMap(e.Params),
+		Params:     maps.Clone(e.Params),
 		Delay:      e.Delay,
 		Conditions: CopyConditions(e.Conditions),
 	}
@@ -188,12 +178,5 @@ func CopyRequirements(rs []Requirement) []Requirement {
 
 // CopyAttributes copies an attribute map (Attribute is pure value).
 func CopyAttributes(attrs map[string]Attribute) map[string]Attribute {
-	if attrs == nil {
-		return nil
-	}
-	result := make(map[string]Attribute, len(attrs))
-	for k, v := range attrs {
-		result[k] = v
-	}
-	return result
+	return maps.Clone(attrs)
 }

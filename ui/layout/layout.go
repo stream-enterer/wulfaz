@@ -19,8 +19,8 @@ const (
 )
 
 var (
-	sidebarColor = color.RGBA{25, 25, 40, 255}  // #191928
-	centerColor  = color.RGBA{30, 30, 50, 255}  // #1E1E32
+	sidebarColor = color.RGBA{25, 25, 40, 255} // #191928
+	centerColor  = color.RGBA{30, 30, 50, 255} // #1E1E32
 	textColor    = color.White
 	hpColor      = color.RGBA{255, 80, 80, 255}   // Red for HP
 	shieldColor  = color.RGBA{150, 150, 150, 255} // Grey for shields
@@ -42,11 +42,11 @@ type GameUI struct {
 	logContainer   *widget.Container // Bottom section: combat log
 
 	// Stats display (right sidebar top)
-	nameText     *widget.Text
-	hpText       *widget.Text
-	shieldText   *widget.Text
-	diceGraphic  *widget.Graphic
-	diceFont *text.Face // Cached for dice net rendering
+	nameText    *widget.Text
+	hpText      *widget.Text
+	shieldText  *widget.Text
+	diceGraphic *widget.Graphic
+	diceFont    *text.Face // Cached for dice net rendering
 
 	// Combat log (right sidebar bottom)
 	logText *widget.Text

@@ -24,12 +24,12 @@ const (
 
 // Colors for dice net rendering
 var (
-	colorDiceNetBg    = color.RGBA{25, 25, 40, 255}   // #191928 sidebar color
-	colorDiceNetCell  = color.RGBA{40, 40, 40, 255}   // #282828 colorDieBox
-	colorDiceNetGrid  = color.RGBA{80, 80, 106, 255}  // #50506A grid lines
-	colorDiceNetDmg   = color.RGBA{255, 80, 80, 255}  // #FF5050 red damage
-	colorDiceNetHeal  = color.RGBA{80, 255, 140, 255} // #50FF8C green heal
-	colorDiceNetShld  = color.RGBA{80, 140, 255, 255} // #508CFF blue shield
+	colorDiceNetBg    = color.RGBA{25, 25, 40, 255}    // #191928 sidebar color
+	colorDiceNetCell  = color.RGBA{40, 40, 40, 255}    // #282828 colorDieBox
+	colorDiceNetGrid  = color.RGBA{80, 80, 106, 255}   // #50506A grid lines
+	colorDiceNetDmg   = color.RGBA{255, 80, 80, 255}   // #FF5050 red damage
+	colorDiceNetHeal  = color.RGBA{80, 255, 140, 255}  // #50FF8C green heal
+	colorDiceNetShld  = color.RGBA{80, 140, 255, 255}  // #508CFF blue shield
 	colorDiceNetBlank = color.RGBA{100, 100, 100, 255} // #646464 gray blank
 )
 
