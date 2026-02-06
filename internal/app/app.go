@@ -464,9 +464,13 @@ func (a *App) handleLeftClick(mx, my int) {
 			a.dispatch(tea.DieLockToggled{UnitID: region.UnitID})
 		} else {
 			// ACTIVATION PHASE: check for blank before allowing selection
-			rolled, exists := combat.RolledDice[region.UnitID]
-			if !exists || rolled.Type() == entity.DieBlank {
-				continue // Can't activate blank - skip this die
+			rolledDice, exists := combat.RolledDice[region.UnitID]
+			if !exists || !entity.HasNonBlankDie(rolledDice) {
+				continue // Can't activate all-blank unit
+			}
+			// Skip if already fully activated
+			if combat.ActivatedDice[region.UnitID] {
+				continue
 			}
 			// Toggle selection
 			if combat.SelectedUnitID == region.UnitID {
@@ -484,37 +488,40 @@ func (a *App) handleLeftClick(mx, my int) {
 			if region.Type != "unit" || !pt.In(region.Rect) {
 				continue
 			}
-			rolled, exists := combat.RolledDice[combat.SelectedUnitID]
+			rolledDice, exists := combat.RolledDice[combat.SelectedUnitID]
 			if !exists {
 				continue
 			}
-			// Validate target based on die type
-			switch rolled.Type() {
-			case entity.DieDamage:
-				if !combat.IsEnemyUnit(region.UnitID) {
-					continue // Damage must target enemy
+			// Validate target based on compatible unfired dice
+			targetIsEnemy := combat.IsEnemyUnit(region.UnitID)
+			targetIsPlayer := combat.IsPlayerUnit(region.UnitID)
+			if targetIsEnemy {
+				if !entity.HasUnfiredDieOfType(rolledDice, entity.DieDamage) {
+					continue // No unfired damage dice
 				}
-			case entity.DieShield, entity.DieHeal:
-				if !combat.IsPlayerUnit(region.UnitID) {
-					continue // Shield/Heal must target friendly
+			} else if targetIsPlayer {
+				if !entity.HasUnfiredDieOfType(rolledDice, entity.DieShield) && !entity.HasUnfiredDieOfType(rolledDice, entity.DieHeal) {
+					continue // No unfired shield/heal dice
 				}
-			case entity.DieBlank:
-				continue // Blank dice cannot be activated
+			} else {
+				continue // Invalid target
 			}
 			a.dispatch(tea.DiceActivated{
 				SourceUnitID: combat.SelectedUnitID,
 				TargetUnitID: region.UnitID,
-				Value:        rolled.Value(),
-				Effect:       rolled.Type(),
 				Timestamp:    time.Now().UnixNano(),
 			})
 			return
 		}
 	}
 
-	// Clicked empty space - deselect if in activation mode
+	// Clicked empty space - only deselect if unit has no unfired dice remaining
 	if allLocked && combat.SelectedUnitID != "" {
-		a.dispatch(tea.DieDeselected{})
+		rolledDice, exists := combat.RolledDice[combat.SelectedUnitID]
+		if !exists || entity.AllNonBlankFired(rolledDice) {
+			a.dispatch(tea.DieDeselected{})
+		}
+		// Otherwise keep selection (mid-split-activation)
 	}
 }
 

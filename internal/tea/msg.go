@@ -118,10 +118,10 @@ type FollowUpEvent struct {
 // ===== Dice Phase Messages (Wave 2) =====
 
 // RoundStarted signals a new round began with pre-rolled dice.
-// UnitRolls maps UnitID -> face index (single die per unit).
+// UnitRolls maps UnitID -> face indices (one per die on the unit).
 type RoundStarted struct {
 	Round     int
-	UnitRolls map[string]int // UnitID -> faceIndex
+	UnitRolls map[string][]int // UnitID -> []faceIndex
 }
 
 func (RoundStarted) isMsg() {}
@@ -141,7 +141,7 @@ func (DieLockToggled) isMsg() {}
 // RerollRequested signals player wants to reroll all unlocked player dice.
 // Carries pre-rolled results (RNG in Cmd, not Update).
 type RerollRequested struct {
-	Results map[string]int // UnitID -> new face index (only unlocked units)
+	Results map[string][]int // UnitID -> new face indices (one per die, only unlocked units)
 }
 
 func (RerollRequested) isMsg() {}
@@ -158,30 +158,33 @@ type DieDeselected struct{}
 
 func (DieDeselected) isMsg() {}
 
-// DiceActivated signals a die effect was activated on a target.
+// DiceActivated signals a die activation on a target (split-activation: compatible dice fire).
 type DiceActivated struct {
 	SourceUnitID string
 	TargetUnitID string
-	Value        int            // The die's result value
-	Effect       entity.DieType // damage/shield/heal
-	Timestamp    int64          // Unix nanoseconds from App layer
+	Timestamp    int64 // Unix nanoseconds from App layer
 }
 
 func (DiceActivated) isMsg() {}
 
-// DiceEffectApplied signals effect resolution completed.
-type DiceEffectApplied struct {
-	SourceUnitID   string
+// DiceEffectResult records one die's effect resolution.
+type DiceEffectResult struct {
 	TargetUnitID   string
 	Effect         entity.DieType
 	Value          int
 	NewHealth      int
 	NewShields     int
-	ShieldAbsorbed int   // How much damage was absorbed by shields
-	Timestamp      int64 // Unix nanoseconds for floating text
+	ShieldAbsorbed int // How much damage was absorbed by shields
 }
 
-func (DiceEffectApplied) isMsg() {}
+// UnitDiceEffectsApplied signals all compatible dice effects resolved for a unit activation.
+type UnitDiceEffectsApplied struct {
+	SourceUnitID string
+	Results      []DiceEffectResult
+	Timestamp    int64 // Unix nanoseconds for floating text
+}
+
+func (UnitDiceEffectsApplied) isMsg() {}
 
 // PlayerCommandDone signals player finished their command phase.
 type PlayerCommandDone struct{}
@@ -199,15 +202,17 @@ func (DicePhaseAdvanced) isMsg() {}
 
 // AITargetsComputed signals AI has computed targets for all enemy units.
 type AITargetsComputed struct {
-	Targets map[string]string // EnemyUnitID -> PlayerTargetID
+	Targets        map[string]string // EnemyUnitID -> PlayerTargetID (damage)
+	DefenseTargets map[string]string // EnemyUnitID -> AllyTargetID (shield/heal)
 }
 
 func (AITargetsComputed) isMsg() {}
 
 // AllAttacksResolved signals all attacks have been resolved simultaneously.
 type AllAttacksResolved struct {
-	Attacks   []AttackResult
-	Timestamp int64
+	Attacks        []AttackResult
+	DefenseResults []DiceEffectResult // Enemy shield/heal results against own allies
+	Timestamp      int64
 }
 
 func (AllAttacksResolved) isMsg() {}

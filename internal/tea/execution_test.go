@@ -23,8 +23,7 @@ func TestRoundEnded_ShieldExpiration(t *testing.T) {
 					ID:       "player_cmd",
 					Position: -1,
 					Tags:     []core.Tag{"command"},
-					Die:      entity.Die{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}},
-					HasDie:   true,
+					Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
 					Attributes: map[string]core.Attribute{
 						"health":  {Base: 100},
 						"shields": {Base: 15}, // Should expire
@@ -44,8 +43,7 @@ func TestRoundEnded_ShieldExpiration(t *testing.T) {
 					ID:       "enemy_cmd",
 					Position: -1,
 					Tags:     []core.Tag{"command"},
-					Die:      entity.Die{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}},
-					HasDie:   true,
+					Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}}},
 					Attributes: map[string]core.Attribute{
 						"health":  {Base: 100},
 						"shields": {Base: 20}, // Should expire
@@ -91,8 +89,7 @@ func TestCombatStarted_TriggersFirstRound(t *testing.T) {
 				ID:       "player_cmd",
 				Position: -1,
 				Tags:     []core.Tag{"command"},
-				Die:      entity.Die{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 8}, {Type: entity.DieDamage, Value: 12}, {Type: entity.DieBlank, Value: 0}, {Type: entity.DieBlank, Value: 0}}},
-				HasDie:   true,
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 8}, {Type: entity.DieDamage, Value: 12}, {Type: entity.DieBlank, Value: 0}, {Type: entity.DieBlank, Value: 0}}}},
 				Attributes: map[string]core.Attribute{
 					"health": {Base: 100},
 				},
@@ -103,8 +100,7 @@ func TestCombatStarted_TriggersFirstRound(t *testing.T) {
 				ID:       "enemy_cmd",
 				Position: -1,
 				Tags:     []core.Tag{"command"},
-				Die:      entity.Die{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 8}, {Type: entity.DieDamage, Value: 12}, {Type: entity.DieBlank, Value: 0}, {Type: entity.DieBlank, Value: 0}}},
-				HasDie:   true,
+				Dice:     []entity.Die{{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 5}, {Type: entity.DieDamage, Value: 8}, {Type: entity.DieDamage, Value: 12}, {Type: entity.DieBlank, Value: 0}, {Type: entity.DieBlank, Value: 0}}}},
 				Attributes: map[string]core.Attribute{
 					"health": {Base: 100},
 				},
@@ -380,5 +376,81 @@ func TestExecutionComplete_TransitionsToRoundEnd(t *testing.T) {
 	m2, _ := m1.Update(msg1)
 	if m2.Combat.Round != 2 {
 		t.Errorf("Round = %d, want 2", m2.Combat.Round)
+	}
+}
+
+// ===== Defense Results Tests =====
+
+func TestAllAttacksResolved_DefenseResults(t *testing.T) {
+	// Enemy shield/heal dice should apply to enemy allies via DefenseResults.
+	m := Model{
+		Version: 1,
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhaseExecution,
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 80},
+					},
+				},
+				{
+					ID:       "enemy1",
+					Position: 0,
+					Attributes: map[string]core.Attribute{
+						"health":  {Base: 40},
+						"shields": {Base: 0},
+					},
+				},
+			},
+		},
+	}
+
+	msg := AllAttacksResolved{
+		Attacks: []AttackResult{}, // No damage attacks
+		DefenseResults: []DiceEffectResult{
+			{
+				TargetUnitID: "enemy1",
+				Effect:       entity.DieShield,
+				Value:        5,
+				NewShields:   5,
+			},
+			{
+				TargetUnitID: "enemy_cmd",
+				Effect:       entity.DieHeal,
+				Value:        10,
+				NewHealth:    90,
+			},
+		},
+		Timestamp: 1000,
+	}
+
+	newM, _ := m.Update(msg)
+
+	// Check shields applied to enemy1
+	for _, u := range newM.Combat.EnemyUnits {
+		if u.ID == "enemy1" {
+			if u.Attributes["shields"].Base != 5 {
+				t.Errorf("enemy1 shields = %d, want 5", u.Attributes["shields"].Base)
+			}
+		}
+		if u.ID == "enemy_cmd" {
+			if u.Attributes["health"].Base != 90 {
+				t.Errorf("enemy_cmd health = %d, want 90", u.Attributes["health"].Base)
+			}
+		}
 	}
 }

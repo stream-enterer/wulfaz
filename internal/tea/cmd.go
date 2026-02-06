@@ -35,18 +35,25 @@ func Batch(cmds ...Cmd) Cmd {
 	}
 }
 
-// RollAllDice creates a Cmd that rolls the single die for each unit.
+// RollAllDice creates a Cmd that rolls each die for each unit.
 // RNG happens here (in Cmd), results passed via Msg (TEA compliance).
 func RollAllDice(seed int64, round int, allUnits []entity.Unit) Cmd {
 	return func() Msg {
 		rng := rand.New(rand.NewSource(seed))
-		rolls := make(map[string]int)
+		rolls := make(map[string][]int)
 
 		for _, unit := range allUnits {
-			if !unit.HasDie || len(unit.Die.Faces) == 0 {
+			if len(unit.Dice) == 0 {
 				continue
 			}
-			rolls[unit.ID] = rng.Intn(len(unit.Die.Faces))
+			unitRolls := make([]int, len(unit.Dice))
+			for i, die := range unit.Dice {
+				if len(die.Faces) == 0 {
+					continue
+				}
+				unitRolls[i] = rng.Intn(len(die.Faces))
+			}
+			rolls[unit.ID] = unitRolls
 		}
 
 		return RoundStarted{Round: round, UnitRolls: rolls}
@@ -57,33 +64,40 @@ func RollAllDice(seed int64, round int, allUnits []entity.Unit) Cmd {
 func RerollAllUnlockedDice(seed int64, combat model.CombatModel) Cmd {
 	return func() Msg {
 		rng := rand.New(rand.NewSource(seed))
-		results := make(map[string]int)
+		results := make(map[string][]int)
 
 		for _, unit := range combat.PlayerUnits {
-			if !unit.HasDie || len(unit.Die.Faces) == 0 {
+			if len(unit.Dice) == 0 {
 				continue
 			}
 
-			rolled, exists := combat.RolledDice[unit.ID]
+			rolledDice, exists := combat.RolledDice[unit.ID]
 			if !exists {
 				continue
 			}
 
-			if rolled.Locked {
-				// Skip locked dice
+			if entity.IsUnitLocked(rolledDice) {
 				continue
 			}
 
-			// Reroll unlocked die
-			results[unit.ID] = rng.Intn(len(unit.Die.Faces))
+			// Reroll each die independently
+			unitResults := make([]int, len(rolledDice))
+			for i, rd := range rolledDice {
+				if len(rd.Faces) == 0 {
+					continue
+				}
+				unitResults[i] = rng.Intn(len(rd.Faces))
+			}
+			results[unit.ID] = unitResults
 		}
 
 		return RerollRequested{Results: results}
 	}
 }
 
-// ApplyDiceEffect creates a Cmd that computes effect result.
-func ApplyDiceEffect(sourceID, targetID string, effect entity.DieType, value int, combat model.CombatModel, timestamp int64) Cmd {
+// ApplyCompatibleDiceEffects creates a Cmd that computes results for all compatible dice.
+// targetIsEnemy: true → process only unfired damage dice; false → process only unfired shield/heal dice.
+func ApplyCompatibleDiceEffects(sourceID, targetID string, rolledDice []entity.RolledDie, targetIsEnemy bool, combat model.CombatModel, timestamp int64) Cmd {
 	return func() Msg {
 		// Find target unit
 		var target entity.Unit
@@ -117,39 +131,61 @@ func ApplyDiceEffect(sourceID, targetID string, effect entity.DieType, value int
 			shields = s.Base
 		}
 
+		var results []DiceEffectResult
 		newHealth, newShields := health, shields
-		shieldAbsorbed := 0
 
-		switch effect {
-		case entity.DieDamage:
-			remaining := value
-			// Shields absorb first
-			if remaining > 0 && newShields > 0 {
-				shieldAbsorbed = min(remaining, newShields)
-				remaining -= shieldAbsorbed
-				newShields -= shieldAbsorbed
+		for _, rd := range rolledDice {
+			if rd.Fired {
+				continue
 			}
-			newHealth = max(0, health-remaining)
+			face := rd.CurrentFace()
+			if face.Type == entity.DieBlank {
+				continue
+			}
 
-		case entity.DieShield:
-			newShields = shields + value
+			compatible := false
+			if targetIsEnemy && face.Type == entity.DieDamage {
+				compatible = true
+			}
+			if !targetIsEnemy && (face.Type == entity.DieShield || face.Type == entity.DieHeal) {
+				compatible = true
+			}
+			if !compatible {
+				continue
+			}
 
-		case entity.DieHeal:
-			newHealth = min(health+value, maxHealth)
+			shieldAbsorbed := 0
+			switch face.Type {
+			case entity.DieDamage:
+				remaining := face.Value
+				if remaining > 0 && newShields > 0 {
+					shieldAbsorbed = min(remaining, newShields)
+					remaining -= shieldAbsorbed
+					newShields -= shieldAbsorbed
+				}
+				newHealth = max(0, newHealth-remaining)
+			case entity.DieShield:
+				newShields += face.Value
+			case entity.DieHeal:
+				newHealth = min(newHealth+face.Value, maxHealth)
+			case entity.DieBlank:
+				// Already filtered above
+			}
 
-		case entity.DieBlank:
-			// Blank dice have no effect
+			results = append(results, DiceEffectResult{
+				TargetUnitID:   targetID,
+				Effect:         face.Type,
+				Value:          face.Value,
+				NewHealth:      newHealth,
+				NewShields:     newShields,
+				ShieldAbsorbed: shieldAbsorbed,
+			})
 		}
 
-		return DiceEffectApplied{
-			SourceUnitID:   sourceID,
-			TargetUnitID:   targetID,
-			Effect:         effect,
-			Value:          value,
-			NewHealth:      newHealth,
-			NewShields:     newShields,
-			ShieldAbsorbed: shieldAbsorbed,
-			Timestamp:      timestamp,
+		return UnitDiceEffectsApplied{
+			SourceUnitID: sourceID,
+			Results:      results,
+			Timestamp:    timestamp,
 		}
 	}
 }
@@ -162,72 +198,66 @@ func AdvanceDicePhase(next model.DicePhase) Cmd {
 }
 
 // ComputeAITargets computes targets for all enemy units.
-// Regular units: random valid target (filtered for doomed)
-// Commander: lowest HP target
-// Shield/Heal: lowest HP ally
+// Damage dice: regular units random target (filtered for doomed), commander lowest HP.
+// Shield/Heal dice: lowest HP ally → stored in DefenseTargets.
 func ComputeAITargets(combat model.CombatModel, seed int64) Cmd {
 	return func() Msg {
 		rng := rand.New(rand.NewSource(seed))
 		targets := make(map[string]string)
+		defenseTargets := make(map[string]string)
 
 		// Track incoming damage to filter doomed targets
 		incoming := make(map[string]int)
 
 		for _, enemy := range combat.EnemyUnits {
-			if !enemy.IsAlive() || !enemy.HasDie {
+			if !enemy.IsAlive() || len(enemy.Dice) == 0 {
 				continue
 			}
 
-			rolled, exists := combat.RolledDice[enemy.ID]
-			if !exists {
+			rolledDice, exists := combat.RolledDice[enemy.ID]
+			if !exists || !entity.HasNonBlankDie(rolledDice) {
 				continue
 			}
 
-			face := rolled.CurrentFace()
-			if face.Type == entity.DieBlank {
-				continue
-			}
-
-			var targetID string
-
-			switch face.Type {
-			case entity.DieDamage:
+			// Process damage dice
+			if entity.HasDieOfType(rolledDice, entity.DieDamage) {
 				validTargets := GetValidEnemyTargets(combat.PlayerUnits)
-				if len(validTargets) == 0 {
-					continue
-				}
+				if len(validTargets) > 0 {
+					// Filter doomed targets for regular units
+					if !enemy.IsCommand() {
+						validTargets = FilterDoomedTargets(validTargets, incoming, combat)
+					}
 
-				// Filter doomed targets for regular units
-				if !enemy.IsCommand() {
-					validTargets = FilterDoomedTargets(validTargets, incoming, combat)
-				}
+					var targetID string
+					if enemy.IsCommand() {
+						targetID = SelectLowestHP(validTargets)
+					} else {
+						targetID = SelectRandomTarget(validTargets, rng)
+					}
 
-				// Commander uses lowest HP, regular units use random
-				if enemy.IsCommand() {
-					targetID = SelectLowestHP(validTargets)
-				} else {
-					targetID = SelectRandomTarget(validTargets, rng)
+					if targetID != "" {
+						targets[enemy.ID] = targetID
+						// Sum ALL damage dice values for incoming tracking
+						for _, rd := range rolledDice {
+							if rd.CurrentFace().Type == entity.DieDamage {
+								incoming[targetID] += rd.CurrentFace().Value
+							}
+						}
+					}
 				}
-
-				// Track incoming damage
-				if targetID != "" {
-					incoming[targetID] += face.Value
-				}
-
-			case entity.DieShield, entity.DieHeal:
-				// Target lowest HP ally
-				validAllies := GetValidAlliedTargets(combat.EnemyUnits)
-				targetID = SelectLowestHP(validAllies)
-			case entity.DieBlank:
-				// Already handled by continue above, but listed for exhaustiveness
 			}
 
-			if targetID != "" {
-				targets[enemy.ID] = targetID
+			// Process shield/heal dice
+			if entity.HasDieOfType(rolledDice, entity.DieShield) || entity.HasDieOfType(rolledDice, entity.DieHeal) {
+				validAllies := GetValidAlliedTargets(combat.EnemyUnits)
+				allyID := SelectLowestHP(validAllies)
+				if allyID != "" {
+					defenseTargets[enemy.ID] = allyID
+				}
 			}
 		}
 
-		return AITargetsComputed{Targets: targets}
+		return AITargetsComputed{Targets: targets, DefenseTargets: defenseTargets}
 	}
 }
 
@@ -235,33 +265,69 @@ func ComputeAITargets(combat model.CombatModel, seed int64) Cmd {
 func ExecuteAllAttacks(combat model.CombatModel, timestamp int64) Cmd {
 	return func() Msg {
 		var attacks []AttackResult
+		var defenseResults []DiceEffectResult
 		hpSnapshot := buildHPSnapshot(combat)
 
-		// Collect all damage from enemy units
 		for _, unit := range combat.EnemyUnits {
-			if !unit.IsAlive() || !unit.HasDie {
+			if !unit.IsAlive() || len(unit.Dice) == 0 {
 				continue
 			}
 
-			targetID, hasTarget := combat.EnemyTargets[unit.ID]
-			if !hasTarget {
-				continue
-			}
-
-			rolled, exists := combat.RolledDice[unit.ID]
+			rolledDice, exists := combat.RolledDice[unit.ID]
 			if !exists {
 				continue
 			}
 
-			face := rolled.CurrentFace()
-			if face.Type != entity.DieDamage {
-				continue
+			// Damage dice → resolve against EnemyTargets
+			if targetID, hasTarget := combat.EnemyTargets[unit.ID]; hasTarget {
+				for _, rd := range rolledDice {
+					if rd.CurrentFace().Type == entity.DieDamage {
+						attacks = resolveDamage(attacks, unit.ID, targetID, rd.CurrentFace().Value, hpSnapshot)
+					}
+				}
 			}
 
-			attacks = resolveDamage(attacks, unit.ID, targetID, face.Value, hpSnapshot)
+			// Shield/heal dice → resolve against EnemyDefenseTargets
+			if allyID, hasAlly := combat.EnemyDefenseTargets[unit.ID]; hasAlly {
+				allyHP, allyShields := hpSnapshot[allyID][0], hpSnapshot[allyID][1]
+				allyMaxHealth := allyHP
+				// Look up max_health from unit
+				for _, eu := range combat.EnemyUnits {
+					if eu.ID == allyID {
+						if mh, ok := eu.Attributes["max_health"]; ok {
+							allyMaxHealth = mh.Base
+						}
+						break
+					}
+				}
+
+				for _, rd := range rolledDice {
+					face := rd.CurrentFace()
+					if face.Type == entity.DieShield {
+						allyShields += face.Value
+						defenseResults = append(defenseResults, DiceEffectResult{
+							TargetUnitID: allyID,
+							Effect:       entity.DieShield,
+							Value:        face.Value,
+							NewHealth:    allyHP,
+							NewShields:   allyShields,
+						})
+					} else if face.Type == entity.DieHeal {
+						allyHP = min(allyHP+face.Value, allyMaxHealth)
+						defenseResults = append(defenseResults, DiceEffectResult{
+							TargetUnitID: allyID,
+							Effect:       entity.DieHeal,
+							Value:        face.Value,
+							NewHealth:    allyHP,
+							NewShields:   allyShields,
+						})
+					}
+				}
+				hpSnapshot[allyID] = [2]int{allyHP, allyShields}
+			}
 		}
 
-		return AllAttacksResolved{Attacks: attacks, Timestamp: timestamp}
+		return AllAttacksResolved{Attacks: attacks, DefenseResults: defenseResults, Timestamp: timestamp}
 	}
 }
 

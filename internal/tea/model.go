@@ -146,8 +146,8 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		return m.handleDieDeselected(msg)
 	case DiceActivated:
 		return m.handleDiceActivated(msg)
-	case DiceEffectApplied:
-		return m.handleDiceEffectApplied(msg)
+	case UnitDiceEffectsApplied:
+		return m.handleUnitDiceEffectsApplied(msg)
 	case PlayerCommandDone:
 		return m.handlePlayerCommandDone(msg)
 	case DicePhaseAdvanced:
@@ -563,6 +563,7 @@ func createUndoSnapshot(combat model.CombatModel) model.UndoSnapshot {
 		PlayerUnits:      DeepCopyUnits(combat.PlayerUnits),
 		Log:              copyStringSlice(combat.Log),
 		FloatingTexts:    copyFloatingTexts(combat.FloatingTexts),
+		ActiveArrows:     model.CopyArrows(combat.ActiveArrows),
 	}
 }
 
@@ -621,8 +622,7 @@ func applyModifications(unit entity.Unit, mods ModifiedUnit) entity.Unit {
 		Parts:      unit.Parts,
 		Triggers:   unit.Triggers,
 		Abilities:  unit.Abilities,
-		Die:        unit.Die,
-		HasDie:     unit.HasDie,
+		Dice:       unit.Dice,
 		Pilot:      unit.Pilot,
 		HasPilot:   unit.HasPilot,
 		Position:   unit.Position,
@@ -730,19 +730,18 @@ func updateUnitHP(units []entity.Unit, unitID string, newHP, newShields int) {
 // Blank faces are skipped - they don't need activation.
 func allPlayerDiceActivated(combat model.CombatModel) bool {
 	for _, u := range combat.PlayerUnits {
-		if !u.IsAlive() || !u.HasDie {
+		if !u.IsAlive() || len(u.Dice) == 0 {
 			continue
 		}
-		rolled, exists := combat.RolledDice[u.ID]
+		rolledDice, exists := combat.RolledDice[u.ID]
 		if !exists {
 			continue
 		}
-		// Skip blank faces - they don't need activation
-		if rolled.Type() == entity.DieBlank {
+		// Skip units where ALL rolled dice are blank
+		if !entity.HasNonBlankDie(rolledDice) {
 			continue
 		}
-		activated := combat.ActivatedDice[u.ID]
-		if !activated {
+		if !combat.ActivatedDice[u.ID] {
 			return false
 		}
 	}
@@ -753,14 +752,14 @@ func allPlayerDiceActivated(combat model.CombatModel) bool {
 // Exported for use by renderer and app packages.
 func AllPlayerDiceLocked(combat model.CombatModel) bool {
 	for _, u := range combat.PlayerUnits {
-		if !u.IsAlive() || !u.HasDie {
+		if !u.IsAlive() || len(u.Dice) == 0 {
 			continue
 		}
-		rolled, exists := combat.RolledDice[u.ID]
+		rolledDice, exists := combat.RolledDice[u.ID]
 		if !exists {
 			continue
 		}
-		if !rolled.Locked {
+		if !entity.IsUnitLocked(rolledDice) {
 			return false
 		}
 	}
@@ -772,14 +771,14 @@ func AllPlayerDiceLocked(combat model.CombatModel) bool {
 func CountUsablePlayerDice(combat model.CombatModel) int {
 	count := 0
 	for _, u := range combat.PlayerUnits {
-		if !u.IsAlive() || !u.HasDie {
+		if !u.IsAlive() || len(u.Dice) == 0 {
 			continue
 		}
-		rolled, exists := combat.RolledDice[u.ID]
+		rolledDice, exists := combat.RolledDice[u.ID]
 		if !exists {
 			continue
 		}
-		if rolled.Type() == entity.DieBlank {
+		if !entity.HasNonBlankDie(rolledDice) {
 			continue
 		}
 		if combat.ActivatedDice[u.ID] {
@@ -797,27 +796,37 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 	combat.Round = msg.Round
 	combat.DicePhase = model.DicePhasePreview
 	combat.RerollsRemaining = model.DefaultRerollsPerRound
-	combat.RolledDice = make(map[string]entity.RolledDie)
+	combat.RolledDice = make(map[string][]entity.RolledDie)
 	combat.ActivatedDice = make(map[string]bool)
 	combat.PlayerTargets = make(map[string]string)
 	combat.EnemyTargets = make(map[string]string)
+	combat.EnemyDefenseTargets = make(map[string]string)
 	combat.SelectedUnitID = ""
 	combat.FloatingTexts = nil
 	combat.EndTurnConfirmPending = false
 	combat.UsableDiceRemaining = 0
 
-	// Convert roll indices to RolledDie for all units (single die per unit)
+	// Convert roll indices to []RolledDie for all units
 	allUnits := getAllUnits(combat)
 	for _, unit := range allUnits {
-		faceIdx, ok := msg.UnitRolls[unit.ID]
-		if !ok || !unit.HasDie || len(unit.Die.Faces) == 0 {
+		faceIndices, ok := msg.UnitRolls[unit.ID]
+		if !ok || len(unit.Dice) == 0 {
 			continue
 		}
-		combat.RolledDice[unit.ID] = entity.RolledDie{
-			Faces:     unit.Die.Faces, // Share reference (immutable template data)
-			FaceIndex: faceIdx,
-			Locked:    false,
+		rolledDice := make([]entity.RolledDie, len(unit.Dice))
+		for i, die := range unit.Dice {
+			faceIdx := 0
+			if i < len(faceIndices) {
+				faceIdx = faceIndices[i]
+			}
+			rolledDice[i] = entity.RolledDie{
+				Faces:     die.Faces,
+				FaceIndex: faceIdx,
+				Locked:    false,
+				Fired:     false,
+			}
 		}
+		combat.RolledDice[unit.ID] = rolledDice
 		combat.ActivatedDice[unit.ID] = false
 	}
 
@@ -866,9 +875,12 @@ func (m Model) handleDieLockToggled(msg DieLockToggled) (Model, Cmd) {
 	combat := m.Combat
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
 
-	if rolled, ok := combat.RolledDice[msg.UnitID]; ok {
-		rolled.Locked = !rolled.Locked
-		combat.RolledDice[msg.UnitID] = rolled
+	if dice, ok := combat.RolledDice[msg.UnitID]; ok {
+		newLocked := !entity.IsUnitLocked(dice)
+		for i := range dice {
+			dice[i].Locked = newLocked
+		}
+		combat.RolledDice[msg.UnitID] = dice
 	}
 
 	m.Combat = combat
@@ -891,20 +903,26 @@ func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
 	combat.RerollsRemaining--
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
 
-	// Apply new face indices for all rerolled dice
-	for unitID, newFaceIdx := range msg.Results {
-		if rolled, ok := combat.RolledDice[unitID]; ok {
-			rolled.FaceIndex = newFaceIdx
-			combat.RolledDice[unitID] = rolled
+	// Apply new face indices per-die for all rerolled dice
+	for unitID, newFaceIndices := range msg.Results {
+		if dice, ok := combat.RolledDice[unitID]; ok {
+			for i := range dice {
+				if i < len(newFaceIndices) {
+					dice[i].FaceIndex = newFaceIndices[i]
+				}
+			}
+			combat.RolledDice[unitID] = dice
 		}
 	}
 
 	// Auto-lock all player dice if no rerolls remaining
 	if combat.RerollsRemaining == 0 {
 		for _, u := range combat.PlayerUnits {
-			if rolled, ok := combat.RolledDice[u.ID]; ok {
-				rolled.Locked = true
-				combat.RolledDice[u.ID] = rolled
+			if dice, ok := combat.RolledDice[u.ID]; ok {
+				for i := range dice {
+					dice[i].Locked = true
+				}
+				combat.RolledDice[u.ID] = dice
 			}
 		}
 	}
@@ -965,146 +983,183 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 		return m, nil
 	}
 
-	rolled, exists := m.Combat.RolledDice[msg.SourceUnitID]
+	rolledDice, exists := m.Combat.RolledDice[msg.SourceUnitID]
 	if !exists {
 		return m, nil
 	}
 
-	// Block blank face activation
-	if rolled.Type() == entity.DieBlank {
+	// Determine target type
+	targetIsEnemy := m.Combat.IsEnemyUnit(msg.TargetUnitID)
+	targetIsPlayer := m.Combat.IsPlayerUnit(msg.TargetUnitID)
+	if !targetIsEnemy && !targetIsPlayer {
 		return m, nil
 	}
 
-	// Targeting validation per DESIGN.md:
-	// - damage: enemy only
-	// - shield/heal: friendly only
-	targetIsEnemy := m.Combat.IsEnemyUnit(msg.TargetUnitID)
-	targetIsPlayer := m.Combat.IsPlayerUnit(msg.TargetUnitID)
-
-	if rolled.Type() == entity.DieDamage {
-		if !targetIsEnemy {
-			return m, nil // Invalid: damage must target enemy
+	// Validate compatible unfired dice exist
+	if targetIsEnemy {
+		if !entity.HasUnfiredDieOfType(rolledDice, entity.DieDamage) {
+			return m, nil
 		}
-		// F-167: Validate target can be attacked (command only when all regular dead)
+		// F-167: Validate target can be attacked
 		targetUnit := findUnitByID(m.Combat, msg.TargetUnitID)
 		if targetUnit != nil && !CanTargetUnit(*targetUnit, m.Combat.EnemyUnits) {
 			return m, nil
 		}
 	}
-	if (rolled.Type() == entity.DieShield || rolled.Type() == entity.DieHeal) && !targetIsPlayer {
-		return m, nil // Invalid: shield/heal must target friendly
+	if targetIsPlayer {
+		if !entity.HasUnfiredDieOfType(rolledDice, entity.DieShield) && !entity.HasUnfiredDieOfType(rolledDice, entity.DieHeal) {
+			return m, nil
+		}
 	}
 
-	// Mark die as activated, store target, clear selection
 	combat := m.Combat
 	// Push undo snapshot before changes
 	combat.UndoStack = append(copyUndoStack(combat.UndoStack), createUndoSnapshot(combat))
 
+	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
 	combat.ActivatedDice = entity.CopyActivatedMap(combat.ActivatedDice)
 	combat.PlayerTargets = entity.CopyTargetMap(combat.PlayerTargets)
-	combat.ActivatedDice[msg.SourceUnitID] = true
+
+	// Mark compatible unfired dice as Fired
+	newDice := combat.RolledDice[msg.SourceUnitID]
+	for i := range newDice {
+		if newDice[i].Fired {
+			continue
+		}
+		face := newDice[i].CurrentFace()
+		if targetIsEnemy && face.Type == entity.DieDamage {
+			newDice[i].Fired = true
+		}
+		if targetIsPlayer && (face.Type == entity.DieShield || face.Type == entity.DieHeal) {
+			newDice[i].Fired = true
+		}
+	}
+	combat.RolledDice[msg.SourceUnitID] = newDice
+
 	combat.PlayerTargets[msg.SourceUnitID] = msg.TargetUnitID
-	combat.SelectedUnitID = ""
+
+	// Add targeting arrows for fired dice
+	for _, rd := range newDice {
+		if !rd.Fired {
+			continue
+		}
+		face := rd.CurrentFace()
+		if face.Type == entity.DieBlank {
+			continue
+		}
+		// Only add arrows for dice we just fired (compatible with this target)
+		if targetIsEnemy && face.Type == entity.DieDamage {
+			combat.ActiveArrows = append(combat.ActiveArrows, model.TargetingArrow{
+				SourceUnitID: msg.SourceUnitID,
+				TargetUnitID: msg.TargetUnitID,
+				EffectType:   face.Type,
+				IsDashed:     false,
+			})
+			break // One arrow per activation, not per die
+		}
+		if targetIsPlayer && (face.Type == entity.DieShield || face.Type == entity.DieHeal) {
+			combat.ActiveArrows = append(combat.ActiveArrows, model.TargetingArrow{
+				SourceUnitID: msg.SourceUnitID,
+				TargetUnitID: msg.TargetUnitID,
+				EffectType:   face.Type,
+				IsDashed:     false,
+			})
+			break
+		}
+	}
+
+	// Check if all non-blank dice are fired
+	if entity.AllNonBlankFired(newDice) {
+		combat.ActivatedDice[msg.SourceUnitID] = true
+		combat.SelectedUnitID = ""
+	}
+	// Otherwise keep unit selected for second target
+
 	m.Combat = combat
 
-	// Return Cmd to apply effect immediately
-	return m, ApplyDiceEffect(msg.SourceUnitID, msg.TargetUnitID, rolled.Type(), rolled.Value(), m.Combat, msg.Timestamp)
+	// Apply compatible dice effects
+	return m, ApplyCompatibleDiceEffects(msg.SourceUnitID, msg.TargetUnitID, rolledDice, targetIsEnemy, m.Combat, msg.Timestamp)
 }
 
-func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
+func (m Model) handleUnitDiceEffectsApplied(msg UnitDiceEffectsApplied) (Model, Cmd) {
 	combat := m.Combat
 
 	// Copy unit slices before modification
 	combat.PlayerUnits = copyUnitSlice(combat.PlayerUnits)
 	combat.EnemyUnits = copyUnitSlice(combat.EnemyUnits)
 
-	// Update target unit's health/shields
-	updateUnit := func(units []entity.Unit) {
-		for i, u := range units {
-			if u.ID != msg.TargetUnitID {
-				continue
-			}
-			attrs := core.CopyAttributes(u.Attributes)
-
-			if msg.Effect == entity.DieDamage || msg.Effect == entity.DieHeal {
-				if h, ok := attrs["health"]; ok {
-					h.Base = msg.NewHealth
-					attrs["health"] = h
-				}
-			}
-			if msg.Effect == entity.DieShield || msg.Effect == entity.DieDamage {
-				if s, ok := attrs["shields"]; ok {
-					s.Base = msg.NewShields
-					attrs["shields"] = s
-				} else if msg.NewShields > 0 {
-					attrs["shields"] = core.Attribute{Name: "shields", Base: msg.NewShields, Min: 0}
-				}
-			}
-
-			units[i].Attributes = attrs
-			break
-		}
-	}
-
-	updateUnit(combat.PlayerUnits)
-	updateUnit(combat.EnemyUnits)
-
-	// Create floating text for the effect
-	if msg.Timestamp > 0 {
-		offset := countTextsForUnit(combat.FloatingTexts, msg.TargetUnitID)
-
-		switch msg.Effect {
+	// Apply each result
+	for _, result := range msg.Results {
+		// Update target's health/shields
+		switch result.Effect {
 		case entity.DieDamage:
-			// Shield absorbed text
-			if msg.ShieldAbsorbed > 0 {
+			updateUnitHP(combat.PlayerUnits, result.TargetUnitID, result.NewHealth, result.NewShields)
+			updateUnitHP(combat.EnemyUnits, result.TargetUnitID, result.NewHealth, result.NewShields)
+		case entity.DieShield:
+			updateUnitShields(combat.PlayerUnits, result.TargetUnitID, result.NewShields)
+			updateUnitShields(combat.EnemyUnits, result.TargetUnitID, result.NewShields)
+		case entity.DieHeal:
+			updateUnitHealth(combat.PlayerUnits, result.TargetUnitID, result.NewHealth)
+			updateUnitHealth(combat.EnemyUnits, result.TargetUnitID, result.NewHealth)
+		case entity.DieBlank:
+			// No effect
+		}
+
+		// Create floating text per result
+		if msg.Timestamp > 0 {
+			offset := countTextsForUnit(combat.FloatingTexts, result.TargetUnitID)
+
+			switch result.Effect {
+			case entity.DieDamage:
+				if result.ShieldAbsorbed > 0 {
+					combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
+						UnitID:    result.TargetUnitID,
+						Text:      fmt.Sprintf("-%d", result.ShieldAbsorbed),
+						ColorRGBA: ColorTextShield,
+						StartedAt: msg.Timestamp,
+						YOffset:   offset,
+					})
+					offset = min(offset+1, MaxTextStack)
+				}
+				healthDamage := result.Value - result.ShieldAbsorbed
+				if healthDamage > 0 {
+					combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
+						UnitID:    result.TargetUnitID,
+						Text:      fmt.Sprintf("-%d", healthDamage),
+						ColorRGBA: ColorTextDamage,
+						StartedAt: msg.Timestamp,
+						YOffset:   offset,
+					})
+				}
+			case entity.DieHeal:
 				combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
-					UnitID:    msg.TargetUnitID,
-					Text:      fmt.Sprintf("-%d", msg.ShieldAbsorbed),
+					UnitID:    result.TargetUnitID,
+					Text:      fmt.Sprintf("+%d", result.Value),
+					ColorRGBA: ColorTextHeal,
+					StartedAt: msg.Timestamp,
+					YOffset:   offset,
+				})
+			case entity.DieShield:
+				combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
+					UnitID:    result.TargetUnitID,
+					Text:      fmt.Sprintf("+%d", result.Value),
 					ColorRGBA: ColorTextShield,
 					StartedAt: msg.Timestamp,
 					YOffset:   offset,
 				})
-				offset = min(offset+1, MaxTextStack)
+			case entity.DieBlank:
+				// No floating text
 			}
-			// Health damage text
-			healthDamage := msg.Value - msg.ShieldAbsorbed
-			if healthDamage > 0 {
-				combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
-					UnitID:    msg.TargetUnitID,
-					Text:      fmt.Sprintf("-%d", healthDamage),
-					ColorRGBA: ColorTextDamage,
-					StartedAt: msg.Timestamp,
-					YOffset:   offset,
-				})
-			}
-		case entity.DieHeal:
-			combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
-				UnitID:    msg.TargetUnitID,
-				Text:      fmt.Sprintf("+%d", msg.Value),
-				ColorRGBA: ColorTextHeal,
-				StartedAt: msg.Timestamp,
-				YOffset:   offset,
-			})
-		case entity.DieShield:
-			combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
-				UnitID:    msg.TargetUnitID,
-				Text:      fmt.Sprintf("+%d", msg.Value),
-				ColorRGBA: ColorTextShield,
-				StartedAt: msg.Timestamp,
-				YOffset:   offset,
-			})
-		case entity.DieBlank:
-			// Blank dice produce no floating text
 		}
-	}
 
-	// Add to combat log (bounded for safety)
-	combat.Log = appendLogEntry(combat.Log, fmt.Sprintf("%s -> %s: %s %d",
-		msg.SourceUnitID, msg.TargetUnitID, msg.Effect, msg.Value))
+		// Log each result
+		combat.Log = appendLogEntry(combat.Log, fmt.Sprintf("%s -> %s: %s %d",
+			msg.SourceUnitID, result.TargetUnitID, result.Effect, result.Value))
+	}
 
 	m.Combat = combat
 
-	// Check if combat ended (command unit killed by dice effect)
+	// Check if combat ended
 	if victor := m.checkCombatEnd(); victor != VictorNone {
 		return m.applyCombatEnd()
 	}
@@ -1115,6 +1170,40 @@ func (m Model) handleDiceEffectApplied(msg DiceEffectApplied) (Model, Cmd) {
 	}
 
 	return m, nil
+}
+
+// updateUnitShields sets shields for a unit in the slice.
+func updateUnitShields(units []entity.Unit, unitID string, newShields int) {
+	for i, u := range units {
+		if u.ID != unitID {
+			continue
+		}
+		attrs := core.CopyAttributes(u.Attributes)
+		if s, ok := attrs["shields"]; ok {
+			s.Base = newShields
+			attrs["shields"] = s
+		} else if newShields > 0 {
+			attrs["shields"] = core.Attribute{Name: "shields", Base: newShields, Min: 0}
+		}
+		units[i].Attributes = attrs
+		break
+	}
+}
+
+// updateUnitHealth sets health for a unit in the slice.
+func updateUnitHealth(units []entity.Unit, unitID string, newHealth int) {
+	for i, u := range units {
+		if u.ID != unitID {
+			continue
+		}
+		attrs := core.CopyAttributes(u.Attributes)
+		if h, ok := attrs["health"]; ok {
+			h.Base = newHealth
+			attrs["health"] = h
+		}
+		units[i].Attributes = attrs
+		break
+	}
 }
 
 // countTextsForUnit returns the number of floating texts for a unit (capped).
@@ -1172,12 +1261,14 @@ func (m Model) handleAllDiceLocked(_ AllDiceLocked) (Model, Cmd) {
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
 
 	for _, u := range combat.PlayerUnits {
-		if !u.IsAlive() || !u.HasDie {
+		if !u.IsAlive() || len(u.Dice) == 0 {
 			continue
 		}
-		if rolled, ok := combat.RolledDice[u.ID]; ok {
-			rolled.Locked = true
-			combat.RolledDice[u.ID] = rolled
+		if dice, ok := combat.RolledDice[u.ID]; ok {
+			for i := range dice {
+				dice[i].Locked = true
+			}
+			combat.RolledDice[u.ID] = dice
 		}
 	}
 
@@ -1252,6 +1343,7 @@ func (m Model) handleEndTurnCanceled(_ EndTurnCanceled) (Model, Cmd) {
 func (m Model) handleAITargetsComputed(msg AITargetsComputed) (Model, Cmd) {
 	combat := m.Combat
 	combat.EnemyTargets = entity.CopyTargetMap(msg.Targets)
+	combat.EnemyDefenseTargets = entity.CopyTargetMap(msg.DefenseTargets)
 
 	// Build preview arrows showing AI intent
 	combat.ActiveArrows = computeAllPreviewArrows(combat)
@@ -1275,6 +1367,37 @@ func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
 		combat.FloatingTexts = append(combat.FloatingTexts, texts...)
 	}
 
+	// Process defense results (enemy shield/heal against own allies)
+	for _, result := range msg.DefenseResults {
+		switch result.Effect {
+		case entity.DieShield:
+			updateUnitShields(combat.EnemyUnits, result.TargetUnitID, result.NewShields)
+		case entity.DieHeal:
+			updateUnitHealth(combat.EnemyUnits, result.TargetUnitID, result.NewHealth)
+		}
+
+		// Floating text
+		offset := countTextsForUnit(combat.FloatingTexts, result.TargetUnitID)
+		switch result.Effect {
+		case entity.DieHeal:
+			combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
+				UnitID:    result.TargetUnitID,
+				Text:      fmt.Sprintf("+%d", result.Value),
+				ColorRGBA: ColorTextHeal,
+				StartedAt: msg.Timestamp,
+				YOffset:   offset,
+			})
+		case entity.DieShield:
+			combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
+				UnitID:    result.TargetUnitID,
+				Text:      fmt.Sprintf("+%d", result.Value),
+				ColorRGBA: ColorTextShield,
+				StartedAt: msg.Timestamp,
+				YOffset:   offset,
+			})
+		}
+	}
+
 	// Log attacks with shield absorption details
 	var logEntries []string
 	for _, atk := range msg.Attacks {
@@ -1290,6 +1413,11 @@ func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
 			logEntries = append(logEntries, fmt.Sprintf("%s -> %s: %d dmg%s",
 				atk.AttackerID, atk.TargetID, atk.Damage, status))
 		}
+	}
+	// Log defense results
+	for _, result := range msg.DefenseResults {
+		logEntries = append(logEntries, fmt.Sprintf("enemy %s -> %s: %s %d",
+			result.TargetUnitID, result.TargetUnitID, result.Effect, result.Value))
 	}
 	combat.Log = appendLogEntries(combat.Log, logEntries)
 
@@ -1387,6 +1515,7 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 	combat.DicePhase = model.DicePhaseNone
 	combat.PlayerTargets = nil
 	combat.EnemyTargets = nil
+	combat.EnemyDefenseTargets = nil
 
 	m.Combat = combat
 
@@ -1430,6 +1559,7 @@ func (m Model) handleUndoRequested(_ UndoRequested) (Model, Cmd) {
 	combat.PlayerUnits = DeepCopyUnits(snapshot.PlayerUnits)
 	combat.Log = copyStringSlice(snapshot.Log)
 	combat.FloatingTexts = copyFloatingTexts(snapshot.FloatingTexts)
+	combat.ActiveArrows = model.CopyArrows(snapshot.ActiveArrows)
 	combat.UndoStack = newStack
 	combat.EndTurnConfirmPending = false
 
@@ -1446,14 +1576,17 @@ func (m Model) handleDieUnlocked(msg DieUnlocked) (Model, Cmd) {
 	}
 
 	combat := m.Combat
-	rolled, exists := combat.RolledDice[msg.UnitID]
-	if !exists || !rolled.Locked || combat.ActivatedDice[msg.UnitID] {
+	dice, exists := combat.RolledDice[msg.UnitID]
+	if !exists || !entity.IsUnitLocked(dice) || combat.ActivatedDice[msg.UnitID] {
 		return m, nil
 	}
 
 	combat.RolledDice = entity.CopyRolledDiceMap(combat.RolledDice)
-	rolled.Locked = false
-	combat.RolledDice[msg.UnitID] = rolled
+	newDice := combat.RolledDice[msg.UnitID]
+	for i := range newDice {
+		newDice[i].Locked = false
+	}
+	combat.RolledDice[msg.UnitID] = newDice
 	m.Combat = combat
 	return m, nil
 }
@@ -1477,12 +1610,14 @@ func (m Model) handleUnlockAllDiceRequested(_ UnlockAllDiceRequested) (Model, Cm
 
 	// Unlock all non-activated player dice
 	for _, u := range combat.PlayerUnits {
-		if !u.IsAlive() || !u.HasDie {
+		if !u.IsAlive() || len(u.Dice) == 0 {
 			continue
 		}
-		if rolled, ok := combat.RolledDice[u.ID]; ok && !combat.ActivatedDice[u.ID] {
-			rolled.Locked = false
-			combat.RolledDice[u.ID] = rolled
+		if dice, ok := combat.RolledDice[u.ID]; ok && !combat.ActivatedDice[u.ID] {
+			for i := range dice {
+				dice[i].Locked = false
+			}
+			combat.RolledDice[u.ID] = dice
 		}
 	}
 
@@ -1548,33 +1683,71 @@ func computePlayerPreviewArrows(combat model.CombatModel) []model.TargetingArrow
 	var arrows []model.TargetingArrow
 
 	for sourceID, targetID := range combat.PlayerTargets {
-		rolled, exists := combat.RolledDice[sourceID]
+		rolledDice, exists := combat.RolledDice[sourceID]
 		if !exists {
 			continue
 		}
 		arrows = append(arrows, model.TargetingArrow{
 			SourceUnitID: sourceID,
 			TargetUnitID: targetID,
-			EffectType:   rolled.Type(),
+			EffectType:   entity.PrimaryEffectType(rolledDice),
 			IsDashed:     false,
 		})
 	}
 	return arrows
 }
 
-// computeEnemyPreviewArrows builds dashed arrows from EnemyTargets map.
+// computeEnemyPreviewArrows builds dashed arrows from EnemyTargets and EnemyDefenseTargets.
 func computeEnemyPreviewArrows(combat model.CombatModel) []model.TargetingArrow {
 	var arrows []model.TargetingArrow
 
+	// Damage arrows from EnemyTargets
 	for sourceID, targetID := range combat.EnemyTargets {
-		rolled, exists := combat.RolledDice[sourceID]
+		rolledDice, exists := combat.RolledDice[sourceID]
 		if !exists {
+			continue
+		}
+		// Find the damage effect type for this arrow
+		effectType := entity.DieBlank
+		for _, rd := range rolledDice {
+			if rd.CurrentFace().Type == entity.DieDamage {
+				effectType = entity.DieDamage
+				break
+			}
+		}
+		if effectType == entity.DieBlank {
 			continue
 		}
 		arrows = append(arrows, model.TargetingArrow{
 			SourceUnitID: sourceID,
 			TargetUnitID: targetID,
-			EffectType:   rolled.Type(),
+			EffectType:   effectType,
+			IsDashed:     true,
+		})
+	}
+
+	// Defense arrows from EnemyDefenseTargets
+	for sourceID, allyID := range combat.EnemyDefenseTargets {
+		rolledDice, exists := combat.RolledDice[sourceID]
+		if !exists {
+			continue
+		}
+		// Find the shield/heal effect type
+		effectType := entity.DieBlank
+		for _, rd := range rolledDice {
+			ft := rd.CurrentFace().Type
+			if ft == entity.DieShield || ft == entity.DieHeal {
+				effectType = ft
+				break
+			}
+		}
+		if effectType == entity.DieBlank {
+			continue
+		}
+		arrows = append(arrows, model.TargetingArrow{
+			SourceUnitID: sourceID,
+			TargetUnitID: allyID,
+			EffectType:   effectType,
 			IsDashed:     true,
 		})
 	}

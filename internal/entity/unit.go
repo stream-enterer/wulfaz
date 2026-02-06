@@ -10,8 +10,7 @@ type Unit struct {
 	Parts      map[string]Part // VALUE type
 	Triggers   []core.Trigger
 	Abilities  []core.Ability
-	Die        Die
-	HasDie     bool
+	Dice       []Die
 	Pilot      Pilot
 	HasPilot   bool
 	Position   int // Board position (0-9), -1 for off-board command units

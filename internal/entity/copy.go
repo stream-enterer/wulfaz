@@ -135,17 +135,42 @@ func CopyRolledDie(rd RolledDie) RolledDie {
 		Faces:     faces,
 		FaceIndex: rd.FaceIndex,
 		Locked:    rd.Locked,
+		Fired:     rd.Fired,
 	}
 }
 
-// CopyRolledDiceMap copies a map of unit ID to single rolled die.
-func CopyRolledDiceMap(m map[string]RolledDie) map[string]RolledDie {
+// CopyRolledDiceSlice copies a slice of RolledDie.
+func CopyRolledDiceSlice(dice []RolledDie) []RolledDie {
+	if dice == nil {
+		return nil
+	}
+	result := make([]RolledDie, len(dice))
+	for i, d := range dice {
+		result[i] = CopyRolledDie(d)
+	}
+	return result
+}
+
+// CopyDiceSlice copies a slice of Die.
+func CopyDiceSlice(dice []Die) []Die {
+	if dice == nil {
+		return nil
+	}
+	result := make([]Die, len(dice))
+	for i, d := range dice {
+		result[i] = CopyDie(d)
+	}
+	return result
+}
+
+// CopyRolledDiceMap copies a map of unit ID to rolled dice slice.
+func CopyRolledDiceMap(m map[string][]RolledDie) map[string][]RolledDie {
 	if m == nil {
 		return nil
 	}
-	result := make(map[string]RolledDie, len(m))
+	result := make(map[string][]RolledDie, len(m))
 	for k, v := range m {
-		result[k] = CopyRolledDie(v)
+		result[k] = CopyRolledDiceSlice(v)
 	}
 	return result
 }
@@ -185,8 +210,7 @@ func CopyUnit(u Unit, newID string) Unit {
 		Parts:      CopyParts(u.Parts),
 		Triggers:   core.CopyTriggers(u.Triggers),
 		Abilities:  core.CopyAbilities(u.Abilities),
-		Die:        CopyDie(u.Die),
-		HasDie:     u.HasDie,
+		Dice:       CopyDiceSlice(u.Dice),
 		Pilot:      CopyPilot(u.Pilot),
 		HasPilot:   u.HasPilot,
 		Position:   u.Position,

@@ -140,28 +140,23 @@ func separateCommandUnit(units []entity.Unit) (*entity.Unit, []entity.Unit) {
 	return cmd, board
 }
 
-// getDieState returns die outline state: 0=normal, 1=locked, 2=selected, 3=activated, 4=blank
-// Priority: activated > selected > locked > blank > normal
-// Exception: during execution phase, blank dice always show blank state (not locked)
-func getDieState(unitID string, combat model.CombatModel, isPlayerUnit bool) int {
-	rolled, exists := combat.RolledDice[unitID]
-	if !exists {
-		return 0
-	}
-
-	// Check activated first (highest priority)
-	if combat.ActivatedDice[unitID] {
+// getDieState returns die outline state for an individual die:
+// 0=normal, 1=locked, 2=selected, 3=fired/activated, 4=blank
+// Priority: fired > selected > locked > blank > normal
+func getDieState(unitID string, rolled entity.RolledDie, combat model.CombatModel, isPlayerUnit bool) int {
+	// Fired die (spent) — highest priority
+	if rolled.Fired {
 		return 3 // red
 	}
-	// Check selected (only for player units)
-	if isPlayerUnit && combat.SelectedUnitID == unitID {
+	// Selected (only for player units, only unfired dice)
+	if isPlayerUnit && combat.SelectedUnitID == unitID && !rolled.Fired {
 		return 2 // green
 	}
-	// During execution/round-end phases, blank dice should show blank state (not locked orange)
+	// During execution/round-end phases, blank dice show blank state
 	if (combat.DicePhase == model.DicePhaseExecution || combat.DicePhase == model.DicePhaseRoundEnd) && rolled.Type() == entity.DieBlank {
 		return 4 // gray for blank
 	}
-	// Check locked
+	// Locked
 	if rolled.Locked {
 		return 1 // orange
 	}
@@ -216,24 +211,30 @@ func drawRedX(screen *ebiten.Image, x, y float32) {
 	vector.StrokeLine(screen, x+DieBoxSize-dieContentPadding, y+dieContentPadding, x+dieContentPadding, y+DieBoxSize-dieContentPadding, 2, colorRedUsed, false)
 }
 
-// drawUnitDice draws single centered die for any unit.
+// drawUnitDice draws dice for any unit, centered horizontally in the card.
 func drawUnitDice(screen *ebiten.Image, unit entity.Unit, cardX, cardY, cardW, cardH float32, combat model.CombatModel, isPlayerUnit bool) []HitRegion {
 	var regions []HitRegion
-	if !unit.HasDie || !unit.IsAlive() {
+	if len(unit.Dice) == 0 || !unit.IsAlive() {
 		return regions
 	}
 
-	rolled, exists := combat.RolledDice[unit.ID]
+	rolledDice, exists := combat.RolledDice[unit.ID]
 	if !exists {
 		return regions
 	}
 
-	// Single die centered in card
-	dieX := cardX + (cardW-DieBoxSize)/2
+	n := len(rolledDice)
+	const gap float32 = 4
+	totalW := float32(n)*DieBoxSize + float32(n-1)*gap
+	startX := cardX + (cardW-totalW)/2
 	dieY := cardY + (cardH-DieBoxSize)/2
-	state := getDieState(unit.ID, combat, isPlayerUnit)
-	rect := drawDieBox(screen, dieX, dieY, rolled.CurrentFace(), state)
-	regions = append(regions, HitRegion{Rect: rect, Type: "die", UnitID: unit.ID, DieIndex: 0})
+
+	for i, rd := range rolledDice {
+		dieX := startX + float32(i)*(DieBoxSize+gap)
+		state := getDieState(unit.ID, rd, combat, isPlayerUnit)
+		rect := drawDieBox(screen, dieX, dieY, rd.CurrentFace(), state)
+		regions = append(regions, HitRegion{Rect: rect, Type: "die", UnitID: unit.ID, DieIndex: i})
+	}
 
 	return regions
 }

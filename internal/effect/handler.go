@@ -286,14 +286,6 @@ func copyUnit(u entity.Unit) entity.Unit {
 	newAbilities := make([]core.Ability, len(u.Abilities))
 	copy(newAbilities, u.Abilities)
 
-	// Copy single die if present
-	var newDie entity.Die
-	if u.HasDie && u.Die.Faces != nil {
-		faces := make([]entity.DieFace, len(u.Die.Faces))
-		copy(faces, u.Die.Faces)
-		newDie = entity.Die{Faces: faces}
-	}
-
 	return entity.Unit{
 		ID:         u.ID,
 		TemplateID: u.TemplateID,
@@ -302,8 +294,7 @@ func copyUnit(u entity.Unit) entity.Unit {
 		Parts:      newParts,
 		Triggers:   newTriggers,
 		Abilities:  newAbilities,
-		Die:        newDie,
-		HasDie:     u.HasDie,
+		Dice:       entity.CopyDiceSlice(u.Dice),
 		Pilot:      u.Pilot,
 		HasPilot:   u.HasPilot,
 		Position:   u.Position,

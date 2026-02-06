@@ -128,11 +128,11 @@ func formatShields(unit entity.Unit) string {
 	return fmt.Sprintf("⛨ %d", shields)
 }
 
-// getDiceFaces returns the die faces for display.
-// Returns nil if unit has no die or < 6 faces.
+// getDiceFaces returns the die faces for display (first die only).
+// Returns nil if unit has no dice or first die has < 6 faces.
 func getDiceFaces(unit entity.Unit) []entity.DieFace {
-	if !unit.HasDie || len(unit.Die.Faces) < 6 {
+	if len(unit.Dice) == 0 || len(unit.Dice[0].Faces) < 6 {
 		return nil
 	}
-	return unit.Die.Faces
+	return unit.Dice[0].Faces
 }
