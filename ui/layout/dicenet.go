@@ -53,7 +53,7 @@ var diceNetCells = []struct {
 
 // RenderDiceNet creates an image of the dice net for the given faces.
 // Returns nil if faces slice has fewer than 6 elements.
-func RenderDiceNet(faces []entity.DieFace, monoFace *text.Face) *ebiten.Image {
+func RenderDiceNet(faces []entity.DieFace, font *text.Face) *ebiten.Image {
 	if len(faces) < 6 {
 		return nil
 	}
@@ -77,9 +77,9 @@ func RenderDiceNet(faces []entity.DieFace, monoFace *text.Face) *ebiten.Image {
 		cell := diceNetCells[i]
 		x := float32(cell.col * diceNetCellSize)
 		y := float32(cell.row * diceNetCellSize)
-		label := formatFaceLabel(faces[i])
-		c := getFaceColor(faces[i].Type)
-		drawCenteredText(img, label, x, y, diceNetCellSize, diceNetCellSize, c, monoFace)
+		label := formatDieFaceLabel(faces[i])
+		c := getDieFaceColor(faces[i].Type)
+		drawCenteredText(img, label, x, y, diceNetCellSize, diceNetCellSize, c, font)
 	}
 
 	return img
@@ -89,66 +89,66 @@ func RenderDiceNet(faces []entity.DieFace, monoFace *text.Face) *ebiten.Image {
 // Each line is drawn exactly once to ensure uniform thickness.
 // All coordinates are inset by diceNetInset so edge strokes aren't clipped.
 func drawDiceNetGridLines(img *ebiten.Image) {
-	c := diceNetCellSize
-	i := float32(diceNetInset)
-	s := float32(diceNetStroke)
-	col := colorDiceNetGrid
+	cellSz := diceNetCellSize
+	inset := float32(diceNetInset)
+	stroke := float32(diceNetStroke)
+	gridColor := colorDiceNetGrid
 
 	// Helper to convert grid position to inset coordinate
 	// Edge positions (0 and max) get inset, interior positions stay at cell boundaries
 	gx := func(gridCol int) float32 {
 		if gridCol == 0 {
-			return i
+			return inset
 		}
 		if gridCol == diceNetCols {
-			return float32(diceNetWidth) - i
+			return float32(diceNetWidth) - inset
 		}
-		return float32(gridCol * c)
+		return float32(gridCol * cellSz)
 	}
 	gy := func(gridRow int) float32 {
 		if gridRow == 0 {
-			return i
+			return inset
 		}
 		if gridRow == diceNetRows {
-			return float32(diceNetHeight) - i
+			return float32(diceNetHeight) - inset
 		}
-		return float32(gridRow * c)
+		return float32(gridRow * cellSz)
 	}
 
 	// Horizontal lines
 	// Top of face 0 (row 0, cols 1-2)
-	vector.StrokeLine(img, gx(1), gy(0), gx(2), gy(0), s, col, false)
+	vector.StrokeLine(img, gx(1), gy(0), gx(2), gy(0), stroke, gridColor, false)
 	// Top of middle row (row 1, full width)
-	vector.StrokeLine(img, gx(0), gy(1), gx(4), gy(1), s, col, false)
+	vector.StrokeLine(img, gx(0), gy(1), gx(4), gy(1), stroke, gridColor, false)
 	// Bottom of middle row (row 2, full width)
-	vector.StrokeLine(img, gx(0), gy(2), gx(4), gy(2), s, col, false)
+	vector.StrokeLine(img, gx(0), gy(2), gx(4), gy(2), stroke, gridColor, false)
 	// Bottom of face 5 (row 3, cols 1-2)
-	vector.StrokeLine(img, gx(1), gy(3), gx(2), gy(3), s, col, false)
+	vector.StrokeLine(img, gx(1), gy(3), gx(2), gy(3), stroke, gridColor, false)
 
 	// Vertical lines
 	// Left of face 0 (col 1, rows 0-1)
-	vector.StrokeLine(img, gx(1), gy(0), gx(1), gy(1), s, col, false)
+	vector.StrokeLine(img, gx(1), gy(0), gx(1), gy(1), stroke, gridColor, false)
 	// Right of face 0 (col 2, rows 0-1)
-	vector.StrokeLine(img, gx(2), gy(0), gx(2), gy(1), s, col, false)
+	vector.StrokeLine(img, gx(2), gy(0), gx(2), gy(1), stroke, gridColor, false)
 	// Left edge of middle row (col 0, rows 1-2)
-	vector.StrokeLine(img, gx(0), gy(1), gx(0), gy(2), s, col, false)
+	vector.StrokeLine(img, gx(0), gy(1), gx(0), gy(2), stroke, gridColor, false)
 	// Between faces 1-2 (col 1, rows 1-2)
-	vector.StrokeLine(img, gx(1), gy(1), gx(1), gy(2), s, col, false)
+	vector.StrokeLine(img, gx(1), gy(1), gx(1), gy(2), stroke, gridColor, false)
 	// Between faces 2-3 (col 2, rows 1-2)
-	vector.StrokeLine(img, gx(2), gy(1), gx(2), gy(2), s, col, false)
+	vector.StrokeLine(img, gx(2), gy(1), gx(2), gy(2), stroke, gridColor, false)
 	// Between faces 3-4 (col 3, rows 1-2)
-	vector.StrokeLine(img, gx(3), gy(1), gx(3), gy(2), s, col, false)
+	vector.StrokeLine(img, gx(3), gy(1), gx(3), gy(2), stroke, gridColor, false)
 	// Right edge of middle row (col 4, rows 1-2)
-	vector.StrokeLine(img, gx(4), gy(1), gx(4), gy(2), s, col, false)
+	vector.StrokeLine(img, gx(4), gy(1), gx(4), gy(2), stroke, gridColor, false)
 	// Left of face 5 (col 1, rows 2-3)
-	vector.StrokeLine(img, gx(1), gy(2), gx(1), gy(3), s, col, false)
+	vector.StrokeLine(img, gx(1), gy(2), gx(1), gy(3), stroke, gridColor, false)
 	// Right of face 5 (col 2, rows 2-3)
-	vector.StrokeLine(img, gx(2), gy(2), gx(2), gy(3), s, col, false)
+	vector.StrokeLine(img, gx(2), gy(2), gx(2), gy(3), stroke, gridColor, false)
 }
 
-// formatFaceLabel returns the display string for a die face.
+// formatDieFaceLabel returns the display string for a die face.
 // Examples: "D1", "H2", "S1", "x"
-func formatFaceLabel(face entity.DieFace) string {
+func formatDieFaceLabel(face entity.DieFace) string {
 	switch face.Type {
 	case entity.DieDamage:
 		return fmt.Sprintf("D%d", face.Value)
@@ -163,8 +163,8 @@ func formatFaceLabel(face entity.DieFace) string {
 	}
 }
 
-// getFaceColor returns the appropriate color for a die face type.
-func getFaceColor(dieType entity.DieType) color.Color {
+// getDieFaceColor returns the appropriate color for a die face type.
+func getDieFaceColor(dieType entity.DieType) color.Color {
 	switch dieType {
 	case entity.DieDamage:
 		return colorDiceNetDmg
@@ -180,13 +180,13 @@ func getFaceColor(dieType entity.DieType) color.Color {
 }
 
 // drawCenteredText draws text centered within a cell.
-func drawCenteredText(img *ebiten.Image, s string, cellX, cellY, cellW, cellH float32, c color.Color, face *text.Face) {
-	if face == nil {
+func drawCenteredText(img *ebiten.Image, s string, cellX, cellY, cellW, cellH float32, c color.Color, font *text.Face) {
+	if font == nil {
 		return
 	}
 
 	// Measure text dimensions
-	w, h := text.Measure(s, *face, 0)
+	w, h := text.Measure(s, *font, 0)
 
 	// Calculate centered position
 	x := cellX + (cellW-float32(w))/2
@@ -195,7 +195,7 @@ func drawCenteredText(img *ebiten.Image, s string, cellX, cellY, cellW, cellH fl
 	op := &text.DrawOptions{}
 	op.GeoM.Translate(float64(x), float64(y))
 	op.ColorScale.ScaleWithColor(c)
-	text.Draw(img, s, *face, op)
+	text.Draw(img, s, *font, op)
 }
 
 // CreateEmptyDiceNet returns a blank image of the correct size for the dice net.

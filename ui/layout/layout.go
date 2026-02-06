@@ -9,6 +9,8 @@ import (
 	"github.com/ebitenui/ebitenui/widget"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
+
+	"wulfaz/internal/entity"
 )
 
 const (
@@ -40,10 +42,11 @@ type GameUI struct {
 	logContainer   *widget.Container // Bottom section: combat log
 
 	// Stats display (right sidebar top)
-	nameText   *widget.Text
-	hpText     *widget.Text
-	shieldText *widget.Text
-	diceText   *widget.Text
+	nameText     *widget.Text
+	hpText       *widget.Text
+	shieldText   *widget.Text
+	diceGraphic  *widget.Graphic
+	diceFont *text.Face // Cached for dice net rendering
 
 	// Combat log (right sidebar bottom)
 	logText *widget.Text
@@ -140,15 +143,15 @@ func NewGameUI(face, monoFace *text.Face) *GameUI {
 		widget.TextOpts.Text("", monoFace, shieldColor),
 		widget.TextOpts.MaxWidth(float64(RightSidebarWidth-20)),
 	)
-	g.diceText = widget.NewText(
-		widget.TextOpts.Text("", monoFace, textColor),
-		widget.TextOpts.MaxWidth(float64(RightSidebarWidth-20)),
+	g.diceFont = monoFace
+	g.diceGraphic = widget.NewGraphic(
+		widget.GraphicOpts.Image(CreateEmptyDiceNet()),
 	)
 
 	g.statsContainer.AddChild(g.nameText)
 	g.statsContainer.AddChild(g.hpText)
 	g.statsContainer.AddChild(g.shieldText)
-	g.statsContainer.AddChild(g.diceText)
+	g.statsContainer.AddChild(g.diceGraphic)
 
 	// Log container (bottom) - anchor layout with log at bottom
 	g.logContainer = widget.NewContainer(
@@ -280,8 +283,13 @@ func (g *GameUI) SetShieldText(s string) {
 	g.rightSidebar.RequestRelayout()
 }
 
-// SetDiceText updates the dice net display
-func (g *GameUI) SetDiceText(s string) {
-	g.diceText.Label = s
+// SetDiceFaces updates the dice net display with the given faces.
+// Pass nil or empty slice to clear the display.
+func (g *GameUI) SetDiceFaces(faces []entity.DieFace) {
+	if len(faces) < 6 {
+		g.diceGraphic.Image = CreateEmptyDiceNet()
+	} else {
+		g.diceGraphic.Image = RenderDiceNet(faces, g.diceFont)
+	}
 	g.rightSidebar.RequestRelayout()
 }
