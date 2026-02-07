@@ -17,7 +17,7 @@ const (
 	DicePhaseNone          DicePhase = iota
 	DicePhasePreview                 // All dice rolled, player sees AI targets as preview
 	DicePhasePlayerCommand           // Player manipulates all player unit dice
-	DicePhaseExecution               // All attacks resolve simultaneously
+	DicePhaseExecution               // Enemy attacks resolve per-unit via Task Pattern
 	DicePhaseRoundEnd                // Shields expire, round cleanup
 )
 

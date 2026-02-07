@@ -95,8 +95,6 @@ func (m Model) Update(msg model.Msg) (Model, model.Cmd) {
 	// AI targeting and execution
 	case model.AITargetsComputed:
 		return m.handleAITargetsComputed(msg)
-	case model.AllAttacksResolved:
-		return m.handleAllAttacksResolved(msg)
 	case model.ExecutionComplete:
 		return m.handleExecutionComplete(msg)
 	case model.RoundEnded:
@@ -430,34 +428,6 @@ func findUnitByID(combat model.CombatModel, unitID string) *entity.Unit {
 		}
 	}
 	return nil
-}
-
-// buildHPSnapshot creates map of unitID -> {health, shields} for simultaneous resolution.
-func buildHPSnapshot(combat model.CombatModel) map[string][2]int {
-	snapshot := make(map[string][2]int)
-	for _, u := range combat.PlayerUnits {
-		hp := 0
-		if h, ok := u.Attributes["health"]; ok {
-			hp = h.Base
-		}
-		shields := 0
-		if s, ok := u.Attributes["shields"]; ok {
-			shields = s.Base
-		}
-		snapshot[u.ID] = [2]int{hp, shields}
-	}
-	for _, u := range combat.EnemyUnits {
-		hp := 0
-		if h, ok := u.Attributes["health"]; ok {
-			hp = h.Base
-		}
-		shields := 0
-		if s, ok := u.Attributes["shields"]; ok {
-			shields = s.Base
-		}
-		snapshot[u.ID] = [2]int{hp, shields}
-	}
-	return snapshot
 }
 
 // updateUnitHP updates a unit's health/shields in a slice by ID.
@@ -920,6 +890,11 @@ func (m Model) handleUnitDiceEffectsApplied(msg model.UnitDiceEffectsApplied) (M
 		return m.applyCombatEnd()
 	}
 
+	// Chain next enemy unit during execution phase
+	if combat.DicePhase == model.DicePhaseExecution {
+		return m.advanceEnemyExecution(msg.SourceUnitID, msg.Timestamp)
+	}
+
 	// Auto-advance when all player dice are activated
 	if combat.DicePhase == model.DicePhasePlayerCommand && allPlayerDiceActivated(m.Combat) {
 		return m, func() model.Msg { return model.PlayerCommandDone{} }
@@ -1108,131 +1083,6 @@ func (m Model) handleAITargetsComputed(msg model.AITargetsComputed) (Model, mode
 	return m, nil
 }
 
-func (m Model) handleAllAttacksResolved(msg model.AllAttacksResolved) (Model, model.Cmd) {
-	combat := m.Combat
-	combat.PlayerUnits = slices.Clone(combat.PlayerUnits)
-	combat.EnemyUnits = slices.Clone(combat.EnemyUnits)
-
-	// Apply all attacks and create floating texts
-	for _, atk := range msg.Attacks {
-		updateUnitHP(combat.PlayerUnits, atk.TargetID, atk.NewHealth, atk.NewShields)
-		updateUnitHP(combat.EnemyUnits, atk.TargetID, atk.NewHealth, atk.NewShields)
-
-		// Create floating text(s)
-		texts := formatAttackTexts(atk, msg.Timestamp, combat.FloatingTexts)
-		combat.FloatingTexts = append(combat.FloatingTexts, texts...)
-	}
-
-	// Process defense results (enemy shield/heal against own allies)
-	for _, result := range msg.DefenseResults {
-		switch result.Effect {
-		case entity.DieShield:
-			updateUnitShields(combat.EnemyUnits, result.TargetUnitID, result.NewShields)
-		case entity.DieHeal:
-			updateUnitHealth(combat.EnemyUnits, result.TargetUnitID, result.NewHealth)
-		case entity.DieDamage, entity.DieBlank:
-			// Defense results only use shield/heal effects
-		}
-
-		// Floating text
-		offset := countTextsForUnit(combat.FloatingTexts, result.TargetUnitID)
-		switch result.Effect {
-		case entity.DieHeal:
-			combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
-				UnitID:    result.TargetUnitID,
-				Text:      fmt.Sprintf("+%d", result.Value),
-				ColorRGBA: model.ColorTextHeal,
-				StartedAt: msg.Timestamp,
-				YOffset:   offset,
-			})
-		case entity.DieShield:
-			combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
-				UnitID:    result.TargetUnitID,
-				Text:      fmt.Sprintf("+%d", result.Value),
-				ColorRGBA: model.ColorTextShield,
-				StartedAt: msg.Timestamp,
-				YOffset:   offset,
-			})
-		case entity.DieDamage, entity.DieBlank:
-			// Defense results only use shield/heal effects
-		}
-	}
-
-	// Log attacks with shield absorption details
-	var logEntries []string
-	for _, atk := range msg.Attacks {
-		status := ""
-		if atk.TargetDead {
-			status = " [DESTROYED]"
-		}
-		if atk.ShieldAbsorbed > 0 {
-			healthDmg := atk.Damage - atk.ShieldAbsorbed
-			logEntries = append(logEntries, fmt.Sprintf("%s -> %s: %d dmg (%d absorbed, %d to health)%s",
-				atk.AttackerID, atk.TargetID, atk.Damage, atk.ShieldAbsorbed, healthDmg, status))
-		} else if atk.Damage > 0 {
-			logEntries = append(logEntries, fmt.Sprintf("%s -> %s: %d dmg%s",
-				atk.AttackerID, atk.TargetID, atk.Damage, status))
-		}
-	}
-	// Log defense results
-	for _, result := range msg.DefenseResults {
-		logEntries = append(logEntries, fmt.Sprintf("enemy %s -> %s: %s %d",
-			result.TargetUnitID, result.TargetUnitID, result.Effect, result.Value))
-	}
-	combat.Log = appendLogEntries(combat.Log, logEntries)
-
-	// Move to round end
-	combat.DicePhase = model.DicePhaseRoundEnd
-	m.Combat = combat
-
-	// Wait for click to continue
-	return m, nil
-}
-
-// formatAttackTexts creates FloatingText entries for an attack.
-// Shield absorption + overflow creates two stacked entries.
-func formatAttackTexts(atk model.AttackResult, timestamp int64, existing []model.FloatingText) []model.FloatingText {
-	// Count existing texts for this unit to determine stack offset
-	offset := 0
-	for _, t := range existing {
-		if t.UnitID == atk.TargetID {
-			offset++
-		}
-	}
-	if offset > model.MaxTextStack {
-		offset = model.MaxTextStack
-	}
-
-	var texts []model.FloatingText
-
-	// Determine if this was shield absorption + overflow
-	shieldDamage := atk.ShieldAbsorbed
-	healthDamage := atk.Damage - shieldDamage
-
-	if shieldDamage > 0 {
-		texts = append(texts, model.FloatingText{
-			UnitID:    atk.TargetID,
-			Text:      fmt.Sprintf("-%d", shieldDamage),
-			ColorRGBA: model.ColorTextShield,
-			StartedAt: timestamp,
-			YOffset:   min(offset, model.MaxTextStack),
-		})
-		offset++
-	}
-
-	if healthDamage > 0 {
-		texts = append(texts, model.FloatingText{
-			UnitID:    atk.TargetID,
-			Text:      fmt.Sprintf("-%d", healthDamage),
-			ColorRGBA: model.ColorTextDamage,
-			StartedAt: timestamp,
-			YOffset:   min(offset, model.MaxTextStack),
-		})
-	}
-
-	return texts
-}
-
 func (m Model) handleExecutionComplete(_ model.ExecutionComplete) (Model, model.Cmd) {
 	// Allow from Execution (normal) or RoundEnd (timer fired after phase already set by click)
 	if m.Combat.DicePhase != model.DicePhaseExecution && m.Combat.DicePhase != model.DicePhaseRoundEnd {
@@ -1388,7 +1238,7 @@ func (m Model) handleUnlockAllDiceRequested(_ model.UnlockAllDiceRequested) (Mod
 	return m, nil
 }
 
-// handleExecutionAdvanceClicked executes all attacks simultaneously on click.
+// handleExecutionAdvanceClicked starts per-unit enemy execution on click.
 func (m Model) handleExecutionAdvanceClicked(msg model.ExecutionAdvanceClicked) (Model, model.Cmd) {
 	if m.Combat.DicePhase != model.DicePhaseExecution {
 		return m, nil
@@ -1399,8 +1249,31 @@ func (m Model) handleExecutionAdvanceClicked(msg model.ExecutionAdvanceClicked) 
 	combat.FloatingTexts = pruneExpiredTexts(combat.FloatingTexts, msg.Timestamp)
 	m.Combat = combat
 
-	// Execute all attacks simultaneously
-	return m, ExecuteAllAttacks(m.Combat, msg.Timestamp)
+	return m.advanceEnemyExecution("", msg.Timestamp)
+}
+
+// advanceEnemyExecution finds the next enemy unit after afterUnitID with targets and fires its Cmd.
+// When all units are processed, transitions to DicePhaseRoundEnd.
+func (m Model) advanceEnemyExecution(afterUnitID string, timestamp int64) (Model, model.Cmd) {
+	combat := m.Combat
+	found := afterUnitID == ""
+	for _, unit := range combat.EnemyUnits {
+		if !found {
+			if unit.ID == afterUnitID {
+				found = true
+			}
+			continue
+		}
+		_, hasDmg := combat.EnemyTargets[unit.ID]
+		_, hasDef := combat.EnemyDefenseTargets[unit.ID]
+		if hasDmg || hasDef {
+			return m, ApplyEnemyUnitEffects(unit.ID, m.Combat, timestamp)
+		}
+	}
+	// All enemy units processed
+	combat.DicePhase = model.DicePhaseRoundEnd
+	m.Combat = combat
+	return m, nil
 }
 
 // pruneExpiredTexts removes floating texts older than CombatTextDuration.

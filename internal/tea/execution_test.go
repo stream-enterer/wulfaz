@@ -190,14 +190,16 @@ func TestCheckCombatEnd_CommandUnitBased(t *testing.T) {
 	}
 }
 
-// ===== All Attacks Resolved Tests =====
+// ===== Enemy Execution Tests (Per-Unit via UnitDiceEffectsApplied) =====
 
-func TestAllAttacksResolved_AppliesDamage(t *testing.T) {
+func TestEnemyExecution_AppliesDamage(t *testing.T) {
 	m := Model{
 		Version: 1,
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
 			DicePhase: model.DicePhaseExecution,
+			EnemyTargets:        map[string]string{"enemy1": "player_cmd"},
+			EnemyDefenseTargets: map[string]string{},
 			PlayerUnits: []entity.Unit{
 				{
 					ID:       "player_cmd",
@@ -228,15 +230,15 @@ func TestAllAttacksResolved_AppliesDamage(t *testing.T) {
 		},
 	}
 
-	msg := model.AllAttacksResolved{
-		Attacks: []model.AttackResult{
+	msg := model.UnitDiceEffectsApplied{
+		SourceUnitID: "enemy1",
+		Results: []model.DiceEffectResult{
 			{
-				AttackerID: "player1",
-				TargetID:   "enemy1",
-				Damage:     20,
-				NewHealth:  30,
-				NewShields: 0,
-				TargetDead: false,
+				TargetUnitID: "player_cmd",
+				Effect:       entity.DieDamage,
+				Value:        20,
+				NewHealth:    80,
+				NewShields:   0,
 			},
 		},
 		Timestamp: 1000,
@@ -244,22 +246,24 @@ func TestAllAttacksResolved_AppliesDamage(t *testing.T) {
 
 	newM, _ := m.Update(msg)
 
-	// Check damage applied to enemy1
-	for _, u := range newM.Combat.EnemyUnits {
-		if u.ID == "enemy1" {
-			if u.Attributes["health"].Base != 30 {
-				t.Errorf("enemy1 health = %d, want 30", u.Attributes["health"].Base)
+	// Check damage applied to player_cmd
+	for _, u := range newM.Combat.PlayerUnits {
+		if u.ID == "player_cmd" {
+			if u.Attributes["health"].Base != 80 {
+				t.Errorf("player_cmd health = %d, want 80", u.Attributes["health"].Base)
 			}
 		}
 	}
 }
 
-func TestAllAttacksResolved_VictoryCheck(t *testing.T) {
+func TestEnemyExecution_VictoryCheck(t *testing.T) {
 	m := Model{
 		Version: 1,
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
 			DicePhase: model.DicePhaseExecution,
+			EnemyTargets:        map[string]string{"enemy1": "enemy_cmd"},
+			EnemyDefenseTargets: map[string]string{},
 			PlayerUnits: []entity.Unit{
 				{
 					ID:       "player_cmd",
@@ -279,19 +283,26 @@ func TestAllAttacksResolved_VictoryCheck(t *testing.T) {
 						"health": {Base: 10}, // Low HP, will die
 					},
 				},
+				{
+					ID:       "enemy1",
+					Position: 0,
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 50},
+					},
+				},
 			},
 		},
 	}
 
-	msg := model.AllAttacksResolved{
-		Attacks: []model.AttackResult{
+	msg := model.UnitDiceEffectsApplied{
+		SourceUnitID: "enemy1",
+		Results: []model.DiceEffectResult{
 			{
-				AttackerID: "player1",
-				TargetID:   "enemy_cmd",
-				Damage:     10,
-				NewHealth:  0,
-				NewShields: 0,
-				TargetDead: true,
+				TargetUnitID: "enemy_cmd",
+				Effect:       entity.DieDamage,
+				Value:        10,
+				NewHealth:    0,
+				NewShields:   0,
 			},
 		},
 		Timestamp: 1000,
@@ -299,15 +310,7 @@ func TestAllAttacksResolved_VictoryCheck(t *testing.T) {
 
 	newM, cmd := m.Update(msg)
 
-	// Should return nil (waiting for click, not timer)
-	if cmd != nil {
-		t.Fatalf("expected nil cmd, got %T", cmd())
-	}
-
-	// Step 2: RoundEndClicked triggers victory check
-	newM, cmd = newM.Update(model.RoundEndClicked{})
-
-	// Combat should end
+	// Victory detected immediately during execution (not deferred)
 	if newM.Combat.Phase != model.CombatResolved {
 		t.Errorf("Combat.Phase = %v, want CombatResolved", newM.Combat.Phase)
 	}
@@ -315,12 +318,13 @@ func TestAllAttacksResolved_VictoryCheck(t *testing.T) {
 		t.Errorf("Victor = %s, want player", newM.Combat.Victor)
 	}
 
-	// Should return CombatEnded
-	if cmd != nil {
-		result := cmd()
-		if ended, ok := result.(model.CombatEnded); !ok || ended.Victor != model.VictorPlayer {
-			t.Errorf("expected CombatEnded{VictorPlayer}, got %T", result)
-		}
+	// Should return CombatEnded cmd
+	if cmd == nil {
+		t.Fatal("expected CombatEnded cmd, got nil")
+	}
+	result := cmd()
+	if ended, ok := result.(model.CombatEnded); !ok || ended.Victor != model.VictorPlayer {
+		t.Errorf("expected CombatEnded{VictorPlayer}, got %T", result)
 	}
 }
 
@@ -379,15 +383,17 @@ func TestExecutionComplete_TransitionsToRoundEnd(t *testing.T) {
 	}
 }
 
-// ===== Defense Results Tests =====
+// ===== Enemy Defense Results Tests =====
 
-func TestAllAttacksResolved_DefenseResults(t *testing.T) {
-	// Enemy shield/heal dice should apply to enemy allies via DefenseResults.
+func TestEnemyExecution_DefenseResults(t *testing.T) {
+	// Enemy shield/heal dice should apply to enemy allies via UnitDiceEffectsApplied.
 	m := Model{
 		Version: 1,
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
 			DicePhase: model.DicePhaseExecution,
+			EnemyTargets:        map[string]string{},
+			EnemyDefenseTargets: map[string]string{"enemy_cmd": "enemy1"},
 			PlayerUnits: []entity.Unit{
 				{
 					ID:       "player_cmd",
@@ -419,13 +425,14 @@ func TestAllAttacksResolved_DefenseResults(t *testing.T) {
 		},
 	}
 
-	msg := model.AllAttacksResolved{
-		Attacks: []model.AttackResult{}, // No damage attacks
-		DefenseResults: []model.DiceEffectResult{
+	msg := model.UnitDiceEffectsApplied{
+		SourceUnitID: "enemy_cmd",
+		Results: []model.DiceEffectResult{
 			{
 				TargetUnitID: "enemy1",
 				Effect:       entity.DieShield,
 				Value:        5,
+				NewHealth:    40,
 				NewShields:   5,
 			},
 			{
@@ -433,6 +440,7 @@ func TestAllAttacksResolved_DefenseResults(t *testing.T) {
 				Effect:       entity.DieHeal,
 				Value:        10,
 				NewHealth:    90,
+				NewShields:   0,
 			},
 		},
 		Timestamp: 1000,
@@ -452,5 +460,168 @@ func TestAllAttacksResolved_DefenseResults(t *testing.T) {
 				t.Errorf("enemy_cmd health = %d, want 90", u.Attributes["health"].Base)
 			}
 		}
+	}
+}
+
+// ===== ApplyEnemyUnitEffects Cmd Tests =====
+
+func TestApplyEnemyUnitEffects_DamageWithShieldAbsorption(t *testing.T) {
+	combat := model.CombatModel{
+		PlayerUnits: []entity.Unit{
+			{
+				ID: "player1",
+				Attributes: map[string]core.Attribute{
+					"health":  {Base: 50},
+					"shields": {Base: 3},
+				},
+			},
+		},
+		EnemyUnits: []entity.Unit{
+			{
+				ID: "enemy1",
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 40},
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"enemy1": {
+				{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0},
+			},
+		},
+		EnemyTargets:        map[string]string{"enemy1": "player1"},
+		EnemyDefenseTargets: map[string]string{},
+	}
+
+	cmd := ApplyEnemyUnitEffects("enemy1", combat, 1000)
+	result := cmd().(model.UnitDiceEffectsApplied)
+
+	if result.SourceUnitID != "enemy1" {
+		t.Errorf("SourceUnitID = %s, want enemy1", result.SourceUnitID)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("len(Results) = %d, want 1", len(result.Results))
+	}
+	r := result.Results[0]
+	if r.TargetUnitID != "player1" {
+		t.Errorf("TargetUnitID = %s, want player1", r.TargetUnitID)
+	}
+	if r.ShieldAbsorbed != 3 {
+		t.Errorf("ShieldAbsorbed = %d, want 3", r.ShieldAbsorbed)
+	}
+	if r.NewShields != 0 {
+		t.Errorf("NewShields = %d, want 0", r.NewShields)
+	}
+	if r.NewHealth != 48 {
+		t.Errorf("NewHealth = %d, want 48", r.NewHealth)
+	}
+}
+
+func TestApplyEnemyUnitEffects_HealCappedAtMaxHealth(t *testing.T) {
+	combat := model.CombatModel{
+		EnemyUnits: []entity.Unit{
+			{
+				ID: "enemy1",
+				Attributes: map[string]core.Attribute{
+					"health":     {Base: 45},
+					"max_health": {Base: 50},
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"enemy1": {
+				{Faces: []entity.DieFace{{Type: entity.DieHeal, Value: 10}}, FaceIndex: 0},
+			},
+		},
+		EnemyTargets:        map[string]string{},
+		EnemyDefenseTargets: map[string]string{"enemy1": "enemy1"},
+	}
+
+	cmd := ApplyEnemyUnitEffects("enemy1", combat, 1000)
+	result := cmd().(model.UnitDiceEffectsApplied)
+
+	if len(result.Results) != 1 {
+		t.Fatalf("len(Results) = %d, want 1", len(result.Results))
+	}
+	if result.Results[0].NewHealth != 50 {
+		t.Errorf("NewHealth = %d, want 50 (capped at max_health)", result.Results[0].NewHealth)
+	}
+}
+
+func TestApplyEnemyUnitEffects_OnlyDamageDice(t *testing.T) {
+	combat := model.CombatModel{
+		PlayerUnits: []entity.Unit{
+			{
+				ID: "player1",
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 100},
+				},
+			},
+		},
+		EnemyUnits: []entity.Unit{
+			{
+				ID: "enemy1",
+				Attributes: map[string]core.Attribute{
+					"health": {Base: 40},
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"enemy1": {
+				{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 3}}, FaceIndex: 0},
+				{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 4}}, FaceIndex: 0},
+			},
+		},
+		EnemyTargets:        map[string]string{"enemy1": "player1"},
+		EnemyDefenseTargets: map[string]string{},
+	}
+
+	cmd := ApplyEnemyUnitEffects("enemy1", combat, 1000)
+	result := cmd().(model.UnitDiceEffectsApplied)
+
+	if len(result.Results) != 2 {
+		t.Fatalf("len(Results) = %d, want 2", len(result.Results))
+	}
+	// First die: 3 dmg -> 97 HP
+	if result.Results[0].NewHealth != 97 {
+		t.Errorf("Results[0].NewHealth = %d, want 97", result.Results[0].NewHealth)
+	}
+	// Second die: 4 dmg -> 93 HP
+	if result.Results[1].NewHealth != 93 {
+		t.Errorf("Results[1].NewHealth = %d, want 93", result.Results[1].NewHealth)
+	}
+}
+
+func TestApplyEnemyUnitEffects_OnlyHealDice(t *testing.T) {
+	combat := model.CombatModel{
+		EnemyUnits: []entity.Unit{
+			{
+				ID: "enemy_cmd",
+				Attributes: map[string]core.Attribute{
+					"health":     {Base: 80},
+					"max_health": {Base: 100},
+				},
+			},
+		},
+		RolledDice: map[string][]entity.RolledDie{
+			"enemy_cmd": {
+				{Faces: []entity.DieFace{{Type: entity.DieHeal, Value: 5}}, FaceIndex: 0},
+			},
+		},
+		EnemyTargets:        map[string]string{},
+		EnemyDefenseTargets: map[string]string{"enemy_cmd": "enemy_cmd"},
+	}
+
+	cmd := ApplyEnemyUnitEffects("enemy_cmd", combat, 1000)
+	result := cmd().(model.UnitDiceEffectsApplied)
+
+	if len(result.Results) != 1 {
+		t.Fatalf("len(Results) = %d, want 1", len(result.Results))
+	}
+	if result.Results[0].Effect != entity.DieHeal {
+		t.Errorf("Effect = %v, want DieHeal", result.Results[0].Effect)
+	}
+	if result.Results[0].NewHealth != 85 {
+		t.Errorf("NewHealth = %d, want 85", result.Results[0].NewHealth)
 	}
 }

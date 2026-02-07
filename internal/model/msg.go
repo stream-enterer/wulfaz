@@ -287,26 +287,6 @@ type AITargetsComputed struct {
 
 func (AITargetsComputed) isMsg() {}
 
-// AllAttacksResolved signals all attacks have been resolved simultaneously.
-type AllAttacksResolved struct {
-	Attacks        []AttackResult
-	DefenseResults []DiceEffectResult // Enemy shield/heal results against own allies
-	Timestamp      int64
-}
-
-func (AllAttacksResolved) isMsg() {}
-
-// AttackResult records one attack's outcome.
-type AttackResult struct {
-	AttackerID     string
-	TargetID       string
-	Damage         int
-	ShieldAbsorbed int // How much was absorbed by shields
-	NewHealth      int
-	NewShields     int
-	TargetDead     bool
-}
-
 // ExecutionComplete signals all positions resolved.
 type ExecutionComplete struct{}
 
