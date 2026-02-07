@@ -628,41 +628,69 @@ func TestApplyEnemyUnitEffects_OnlyHealDice(t *testing.T) {
 
 // ===== Dead Unit Target Pruning Tests =====
 
-func TestPruneDeadTargets_RemovesDeadSource(t *testing.T) {
-	targets := map[string]string{"alive1": "dest1", "dead1": "dest2"}
-	sources := []entity.Unit{
-		{ID: "alive1", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
-		{ID: "dead1", Attributes: map[string]core.Attribute{"health": {Base: 0}}},
+func TestPruneDeadTargets(t *testing.T) {
+	alive := func(id string) entity.Unit {
+		return entity.Unit{ID: id, Attributes: map[string]core.Attribute{"health": {Base: 10}}}
 	}
-	dests := []entity.Unit{
-		{ID: "dest1", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
-		{ID: "dest2", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+	dead := func(id string) entity.Unit {
+		return entity.Unit{ID: id, Attributes: map[string]core.Attribute{"health": {Base: 0}}}
 	}
-	pruned := pruneDeadTargets(targets, sources, dests)
-	if _, ok := pruned["dead1"]; ok {
-		t.Error("dead source should be pruned")
-	}
-	if _, ok := pruned["alive1"]; !ok {
-		t.Error("alive source should remain")
-	}
-}
 
-func TestPruneDeadTargets_RemovesDeadDest(t *testing.T) {
-	targets := map[string]string{"src1": "alive1", "src2": "dead1"}
-	sources := []entity.Unit{
-		{ID: "src1", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
-		{ID: "src2", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+	tests := []struct {
+		name    string
+		targets map[string]string
+		sources []entity.Unit
+		dests   []entity.Unit
+		want    map[string]string
+	}{
+		{
+			name:    "empty map unchanged",
+			targets: map[string]string{},
+			sources: []entity.Unit{alive("s1")},
+			dests:   []entity.Unit{alive("d1")},
+			want:    map[string]string{},
+		},
+		{
+			name:    "all alive unchanged",
+			targets: map[string]string{"s1": "d1", "s2": "d2"},
+			sources: []entity.Unit{alive("s1"), alive("s2")},
+			dests:   []entity.Unit{alive("d1"), alive("d2")},
+			want:    map[string]string{"s1": "d1", "s2": "d2"},
+		},
+		{
+			name:    "dead source removed",
+			targets: map[string]string{"alive1": "dest1", "dead1": "dest2"},
+			sources: []entity.Unit{alive("alive1"), dead("dead1")},
+			dests:   []entity.Unit{alive("dest1"), alive("dest2")},
+			want:    map[string]string{"alive1": "dest1"},
+		},
+		{
+			name:    "dead dest removed",
+			targets: map[string]string{"src1": "alive1", "src2": "dead1"},
+			sources: []entity.Unit{alive("src1"), alive("src2")},
+			dests:   []entity.Unit{alive("alive1"), dead("dead1")},
+			want:    map[string]string{"src1": "alive1"},
+		},
+		{
+			name:    "both dead clears all",
+			targets: map[string]string{"dead1": "dead2"},
+			sources: []entity.Unit{dead("dead1")},
+			dests:   []entity.Unit{dead("dead2")},
+			want:    map[string]string{},
+		},
 	}
-	dests := []entity.Unit{
-		{ID: "alive1", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
-		{ID: "dead1", Attributes: map[string]core.Attribute{"health": {Base: 0}}},
-	}
-	pruned := pruneDeadTargets(targets, sources, dests)
-	if _, ok := pruned["src2"]; ok {
-		t.Error("entry pointing to dead dest should be pruned")
-	}
-	if _, ok := pruned["src1"]; !ok {
-		t.Error("entry pointing to alive dest should remain")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := pruneDeadTargets(tt.targets, tt.sources, tt.dests)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len = %d, want %d; got %v", len(got), len(tt.want), got)
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Errorf("got[%q] = %q, want %q", k, got[k], v)
+				}
+			}
+		})
 	}
 }
 
@@ -722,9 +750,6 @@ func TestEnemyExecution_SkipsDeadSource(t *testing.T) {
 					},
 				},
 			},
-			RolledDice: map[string][]entity.RolledDie{
-				"enemy2": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0}},
-			},
 		},
 	}
 
@@ -745,9 +770,13 @@ func TestEnemyExecution_SkipsDeadSource(t *testing.T) {
 
 	newM, _ := m.Update(msg)
 
-	// enemy1's target entry should have been pruned (dead source)
+	// enemy1's target entry should have been pruned (dead source).
+	// enemy2→player1 survives (both alive).
 	if _, ok := newM.Combat.EnemyTargets["enemy1"]; ok {
 		t.Error("dead enemy1 should be pruned from EnemyTargets")
+	}
+	if len(newM.Combat.EnemyTargets) != 1 {
+		t.Errorf("EnemyTargets len = %d, want 1", len(newM.Combat.EnemyTargets))
 	}
 }
 
@@ -805,9 +834,6 @@ func TestEnemyExecution_SkipsDeadTarget_ChainKill(t *testing.T) {
 					},
 				},
 			},
-			RolledDice: map[string][]entity.RolledDie{
-				"enemy2": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0}},
-			},
 		},
 	}
 
@@ -828,13 +854,12 @@ func TestEnemyExecution_SkipsDeadTarget_ChainKill(t *testing.T) {
 
 	newM, cmd := m.Update(msg)
 
-	// enemy2's target entry should have been pruned (dead destination)
-	if _, ok := newM.Combat.EnemyTargets["enemy2"]; ok {
-		t.Error("enemy2→player1 should be pruned after player1 dies")
+	// Both entries pruned: enemy1→player1 (dead dest) and enemy2→player1 (dead dest).
+	if len(newM.Combat.EnemyTargets) != 0 {
+		t.Errorf("EnemyTargets len = %d, want 0; got %v", len(newM.Combat.EnemyTargets), newM.Combat.EnemyTargets)
 	}
 
-	// The chained cmd should be for enemy2 but with no targets left,
-	// so execution should transition to DicePhaseRoundEnd.
+	// With no targets left, execution should transition to DicePhaseRoundEnd.
 	if cmd != nil {
 		t.Errorf("expected nil cmd (all remaining targets pruned), got non-nil")
 	}
@@ -892,7 +917,8 @@ func TestEnemyExecution_SkipsDeadDefenseTarget(t *testing.T) {
 
 	newM, _ := m.Update(msg)
 
-	if _, ok := newM.Combat.EnemyDefenseTargets["enemy_cmd"]; ok {
-		t.Error("defense target pointing to dead enemy1 should be pruned")
+	if len(newM.Combat.EnemyDefenseTargets) != 0 {
+		t.Errorf("EnemyDefenseTargets len = %d, want 0; got %v",
+			len(newM.Combat.EnemyDefenseTargets), newM.Combat.EnemyDefenseTargets)
 	}
 }
