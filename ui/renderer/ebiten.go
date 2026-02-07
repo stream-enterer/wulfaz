@@ -19,6 +19,7 @@ import (
 var (
 	centerOffset image.Point
 	centerWidth  int
+	centerHeight int
 )
 
 // offsetX returns x coordinate offset into center area
@@ -463,6 +464,7 @@ func RenderEbiten(screen *ebiten.Image, m tea.Model, centerRect image.Rectangle)
 	// Store layout info for all rendering functions
 	centerOffset = centerRect.Min
 	centerWidth = centerRect.Dx()
+	centerHeight = centerRect.Dy()
 
 	// Fill only the center area (not sidebars)
 	vector.FillRect(screen, float32(centerRect.Min.X), float32(centerRect.Min.Y),
@@ -488,7 +490,7 @@ func RenderEbiten(screen *ebiten.Image, m tea.Model, centerRect image.Rectangle)
 func renderMenu(screen *ebiten.Image) {
 	// Center text in the center panel area
 	cx := centerOffset.X + centerWidth/2
-	cy := centerOffset.Y + screen.Bounds().Dy()/2
+	cy := centerOffset.Y + centerHeight/2
 	DrawTextCentered(screen, "=== WULFAZ ===", cx, cy-20)
 	DrawTextCentered(screen, "Press SPACE to start", cx, cy+10)
 }
@@ -496,7 +498,7 @@ func renderMenu(screen *ebiten.Image) {
 func renderGameOver(screen *ebiten.Image) {
 	// Center text in the center panel area
 	cx := centerOffset.X + centerWidth/2
-	cy := centerOffset.Y + screen.Bounds().Dy()/2
+	cy := centerOffset.Y + centerHeight/2
 	DrawTextCentered(screen, "=== GAME OVER ===", cx, cy-10)
 	DrawTextCentered(screen, "Press ESC to quit", cx, cy+20)
 }
