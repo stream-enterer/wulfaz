@@ -5,16 +5,19 @@ Mech autobattler roguelike in Go using TEA (The Elm Architecture).
 ## Project Structure
 
 ```
-core ← entity ← model ← tea
-         ↑          ↑        ↑
-       event     resolve ----+
-         ↑          ↑
-       effect ------+
-         ↑
-      template
+Layer 4 (top):    tea
+Layer 3:          model   resolve
+Layer 2:          effect  template
+Layer 1:          event
+Layer 0 (bottom): entity
+Foundation:       core
 ```
 
-No import cycles. Templates in `data/templates/` as KDL 1.0 *NOT* 2.0.
+A package may only import from strictly lower layers or `core`.
+Permitted same-layer edge: `resolve → model`.
+`app` and `ui` sit above all layers and are unconstrained.
+New `internal/` packages must be assigned a layer here before use.
+Templates in `data/templates/` as KDL 1.0 *NOT* 2.0.
 
 ## Reference Docs
 
@@ -34,7 +37,7 @@ Same initial state + same Msg sequence = same result. Always.
 Update returns Cmd descriptions. Runtime executes them.
 
 ### P4: No Mutation
-If anyone else can change what you hold, you have a bug.
+If anyone else can change what you hold, you have a bug. Clone slices and maps before modifying.
 
 ### P5: Explicit Over Implicit
 Trace any action to its effects by reading linearly.
@@ -71,6 +74,7 @@ func (m Model) Subscriptions() []Sub
 - Sealed: unexported `isMsg()` method
 - Carry results: `DiceRolled{Values: []int}` not `{Count: int}`
 - Serializable: no `error` type, use `Code int, Message string`
+- Defined in `model` package; `tea` consumes Msgs but must not define them (would force upward imports)
 
 ### Update
 - Pure: same input → same output
@@ -102,10 +106,11 @@ Not chained in Cmd — breaks testability, visibility, replay.
 
 ---
 
-## Checklist
+## Verify Before Completing
 
 - [ ] Model: no pointers, has Version, value receivers
 - [ ] Msgs: past-tense, serializable, carry results
 - [ ] Update: pure, exhaustive switch, copies collections
 - [ ] Sequential effects: Task Pattern
 - [ ] `json.Marshal(model)` works
+- [ ] Imports: every `internal/` import targets a lower layer or permitted same-layer edge (see Project Structure)
