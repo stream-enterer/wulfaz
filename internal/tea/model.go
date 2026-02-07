@@ -1523,10 +1523,8 @@ func reorderRoster(roster []entity.Unit, fromIdx, toIdx int) []entity.Unit {
 	unit := board[fromIdx]
 	board = append(board[:fromIdx], board[fromIdx+1:]...)
 
-	// Adjust toIdx if needed (removal shifted indices)
-	if toIdx > fromIdx {
-		toIdx--
-	}
+	// NOTE: No toIdx adjustment needed — computeInsertionIndex already
+	// skips the dragged unit, so toIdx is already in post-removal space.
 
 	// Insert at new position
 	board = append(board[:toIdx], append([]entity.Unit{unit}, board[toIdx:]...)...)
