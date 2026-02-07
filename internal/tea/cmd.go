@@ -7,38 +7,10 @@ import (
 	"wulfaz/internal/model"
 )
 
-type Cmd func() Msg
-
-func None() Cmd { return nil }
-
-func Batch(cmds ...Cmd) Cmd {
-	if len(cmds) == 0 {
-		return nil
-	}
-	return func() Msg {
-		var msgs []Msg
-		for _, cmd := range cmds {
-			if cmd != nil {
-				if msg := cmd(); msg != nil {
-					msgs = append(msgs, msg)
-				}
-			}
-		}
-		switch len(msgs) {
-		case 0:
-			return nil
-		case 1:
-			return msgs[0]
-		default:
-			return BatchedMsgs{Msgs: msgs}
-		}
-	}
-}
-
 // RollAllDice creates a Cmd that rolls each die for each unit.
 // RNG happens here (in Cmd), results passed via Msg (TEA compliance).
-func RollAllDice(seed int64, round int, allUnits []entity.Unit) Cmd {
-	return func() Msg {
+func RollAllDice(seed int64, round int, allUnits []entity.Unit) model.Cmd {
+	return func() model.Msg {
 		rng := rand.New(rand.NewSource(seed))
 		rolls := make(map[string][]int)
 
@@ -56,13 +28,13 @@ func RollAllDice(seed int64, round int, allUnits []entity.Unit) Cmd {
 			rolls[unit.ID] = unitRolls
 		}
 
-		return RoundStarted{Round: round, UnitRolls: rolls}
+		return model.RoundStarted{Round: round, UnitRolls: rolls}
 	}
 }
 
 // RerollAllUnlockedDice creates a Cmd that rerolls all unlocked player dice.
-func RerollAllUnlockedDice(seed int64, combat model.CombatModel) Cmd {
-	return func() Msg {
+func RerollAllUnlockedDice(seed int64, combat model.CombatModel) model.Cmd {
+	return func() model.Msg {
 		rng := rand.New(rand.NewSource(seed))
 		results := make(map[string][]int)
 
@@ -91,14 +63,14 @@ func RerollAllUnlockedDice(seed int64, combat model.CombatModel) Cmd {
 			results[unit.ID] = unitResults
 		}
 
-		return RerollRequested{Results: results}
+		return model.RerollRequested{Results: results}
 	}
 }
 
 // ApplyCompatibleDiceEffects creates a Cmd that computes results for all compatible dice.
-// targetIsEnemy: true → process only unfired damage dice; false → process only unfired shield/heal dice.
-func ApplyCompatibleDiceEffects(sourceID, targetID string, rolledDice []entity.RolledDie, targetIsEnemy bool, combat model.CombatModel, timestamp int64) Cmd {
-	return func() Msg {
+// targetIsEnemy: true -> process only unfired damage dice; false -> process only unfired shield/heal dice.
+func ApplyCompatibleDiceEffects(sourceID, targetID string, rolledDice []entity.RolledDie, targetIsEnemy bool, combat model.CombatModel, timestamp int64) model.Cmd {
+	return func() model.Msg {
 		// Find target unit
 		var target entity.Unit
 		var found bool
@@ -131,7 +103,7 @@ func ApplyCompatibleDiceEffects(sourceID, targetID string, rolledDice []entity.R
 			shields = s.Base
 		}
 
-		var results []DiceEffectResult
+		var results []model.DiceEffectResult
 		newHealth, newShields := health, shields
 
 		for _, rd := range rolledDice {
@@ -172,7 +144,7 @@ func ApplyCompatibleDiceEffects(sourceID, targetID string, rolledDice []entity.R
 				// Already filtered above
 			}
 
-			results = append(results, DiceEffectResult{
+			results = append(results, model.DiceEffectResult{
 				TargetUnitID:   targetID,
 				Effect:         face.Type,
 				Value:          face.Value,
@@ -182,7 +154,7 @@ func ApplyCompatibleDiceEffects(sourceID, targetID string, rolledDice []entity.R
 			})
 		}
 
-		return UnitDiceEffectsApplied{
+		return model.UnitDiceEffectsApplied{
 			SourceUnitID: sourceID,
 			Results:      results,
 			Timestamp:    timestamp,
@@ -191,17 +163,17 @@ func ApplyCompatibleDiceEffects(sourceID, targetID string, rolledDice []entity.R
 }
 
 // AdvanceDicePhase creates a Cmd that advances to next phase.
-func AdvanceDicePhase(next model.DicePhase) Cmd {
-	return func() Msg {
-		return DicePhaseAdvanced{NewPhase: next}
+func AdvanceDicePhase(next model.DicePhase) model.Cmd {
+	return func() model.Msg {
+		return model.DicePhaseAdvanced{NewPhase: next}
 	}
 }
 
 // ComputeAITargets computes targets for all enemy units.
 // Damage dice: regular units random target (filtered for doomed), commander lowest HP.
-// Shield/Heal dice: lowest HP ally → stored in DefenseTargets.
-func ComputeAITargets(combat model.CombatModel, seed int64) Cmd {
-	return func() Msg {
+// Shield/Heal dice: lowest HP ally -> stored in DefenseTargets.
+func ComputeAITargets(combat model.CombatModel, seed int64) model.Cmd {
+	return func() model.Msg {
 		rng := rand.New(rand.NewSource(seed))
 		targets := make(map[string]string)
 		defenseTargets := make(map[string]string)
@@ -257,15 +229,15 @@ func ComputeAITargets(combat model.CombatModel, seed int64) Cmd {
 			}
 		}
 
-		return AITargetsComputed{Targets: targets, DefenseTargets: defenseTargets}
+		return model.AITargetsComputed{Targets: targets, DefenseTargets: defenseTargets}
 	}
 }
 
 // ExecuteAllAttacks resolves all attacks simultaneously from HP snapshot.
-func ExecuteAllAttacks(combat model.CombatModel, timestamp int64) Cmd {
-	return func() Msg {
-		var attacks []AttackResult
-		var defenseResults []DiceEffectResult
+func ExecuteAllAttacks(combat model.CombatModel, timestamp int64) model.Cmd {
+	return func() model.Msg {
+		var attacks []model.AttackResult
+		var defenseResults []model.DiceEffectResult
 		hpSnapshot := buildHPSnapshot(combat)
 
 		for _, unit := range combat.EnemyUnits {
@@ -278,7 +250,7 @@ func ExecuteAllAttacks(combat model.CombatModel, timestamp int64) Cmd {
 				continue
 			}
 
-			// Damage dice → resolve against EnemyTargets
+			// Damage dice -> resolve against EnemyTargets
 			if targetID, hasTarget := combat.EnemyTargets[unit.ID]; hasTarget {
 				for _, rd := range rolledDice {
 					if rd.CurrentFace().Type == entity.DieDamage {
@@ -287,7 +259,7 @@ func ExecuteAllAttacks(combat model.CombatModel, timestamp int64) Cmd {
 				}
 			}
 
-			// Shield/heal dice → resolve against EnemyDefenseTargets
+			// Shield/heal dice -> resolve against EnemyDefenseTargets
 			if allyID, hasAlly := combat.EnemyDefenseTargets[unit.ID]; hasAlly {
 				allyHP, allyShields := hpSnapshot[allyID][0], hpSnapshot[allyID][1]
 				allyMaxHealth := allyHP
@@ -305,7 +277,7 @@ func ExecuteAllAttacks(combat model.CombatModel, timestamp int64) Cmd {
 					face := rd.CurrentFace()
 					if face.Type == entity.DieShield {
 						allyShields += face.Value
-						defenseResults = append(defenseResults, DiceEffectResult{
+						defenseResults = append(defenseResults, model.DiceEffectResult{
 							TargetUnitID: allyID,
 							Effect:       entity.DieShield,
 							Value:        face.Value,
@@ -314,7 +286,7 @@ func ExecuteAllAttacks(combat model.CombatModel, timestamp int64) Cmd {
 						})
 					} else if face.Type == entity.DieHeal {
 						allyHP = min(allyHP+face.Value, allyMaxHealth)
-						defenseResults = append(defenseResults, DiceEffectResult{
+						defenseResults = append(defenseResults, model.DiceEffectResult{
 							TargetUnitID: allyID,
 							Effect:       entity.DieHeal,
 							Value:        face.Value,
@@ -327,12 +299,12 @@ func ExecuteAllAttacks(combat model.CombatModel, timestamp int64) Cmd {
 			}
 		}
 
-		return AllAttacksResolved{Attacks: attacks, DefenseResults: defenseResults, Timestamp: timestamp}
+		return model.AllAttacksResolved{Attacks: attacks, DefenseResults: defenseResults, Timestamp: timestamp}
 	}
 }
 
 // resolveDamage applies damage from snapshot and records result.
-func resolveDamage(attacks []AttackResult, attackerID, targetID string, damage int, hpSnapshot map[string][2]int) []AttackResult {
+func resolveDamage(attacks []model.AttackResult, attackerID, targetID string, damage int, hpSnapshot map[string][2]int) []model.AttackResult {
 	hp, shields := hpSnapshot[targetID][0], hpSnapshot[targetID][1]
 
 	// Shields absorb first
@@ -343,7 +315,7 @@ func resolveDamage(attacks []AttackResult, attackerID, targetID string, damage i
 	// Then HP
 	hp = max(0, hp-remaining)
 
-	attacks = append(attacks, AttackResult{
+	attacks = append(attacks, model.AttackResult{
 		AttackerID:     attackerID,
 		TargetID:       targetID,
 		Damage:         damage,
@@ -360,7 +332,7 @@ func resolveDamage(attacks []AttackResult, attackerID, targetID string, damage i
 }
 
 // StartNextRound wraps RollAllDice with round-based seed variation.
-func StartNextRound(baseSeed int64, round int, units []entity.Unit) Cmd {
+func StartNextRound(baseSeed int64, round int, units []entity.Unit) model.Cmd {
 	roundSeed := baseSeed + int64(round)*7919 // Prime offset per round
 	return RollAllDice(roundSeed, round, units)
 }

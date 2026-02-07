@@ -1,13 +1,101 @@
-package tea
+package model
 
 import (
 	"wulfaz/internal/core"
 	"wulfaz/internal/entity"
-	"wulfaz/internal/model"
 )
 
 type Msg interface {
 	isMsg() // sealed
+}
+
+type Cmd func() Msg
+
+func None() Cmd { return nil }
+
+func Batch(cmds ...Cmd) Cmd {
+	if len(cmds) == 0 {
+		return nil
+	}
+	return func() Msg {
+		var msgs []Msg
+		for _, cmd := range cmds {
+			if cmd != nil {
+				if msg := cmd(); msg != nil {
+					msgs = append(msgs, msg)
+				}
+			}
+		}
+		switch len(msgs) {
+		case 0:
+			return nil
+		case 1:
+			return msgs[0]
+		default:
+			return BatchedMsgs{Msgs: msgs}
+		}
+	}
+}
+
+// Constants for floating text
+const (
+	CombatTextDuration = 1500000000 // 1.5 seconds in nanoseconds
+	MaxTextStack       = 3          // Cap stacking to prevent overflow
+)
+
+// Color constants as uint32 (0xRRGGBBAA)
+const (
+	ColorTextDamage = 0xFF5050FF // Red
+	ColorTextHeal   = 0x50FF50FF // Green
+	ColorTextShield = 0xAAAAAAFF // Grey
+)
+
+type GamePhase int
+
+const (
+	PhaseMenu GamePhase = iota
+	PhaseCombat
+	PhaseInterCombat // Board visible, rewards/fight as overlays, repositioning enabled
+	PhaseGameOver
+)
+
+type ChoiceType int
+
+const (
+	ChoiceReward ChoiceType = iota
+	ChoiceFight
+)
+
+type Victor int
+
+const (
+	VictorNone Victor = iota
+	VictorPlayer
+	VictorEnemy
+	VictorDraw
+)
+
+func (v Victor) String() string {
+	switch v {
+	case VictorNone:
+		return ""
+	case VictorPlayer:
+		return "player"
+	case VictorEnemy:
+		return "enemy"
+	case VictorDraw:
+		return "draw"
+	}
+	return ""
+}
+
+// DragState tracks unit drag-and-drop state during inter-combat phase.
+type DragState struct {
+	IsDragging    bool
+	DraggedUnitID string
+	OriginalIndex int // Roster index (board units only, excludes command)
+	CurrentX      int // Mouse position
+	CurrentY      int
 }
 
 // Combat messages
@@ -18,7 +106,7 @@ type CombatEnded struct{ Victor Victor }
 func (CombatEnded) isMsg() {}
 
 // CombatStarted signals a new combat should begin (carries the combat state)
-type CombatStarted struct{ Combat model.CombatModel }
+type CombatStarted struct{ Combat CombatModel }
 
 func (CombatStarted) isMsg() {}
 
@@ -26,15 +114,6 @@ func (CombatStarted) isMsg() {}
 type ChoiceSelected struct{ Index int }
 
 func (ChoiceSelected) isMsg() {}
-
-type AbilityActivated struct {
-	SourceID  string
-	AbilityID string
-	TargetID  string
-	Rolls     []int
-}
-
-func (AbilityActivated) isMsg() {}
 
 // Player control messages
 type PlayerPaused struct{}
@@ -193,7 +272,7 @@ func (PlayerCommandDone) isMsg() {}
 
 // DicePhaseAdvanced signals transition to next dice phase.
 type DicePhaseAdvanced struct {
-	NewPhase model.DicePhase
+	NewPhase DicePhase
 }
 
 func (DicePhaseAdvanced) isMsg() {}

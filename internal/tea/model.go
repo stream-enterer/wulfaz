@@ -6,80 +6,18 @@ import (
 	"slices"
 
 	"wulfaz/internal/core"
-	"wulfaz/internal/effect"
 	"wulfaz/internal/entity"
-	"wulfaz/internal/event"
 	"wulfaz/internal/model"
+	"wulfaz/internal/resolve"
 )
-
-// Wave 7: Constants for floating text
-const (
-	CombatTextDuration = 1500000000 // 1.5 seconds in nanoseconds
-	MaxTextStack       = 3          // Cap stacking to prevent overflow
-)
-
-// Color constants as uint32 (0xRRGGBBAA)
-const (
-	ColorTextDamage = 0xFF5050FF // Red
-	ColorTextHeal   = 0x50FF50FF // Green
-	ColorTextShield = 0xAAAAAAFF // Grey
-)
-
-type GamePhase int
-
-const (
-	PhaseMenu GamePhase = iota
-	PhaseCombat
-	PhaseInterCombat // Board visible, rewards/fight as overlays, repositioning enabled
-	PhaseGameOver
-)
-
-type ChoiceType int
-
-const (
-	ChoiceReward ChoiceType = iota
-	ChoiceFight
-)
-
-type Victor int
-
-const (
-	VictorNone Victor = iota
-	VictorPlayer
-	VictorEnemy
-	VictorDraw
-)
-
-func (v Victor) String() string {
-	switch v {
-	case VictorNone:
-		return ""
-	case VictorPlayer:
-		return "player"
-	case VictorEnemy:
-		return "enemy"
-	case VictorDraw:
-		return "draw"
-	}
-	return ""
-}
-
-// DragState tracks unit drag-and-drop state during inter-combat phase.
-type DragState struct {
-	IsDragging    bool
-	DraggedUnitID string
-	OriginalIndex int // Roster index (board units only, excludes command)
-	CurrentX      int // Mouse position
-	CurrentY      int
-}
 
 type Model struct {
 	Version int
-	Phase   GamePhase
+	Phase   model.GamePhase
 	Combat  model.CombatModel
 	Seed    int64
 	// Choice phase state
-	ChoiceType        ChoiceType
+	ChoiceType        model.ChoiceType
 	RewardChoicesLeft int
 	Choices           []string
 	// Run progression
@@ -87,30 +25,30 @@ type Model struct {
 	// F-155/F-156: Persistent player roster (survives between fights)
 	PlayerRoster []entity.Unit
 	// Drag-and-drop state for inter-combat repositioning
-	DragState DragState
+	DragState model.DragState
 }
 
-func (m Model) Update(msg Msg) (Model, Cmd) {
+func (m Model) Update(msg model.Msg) (Model, model.Cmd) {
 	switch msg := msg.(type) {
-	case PlayerQuit:
-		m.Phase = PhaseGameOver
+	case model.PlayerQuit:
+		m.Phase = model.PhaseGameOver
 		return m, nil
 
-	case CombatEnded:
+	case model.CombatEnded:
 		return m.handleCombatEnded(msg)
 
-	case ChoiceSelected:
+	case model.ChoiceSelected:
 		return m.handleChoiceSelected(msg)
 
-	case CombatStarted:
-		m.Phase = PhaseCombat
+	case model.CombatStarted:
+		m.Phase = model.PhaseCombat
 		m.FightNumber++
 		m.Combat = msg.Combat
 		// Trigger first round (Wave 3)
 		return m, StartNextRound(m.Seed, 1, getAllUnits(m.Combat))
 
-	case PlayerPaused:
-		if m.Phase != PhaseCombat {
+	case model.PlayerPaused:
+		if m.Phase != model.PhaseCombat {
 			return m, nil
 		}
 		combat := m.Combat
@@ -118,8 +56,8 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		m.Combat = combat
 		return m, nil
 
-	case PlayerResumed:
-		if m.Phase != PhaseCombat {
+	case model.PlayerResumed:
+		if m.Phase != model.PhaseCombat {
 			return m, nil
 		}
 		combat := m.Combat
@@ -127,163 +65,97 @@ func (m Model) Update(msg Msg) (Model, Cmd) {
 		m.Combat = combat
 		return m, nil
 
-	case TriggersCollected:
+	case model.TriggersCollected:
 		return m.handleTriggersCollected(msg)
 
-	case EffectsResolved:
+	case model.EffectsResolved:
 		return m.handleEffectsResolved(msg)
 
-	case RoundStarted:
+	case model.RoundStarted:
 		return m.handleRoundStarted(msg)
-	case PreviewDone:
+	case model.PreviewDone:
 		return m.handlePreviewDone(msg)
-	case DieLockToggled:
+	case model.DieLockToggled:
 		return m.handleDieLockToggled(msg)
-	case RerollRequested:
+	case model.RerollRequested:
 		return m.handleRerollRequested(msg)
-	case DieSelected:
+	case model.DieSelected:
 		return m.handleDieSelected(msg)
-	case DieDeselected:
+	case model.DieDeselected:
 		return m.handleDieDeselected(msg)
-	case DiceActivated:
+	case model.DiceActivated:
 		return m.handleDiceActivated(msg)
-	case UnitDiceEffectsApplied:
+	case model.UnitDiceEffectsApplied:
 		return m.handleUnitDiceEffectsApplied(msg)
-	case PlayerCommandDone:
+	case model.PlayerCommandDone:
 		return m.handlePlayerCommandDone(msg)
-	case DicePhaseAdvanced:
+	case model.DicePhaseAdvanced:
 		return m.handleDicePhaseAdvanced(msg)
 
 	// AI targeting and execution
-	case AITargetsComputed:
+	case model.AITargetsComputed:
 		return m.handleAITargetsComputed(msg)
-	case AllAttacksResolved:
+	case model.AllAttacksResolved:
 		return m.handleAllAttacksResolved(msg)
-	case ExecutionComplete:
+	case model.ExecutionComplete:
 		return m.handleExecutionComplete(msg)
-	case RoundEnded:
+	case model.RoundEnded:
 		return m.handleRoundEnded(msg)
-	case UndoRequested:
+	case model.UndoRequested:
 		return m.handleUndoRequested(msg)
-	case DieUnlocked:
+	case model.DieUnlocked:
 		return m.handleDieUnlocked(msg)
-	case UnlockAllDiceRequested:
+	case model.UnlockAllDiceRequested:
 		return m.handleUnlockAllDiceRequested(msg)
-	case AllDiceLocked:
+	case model.AllDiceLocked:
 		return m.handleAllDiceLocked(msg)
-	case EndTurnRequested:
+	case model.EndTurnRequested:
 		return m.handleEndTurnRequested(msg)
-	case EndTurnConfirmed:
+	case model.EndTurnConfirmed:
 		return m.handleEndTurnConfirmed(msg)
-	case EndTurnCanceled:
+	case model.EndTurnCanceled:
 		return m.handleEndTurnCanceled(msg)
 
 	// Wave 7: Click-through execution
-	case ExecutionAdvanceClicked:
+	case model.ExecutionAdvanceClicked:
 		return m.handleExecutionAdvanceClicked(msg)
-	case RoundEndClicked:
+	case model.RoundEndClicked:
 		return m.handleRoundEndClicked(msg)
 
 	// Drag-and-drop messages
-	case UnitDragStarted:
+	case model.UnitDragStarted:
 		return m.handleUnitDragStarted(msg)
-	case UnitDragMoved:
+	case model.UnitDragMoved:
 		return m.handleUnitDragMoved(msg)
-	case UnitDragEnded:
+	case model.UnitDragEnded:
 		return m.handleUnitDragEnded(msg)
-	case UnitDragCanceled:
+	case model.UnitDragCanceled:
 		return m.handleUnitDragCanceled(msg)
-
-	default:
-		return m, nil
 	}
+	panic(fmt.Sprintf("tea.Update: unhandled Msg type %T", msg))
 }
 
-// handleTriggersCollected executes effects for collected triggers
-func (m Model) handleTriggersCollected(msg TriggersCollected) (Model, Cmd) {
-	// Check cascade depth limit
+// handleTriggersCollected delegates effect execution to resolve package
+func (m Model) handleTriggersCollected(msg model.TriggersCollected) (Model, model.Cmd) {
 	if msg.Depth >= core.MaxCascadeDepth {
 		combat := m.Combat
 		combat.Log = appendLogEntry(combat.Log, "cascade depth limit reached")
 		m.Combat = combat
-		return m, nil
+		return m.applyCombatEnd()
 	}
 
 	if len(msg.Triggers) == 0 {
-		return m, nil
+		return m.applyCombatEnd()
 	}
 
-	// Build unit map and player IDs set for effect context
 	unitMap := buildUnitMap(m.Combat)
 	playerIDs := buildPlayerUnitIDs(m.Combat)
 
-	// Execute each trigger's effect
-	var result effect.EffectResult
-	result.ModifiedUnits = make(map[string]entity.Unit)
-
-	for _, trigger := range msg.Triggers {
-		// Find source unit
-		sourceUnit, ok := unitMap[trigger.Owner.UnitID]
-		if !ok {
-			continue
-		}
-
-		// Re-evaluate source conditions with current unit state
-		// (unit may have died since trigger was collected)
-		if len(trigger.Conditions) > 0 {
-			if !core.EvaluateConditions(trigger.Conditions, sourceUnit.Tags, sourceUnit.Attributes) {
-				continue
-			}
-		}
-
-		// Build effect context
-		ctx := effect.EffectContext{
-			Owner:            toEventTriggerOwner(trigger.Owner),
-			SourceUnit:       sourceUnit,
-			AllUnits:         unitMap,
-			PlayerUnitIDs:    playerIDs,
-			Rolls:            msg.Rolls,
-			TargetConditions: trigger.TargetConditions,
-		}
-
-		// Execute effect
-		effectResult := effect.Handle(trigger.EffectName, trigger.Params, ctx)
-
-		// Merge results
-		result.Merge(effectResult)
-
-		// Update unit map with modified units for subsequent effects
-		maps.Copy(unitMap, effectResult.ModifiedUnits)
-	}
-
-	// Convert modified units to serializable format
-	modifiedUnits := make(ModifiedUnitsMap)
-	for id, unit := range result.ModifiedUnits {
-		attrs := make(map[string]AttributeValue)
-		for name, attr := range unit.Attributes {
-			attrs[name] = AttributeValue{
-				Base: attr.Base,
-				Min:  attr.Min,
-				Max:  attr.Max,
-			}
-		}
-		modifiedUnits[id] = ModifiedUnit{Attributes: attrs}
-	}
-
-	var followUps []FollowUpEvent
-	for _, fe := range result.FollowUpEvents {
-		followUps = append(followUps, FollowUpEvent{
-			Event:    string(fe.Event),
-			SourceID: fe.SourceID,
-			TargetID: fe.TargetID,
-		})
-	}
-
-	return m, buildEffectsResolvedCmd(modifiedUnits, followUps, result.LogEntries, msg.Depth)
+	return m, resolve.ResolveEffects(msg.Triggers, unitMap, playerIDs, msg.Rolls, msg.Depth)
 }
 
 // handleEffectsResolved applies modifications and dispatches follow-up events
-func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
+func (m Model) handleEffectsResolved(msg model.EffectsResolved) (Model, model.Cmd) {
 	combat := m.Combat
 
 	// Add log entries (bounded for safety)
@@ -320,47 +192,13 @@ func (m Model) handleEffectsResolved(msg EffectsResolved) (Model, Cmd) {
 		return m.applyCombatEnd()
 	}
 
-	// Dispatch follow-up events
 	allUnits := getAllUnits(m.Combat)
-	var allTriggers []CollectedTrigger
-
-	for _, fe := range msg.FollowUpEvents {
-		eventType := core.EventType(fe.Event)
-
-		// Find target unit as source for the triggered event
-		var sourceUnit entity.Unit
-		for _, u := range allUnits {
-			if u.ID == fe.TargetID {
-				sourceUnit = u
-				break
-			}
-		}
-		if sourceUnit.ID == "" {
-			continue
-		}
-
-		ctx := event.TriggerContext{
-			Event:      eventType,
-			SourceUnit: sourceUnit,
-			AllUnits:   allUnits,
-		}
-		collected := event.Dispatch(ctx)
-		for _, ct := range collected {
-			allTriggers = append(allTriggers, toMsgCollectedTrigger(ct))
-		}
-	}
-
-	if len(allTriggers) == 0 {
-		return m.applyCombatEnd()
-	}
-
-	// Return command for cascade
-	return m, buildTriggersCollectedCmd(string(core.EventOnCascade), allTriggers, nil, msg.Depth+1)
+	return m, resolve.CollectFollowUpTriggers(msg.FollowUpEvents, allUnits, msg.Depth)
 }
 
 // checkCombatEnd returns the victor if combat has ended, or VictorNone if ongoing.
 // Combat ends when a command unit dies.
-func (m Model) checkCombatEnd() Victor {
+func (m Model) checkCombatEnd() model.Victor {
 	var playerCmdAlive, enemyCmdAlive bool
 
 	for _, u := range m.Combat.PlayerUnits {
@@ -378,38 +216,38 @@ func (m Model) checkCombatEnd() Victor {
 
 	switch {
 	case !playerCmdAlive && !enemyCmdAlive:
-		return VictorPlayer // Player wins ties per DESIGN.md
+		return model.VictorPlayer // Player wins ties per DESIGN.md
 	case !enemyCmdAlive:
-		return VictorPlayer
+		return model.VictorPlayer
 	case !playerCmdAlive:
-		return VictorEnemy
+		return model.VictorEnemy
 	default:
-		return VictorNone
+		return model.VictorNone
 	}
 }
 
 // applyCombatEnd checks for combat end and updates model if combat is over.
 // Returns the updated model and a Cmd that emits CombatEnded if combat ended.
-func (m Model) applyCombatEnd() (Model, Cmd) {
+func (m Model) applyCombatEnd() (Model, model.Cmd) {
 	if m.Combat.Phase != model.CombatActive {
 		return m, nil
 	}
 	victor := m.checkCombatEnd()
-	if victor == VictorNone {
+	if victor == model.VictorNone {
 		return m, nil
 	}
 	combat := m.Combat
 	combat.Phase = model.CombatResolved
 	combat.Victor = victor.String()
 	var logMsg string
-	if victor == VictorDraw {
+	if victor == model.VictorDraw {
 		logMsg = "combat ended: draw"
 	} else {
 		logMsg = "combat ended: " + victor.String() + " wins"
 	}
 	combat.Log = appendLogEntry(combat.Log, logMsg)
 	m.Combat = combat
-	return m, func() Msg { return CombatEnded{Victor: victor} }
+	return m, func() model.Msg { return model.CombatEnded{Victor: victor} }
 }
 
 // Helper functions
@@ -438,53 +276,6 @@ func buildPlayerUnitIDs(combat model.CombatModel) map[string]bool {
 		ids[u.ID] = true
 	}
 	return ids
-}
-
-func toMsgCollectedTrigger(ct event.CollectedTrigger) CollectedTrigger {
-	return CollectedTrigger{
-		EffectName: ct.Trigger.EffectName,
-		Params:     ct.Trigger.Params,
-		Priority:   ct.Trigger.Priority,
-		Owner: TriggerOwner{
-			UnitID:  ct.Owner.UnitID,
-			PartID:  ct.Owner.PartID,
-			MountID: ct.Owner.MountID,
-			ItemID:  ct.Owner.ItemID,
-		},
-		Conditions:       ct.Trigger.Conditions,
-		TargetConditions: ct.Trigger.TargetConditions,
-	}
-}
-
-func toEventTriggerOwner(to TriggerOwner) event.TriggerOwner {
-	return event.TriggerOwner{
-		UnitID:  to.UnitID,
-		PartID:  to.PartID,
-		MountID: to.MountID,
-		ItemID:  to.ItemID,
-	}
-}
-
-func buildTriggersCollectedCmd(eventType string, triggers []CollectedTrigger, rolls []int, depth int) Cmd {
-	return func() Msg {
-		return TriggersCollected{
-			Event:    eventType,
-			Triggers: triggers,
-			Rolls:    rolls,
-			Depth:    depth,
-		}
-	}
-}
-
-func buildEffectsResolvedCmd(modifiedUnits ModifiedUnitsMap, followUps []FollowUpEvent, logEntries []string, depth int) Cmd {
-	return func() Msg {
-		return EffectsResolved{
-			ModifiedUnits:  modifiedUnits,
-			FollowUpEvents: followUps,
-			LogEntries:     logEntries,
-			Depth:          depth,
-		}
-	}
 }
 
 // appendLogEntry adds an entry, pruning oldest if over MaxLogEntries.
@@ -564,7 +355,7 @@ func syncRosterFromCombat(combatUnits []entity.Unit) []entity.Unit {
 }
 
 // applyModifications applies serialized modifications to a unit
-func applyModifications(unit entity.Unit, mods ModifiedUnit) entity.Unit {
+func applyModifications(unit entity.Unit, mods model.ModifiedUnit) entity.Unit {
 	// Copy attributes map
 	newAttrs := maps.Clone(unit.Attributes)
 
@@ -611,7 +402,7 @@ func FindPlayerCommandUnit(combat model.CombatModel) *entity.Unit {
 // Rejects interactions when: not in combat phase, combat is paused, or wrong dice phase.
 func (m Model) isValidDiceInteraction(unitID string, requiredPhase model.DicePhase) bool {
 	// Check game-level phase
-	if m.Phase != PhaseCombat {
+	if m.Phase != model.PhaseCombat {
 		return false
 	}
 	// Reject when paused
@@ -756,7 +547,7 @@ func CountUsablePlayerDice(combat model.CombatModel) int {
 
 // ===== Dice Phase Handlers (Wave 2) =====
 
-func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
+func (m Model) handleRoundStarted(msg model.RoundStarted) (Model, model.Cmd) {
 	combat := m.Combat
 	combat.Round = msg.Round
 	combat.DicePhase = model.DicePhasePreview
@@ -801,9 +592,9 @@ func (m Model) handleRoundStarted(msg RoundStarted) (Model, Cmd) {
 	return m, ComputeAITargets(m.Combat, m.Seed+int64(msg.Round)*7919)
 }
 
-func (m Model) handlePreviewDone(_ PreviewDone) (Model, Cmd) {
+func (m Model) handlePreviewDone(_ model.PreviewDone) (Model, model.Cmd) {
 	// Validate game and combat state
-	if m.Phase != PhaseCombat {
+	if m.Phase != model.PhaseCombat {
 		return m, nil
 	}
 	if m.Combat.Phase != model.CombatActive {
@@ -827,12 +618,12 @@ func (m Model) handlePreviewDone(_ PreviewDone) (Model, Cmd) {
 
 	// Auto-advance if player has no actionable dice (all blank)
 	if allPlayerDiceActivated(m.Combat) {
-		return m, func() Msg { return PlayerCommandDone{} }
+		return m, func() model.Msg { return model.PlayerCommandDone{} }
 	}
 	return m, nil
 }
 
-func (m Model) handleDieLockToggled(msg DieLockToggled) (Model, Cmd) {
+func (m Model) handleDieLockToggled(msg model.DieLockToggled) (Model, model.Cmd) {
 	if !m.isValidDiceInteraction(msg.UnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
@@ -852,9 +643,9 @@ func (m Model) handleDieLockToggled(msg DieLockToggled) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
+func (m Model) handleRerollRequested(msg model.RerollRequested) (Model, model.Cmd) {
 	// Validate game state
-	if m.Phase != PhaseCombat || m.Combat.Phase != model.CombatActive {
+	if m.Phase != model.PhaseCombat || m.Combat.Phase != model.CombatActive {
 		return m, nil
 	}
 	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
@@ -899,12 +690,12 @@ func (m Model) handleRerollRequested(msg RerollRequested) (Model, Cmd) {
 
 	// Auto-advance if player has no actionable dice after rerolls exhausted
 	if m.Combat.RerollsRemaining == 0 && allPlayerDiceActivated(m.Combat) {
-		return m, func() Msg { return PlayerCommandDone{} }
+		return m, func() model.Msg { return model.PlayerCommandDone{} }
 	}
 	return m, nil
 }
 
-func (m Model) handleDieSelected(msg DieSelected) (Model, Cmd) {
+func (m Model) handleDieSelected(msg model.DieSelected) (Model, model.Cmd) {
 	if !m.isValidDiceInteraction(msg.UnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
@@ -924,9 +715,9 @@ func (m Model) handleDieSelected(msg DieSelected) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleDieDeselected(_ DieDeselected) (Model, Cmd) {
+func (m Model) handleDieDeselected(_ model.DieDeselected) (Model, model.Cmd) {
 	// Validate game and combat state
-	if m.Phase != PhaseCombat {
+	if m.Phase != model.PhaseCombat {
 		return m, nil
 	}
 	if m.Combat.Phase != model.CombatActive {
@@ -939,7 +730,7 @@ func (m Model) handleDieDeselected(_ DieDeselected) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
+func (m Model) handleDiceActivated(msg model.DiceActivated) (Model, model.Cmd) {
 	if !m.isValidDiceInteraction(msg.SourceUnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
@@ -1046,7 +837,7 @@ func (m Model) handleDiceActivated(msg DiceActivated) (Model, Cmd) {
 	return m, ApplyCompatibleDiceEffects(msg.SourceUnitID, msg.TargetUnitID, rolledDice, targetIsEnemy, m.Combat, msg.Timestamp)
 }
 
-func (m Model) handleUnitDiceEffectsApplied(msg UnitDiceEffectsApplied) (Model, Cmd) {
+func (m Model) handleUnitDiceEffectsApplied(msg model.UnitDiceEffectsApplied) (Model, model.Cmd) {
 	combat := m.Combat
 
 	// Copy unit slices before modification
@@ -1080,18 +871,18 @@ func (m Model) handleUnitDiceEffectsApplied(msg UnitDiceEffectsApplied) (Model, 
 					combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
 						UnitID:    result.TargetUnitID,
 						Text:      fmt.Sprintf("-%d", result.ShieldAbsorbed),
-						ColorRGBA: ColorTextShield,
+						ColorRGBA: model.ColorTextShield,
 						StartedAt: msg.Timestamp,
 						YOffset:   offset,
 					})
-					offset = min(offset+1, MaxTextStack)
+					offset = min(offset+1, model.MaxTextStack)
 				}
 				healthDamage := result.Value - result.ShieldAbsorbed
 				if healthDamage > 0 {
 					combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
 						UnitID:    result.TargetUnitID,
 						Text:      fmt.Sprintf("-%d", healthDamage),
-						ColorRGBA: ColorTextDamage,
+						ColorRGBA: model.ColorTextDamage,
 						StartedAt: msg.Timestamp,
 						YOffset:   offset,
 					})
@@ -1100,7 +891,7 @@ func (m Model) handleUnitDiceEffectsApplied(msg UnitDiceEffectsApplied) (Model, 
 				combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
 					UnitID:    result.TargetUnitID,
 					Text:      fmt.Sprintf("+%d", result.Value),
-					ColorRGBA: ColorTextHeal,
+					ColorRGBA: model.ColorTextHeal,
 					StartedAt: msg.Timestamp,
 					YOffset:   offset,
 				})
@@ -1108,7 +899,7 @@ func (m Model) handleUnitDiceEffectsApplied(msg UnitDiceEffectsApplied) (Model, 
 				combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
 					UnitID:    result.TargetUnitID,
 					Text:      fmt.Sprintf("+%d", result.Value),
-					ColorRGBA: ColorTextShield,
+					ColorRGBA: model.ColorTextShield,
 					StartedAt: msg.Timestamp,
 					YOffset:   offset,
 				})
@@ -1125,13 +916,13 @@ func (m Model) handleUnitDiceEffectsApplied(msg UnitDiceEffectsApplied) (Model, 
 	m.Combat = combat
 
 	// Check if combat ended
-	if victor := m.checkCombatEnd(); victor != VictorNone {
+	if victor := m.checkCombatEnd(); victor != model.VictorNone {
 		return m.applyCombatEnd()
 	}
 
 	// Auto-advance when all player dice are activated
 	if combat.DicePhase == model.DicePhasePlayerCommand && allPlayerDiceActivated(m.Combat) {
-		return m, func() Msg { return PlayerCommandDone{} }
+		return m, func() model.Msg { return model.PlayerCommandDone{} }
 	}
 
 	return m, nil
@@ -1179,10 +970,10 @@ func countTextsForUnit(texts []model.FloatingText, unitID string) int {
 			count++
 		}
 	}
-	return min(count, MaxTextStack)
+	return min(count, model.MaxTextStack)
 }
 
-func (m Model) handlePlayerCommandDone(_ PlayerCommandDone) (Model, Cmd) {
+func (m Model) handlePlayerCommandDone(_ model.PlayerCommandDone) (Model, model.Cmd) {
 	if m.Combat.DicePhase != model.DicePhasePlayerCommand {
 		return m, nil
 	}
@@ -1201,15 +992,15 @@ func (m Model) handlePlayerCommandDone(_ PlayerCommandDone) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleDicePhaseAdvanced(msg DicePhaseAdvanced) (Model, Cmd) {
+func (m Model) handleDicePhaseAdvanced(msg model.DicePhaseAdvanced) (Model, model.Cmd) {
 	combat := m.Combat
 	combat.DicePhase = msg.NewPhase
 	m.Combat = combat
 	return m, nil
 }
 
-func (m Model) handleAllDiceLocked(_ AllDiceLocked) (Model, Cmd) {
-	if m.Phase != PhaseCombat {
+func (m Model) handleAllDiceLocked(_ model.AllDiceLocked) (Model, model.Cmd) {
+	if m.Phase != model.PhaseCombat {
 		return m, nil
 	}
 	if m.Combat.Phase != model.CombatActive {
@@ -1241,8 +1032,8 @@ func (m Model) handleAllDiceLocked(_ AllDiceLocked) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleEndTurnRequested(msg EndTurnRequested) (Model, Cmd) {
-	if m.Phase != PhaseCombat {
+func (m Model) handleEndTurnRequested(msg model.EndTurnRequested) (Model, model.Cmd) {
+	if m.Phase != model.PhaseCombat {
 		return m, nil
 	}
 	if m.Combat.Phase != model.CombatActive {
@@ -1260,7 +1051,7 @@ func (m Model) handleEndTurnRequested(msg EndTurnRequested) (Model, Cmd) {
 		combat := m.Combat
 		combat.Log = appendLogEntry(combat.Log, "ended turn early (no usable dice)")
 		m.Combat = combat
-		return m, func() Msg { return PlayerCommandDone{} }
+		return m, func() model.Msg { return model.PlayerCommandDone{} }
 	}
 
 	// Enter confirmation state
@@ -1271,7 +1062,7 @@ func (m Model) handleEndTurnRequested(msg EndTurnRequested) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleEndTurnConfirmed(_ EndTurnConfirmed) (Model, Cmd) {
+func (m Model) handleEndTurnConfirmed(_ model.EndTurnConfirmed) (Model, model.Cmd) {
 	if !m.Combat.EndTurnConfirmPending {
 		return m, nil
 	}
@@ -1287,10 +1078,10 @@ func (m Model) handleEndTurnConfirmed(_ EndTurnConfirmed) (Model, Cmd) {
 	combat.UsableDiceRemaining = 0
 	m.Combat = combat
 
-	return m, func() Msg { return PlayerCommandDone{} }
+	return m, func() model.Msg { return model.PlayerCommandDone{} }
 }
 
-func (m Model) handleEndTurnCanceled(_ EndTurnCanceled) (Model, Cmd) {
+func (m Model) handleEndTurnCanceled(_ model.EndTurnCanceled) (Model, model.Cmd) {
 	if !m.Combat.EndTurnConfirmPending {
 		return m, nil
 	}
@@ -1305,7 +1096,7 @@ func (m Model) handleEndTurnCanceled(_ EndTurnCanceled) (Model, Cmd) {
 
 // ===== AI Targeting and Execution Handlers =====
 
-func (m Model) handleAITargetsComputed(msg AITargetsComputed) (Model, Cmd) {
+func (m Model) handleAITargetsComputed(msg model.AITargetsComputed) (Model, model.Cmd) {
 	combat := m.Combat
 	combat.EnemyTargets = maps.Clone(msg.Targets)
 	combat.EnemyDefenseTargets = maps.Clone(msg.DefenseTargets)
@@ -1317,7 +1108,7 @@ func (m Model) handleAITargetsComputed(msg AITargetsComputed) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
+func (m Model) handleAllAttacksResolved(msg model.AllAttacksResolved) (Model, model.Cmd) {
 	combat := m.Combat
 	combat.PlayerUnits = slices.Clone(combat.PlayerUnits)
 	combat.EnemyUnits = slices.Clone(combat.EnemyUnits)
@@ -1350,7 +1141,7 @@ func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
 			combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
 				UnitID:    result.TargetUnitID,
 				Text:      fmt.Sprintf("+%d", result.Value),
-				ColorRGBA: ColorTextHeal,
+				ColorRGBA: model.ColorTextHeal,
 				StartedAt: msg.Timestamp,
 				YOffset:   offset,
 			})
@@ -1358,7 +1149,7 @@ func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
 			combat.FloatingTexts = append(combat.FloatingTexts, model.FloatingText{
 				UnitID:    result.TargetUnitID,
 				Text:      fmt.Sprintf("+%d", result.Value),
-				ColorRGBA: ColorTextShield,
+				ColorRGBA: model.ColorTextShield,
 				StartedAt: msg.Timestamp,
 				YOffset:   offset,
 			})
@@ -1400,7 +1191,7 @@ func (m Model) handleAllAttacksResolved(msg AllAttacksResolved) (Model, Cmd) {
 
 // formatAttackTexts creates FloatingText entries for an attack.
 // Shield absorption + overflow creates two stacked entries.
-func formatAttackTexts(atk AttackResult, timestamp int64, existing []model.FloatingText) []model.FloatingText {
+func formatAttackTexts(atk model.AttackResult, timestamp int64, existing []model.FloatingText) []model.FloatingText {
 	// Count existing texts for this unit to determine stack offset
 	offset := 0
 	for _, t := range existing {
@@ -1408,8 +1199,8 @@ func formatAttackTexts(atk AttackResult, timestamp int64, existing []model.Float
 			offset++
 		}
 	}
-	if offset > MaxTextStack {
-		offset = MaxTextStack
+	if offset > model.MaxTextStack {
+		offset = model.MaxTextStack
 	}
 
 	var texts []model.FloatingText
@@ -1422,9 +1213,9 @@ func formatAttackTexts(atk AttackResult, timestamp int64, existing []model.Float
 		texts = append(texts, model.FloatingText{
 			UnitID:    atk.TargetID,
 			Text:      fmt.Sprintf("-%d", shieldDamage),
-			ColorRGBA: ColorTextShield,
+			ColorRGBA: model.ColorTextShield,
 			StartedAt: timestamp,
-			YOffset:   min(offset, MaxTextStack),
+			YOffset:   min(offset, model.MaxTextStack),
 		})
 		offset++
 	}
@@ -1433,16 +1224,16 @@ func formatAttackTexts(atk AttackResult, timestamp int64, existing []model.Float
 		texts = append(texts, model.FloatingText{
 			UnitID:    atk.TargetID,
 			Text:      fmt.Sprintf("-%d", healthDamage),
-			ColorRGBA: ColorTextDamage,
+			ColorRGBA: model.ColorTextDamage,
 			StartedAt: timestamp,
-			YOffset:   min(offset, MaxTextStack),
+			YOffset:   min(offset, model.MaxTextStack),
 		})
 	}
 
 	return texts
 }
 
-func (m Model) handleExecutionComplete(_ ExecutionComplete) (Model, Cmd) {
+func (m Model) handleExecutionComplete(_ model.ExecutionComplete) (Model, model.Cmd) {
 	// Allow from Execution (normal) or RoundEnd (timer fired after phase already set by click)
 	if m.Combat.DicePhase != model.DicePhaseExecution && m.Combat.DicePhase != model.DicePhaseRoundEnd {
 		return m, nil
@@ -1450,10 +1241,10 @@ func (m Model) handleExecutionComplete(_ ExecutionComplete) (Model, Cmd) {
 	combat := m.Combat
 	combat.DicePhase = model.DicePhaseRoundEnd
 	m.Combat = combat
-	return m, func() Msg { return RoundEnded{} }
+	return m, func() model.Msg { return model.RoundEnded{} }
 }
 
-func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
+func (m Model) handleRoundEnded(_ model.RoundEnded) (Model, model.Cmd) {
 	// Guard: only process once per round (prevents double increment from multiple timers)
 	if m.Combat.DicePhase != model.DicePhaseRoundEnd {
 		return m, nil
@@ -1489,7 +1280,7 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 	m.Combat = combat
 
 	// Check if combat ended before starting next round
-	if victor := m.checkCombatEnd(); victor != VictorNone {
+	if victor := m.checkCombatEnd(); victor != model.VictorNone {
 		return m.applyCombatEnd()
 	}
 
@@ -1499,8 +1290,8 @@ func (m Model) handleRoundEnded(_ RoundEnded) (Model, Cmd) {
 	return m, StartNextRound(m.Seed, combat.Round, getAllUnits(m.Combat))
 }
 
-func (m Model) handleUndoRequested(_ UndoRequested) (Model, Cmd) {
-	if m.Phase != PhaseCombat {
+func (m Model) handleUndoRequested(_ model.UndoRequested) (Model, model.Cmd) {
+	if m.Phase != model.PhaseCombat {
 		return m, nil
 	}
 	if m.Combat.Phase != model.CombatActive {
@@ -1536,7 +1327,7 @@ func (m Model) handleUndoRequested(_ UndoRequested) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleDieUnlocked(msg DieUnlocked) (Model, Cmd) {
+func (m Model) handleDieUnlocked(msg model.DieUnlocked) (Model, model.Cmd) {
 	if !m.isValidDiceInteraction(msg.UnitID, model.DicePhasePlayerCommand) {
 		return m, nil
 	}
@@ -1560,8 +1351,8 @@ func (m Model) handleDieUnlocked(msg DieUnlocked) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleUnlockAllDiceRequested(_ UnlockAllDiceRequested) (Model, Cmd) {
-	if m.Phase != PhaseCombat {
+func (m Model) handleUnlockAllDiceRequested(_ model.UnlockAllDiceRequested) (Model, model.Cmd) {
+	if m.Phase != model.PhaseCombat {
 		return m, nil
 	}
 	if m.Combat.Phase != model.CombatActive {
@@ -1598,7 +1389,7 @@ func (m Model) handleUnlockAllDiceRequested(_ UnlockAllDiceRequested) (Model, Cm
 }
 
 // handleExecutionAdvanceClicked executes all attacks simultaneously on click.
-func (m Model) handleExecutionAdvanceClicked(msg ExecutionAdvanceClicked) (Model, Cmd) {
+func (m Model) handleExecutionAdvanceClicked(msg model.ExecutionAdvanceClicked) (Model, model.Cmd) {
 	if m.Combat.DicePhase != model.DicePhaseExecution {
 		return m, nil
 	}
@@ -1614,7 +1405,7 @@ func (m Model) handleExecutionAdvanceClicked(msg ExecutionAdvanceClicked) (Model
 
 // pruneExpiredTexts removes floating texts older than CombatTextDuration.
 func pruneExpiredTexts(texts []model.FloatingText, nowNano int64) []model.FloatingText {
-	cutoff := nowNano - int64(CombatTextDuration)
+	cutoff := nowNano - int64(model.CombatTextDuration)
 	result := texts[:0] // Reuse backing array
 	for _, t := range texts {
 		if t.StartedAt > cutoff {
@@ -1625,19 +1416,19 @@ func pruneExpiredTexts(texts []model.FloatingText, nowNano int64) []model.Floati
 }
 
 // handleRoundEndClicked advances past round end when player clicks.
-func (m Model) handleRoundEndClicked(_ RoundEndClicked) (Model, Cmd) {
+func (m Model) handleRoundEndClicked(_ model.RoundEndClicked) (Model, model.Cmd) {
 	if m.Combat.DicePhase != model.DicePhaseRoundEnd {
 		return m, nil
 	}
 	// Check victory before starting next round
-	if victor := m.checkCombatEnd(); victor != VictorNone {
+	if victor := m.checkCombatEnd(); victor != model.VictorNone {
 		return m.applyCombatEnd()
 	}
 	// Clear floating texts and trigger round end flow
 	combat := m.Combat
 	combat.FloatingTexts = nil
 	m.Combat = combat
-	return m, func() Msg { return ExecutionComplete{} }
+	return m, func() model.Msg { return model.ExecutionComplete{} }
 }
 
 // computeAllPreviewArrows shows both player (solid) and enemy (dashed) arrows.
@@ -1724,37 +1515,37 @@ func computeEnemyPreviewArrows(combat model.CombatModel) []model.TargetingArrow 
 	return arrows
 }
 
-func (m Model) handleCombatEnded(msg CombatEnded) (Model, Cmd) {
-	if msg.Victor == VictorPlayer {
+func (m Model) handleCombatEnded(msg model.CombatEnded) (Model, model.Cmd) {
+	if msg.Victor == model.VictorPlayer {
 		// F-155/F-156: Persist surviving units (syncRosterFromCombat filters dead)
 		m.PlayerRoster = syncRosterFromCombat(m.Combat.PlayerUnits)
 
-		m.Phase = PhaseInterCombat
-		m.ChoiceType = ChoiceReward
+		m.Phase = model.PhaseInterCombat
+		m.ChoiceType = model.ChoiceReward
 		m.RewardChoicesLeft = 2
 		m.Choices = []string{"Reward A", "Reward B", "Reward C"}
-		m.DragState = DragState{} // Clear any existing drag state
+		m.DragState = model.DragState{} // Clear any existing drag state
 	} else {
-		m.Phase = PhaseGameOver
+		m.Phase = model.PhaseGameOver
 	}
 	return m, nil
 }
 
-func (m Model) handleChoiceSelected(msg ChoiceSelected) (Model, Cmd) {
+func (m Model) handleChoiceSelected(msg model.ChoiceSelected) (Model, model.Cmd) {
 	// Phase guard - only process during inter-combat phase
-	if m.Phase != PhaseInterCombat {
+	if m.Phase != model.PhaseInterCombat {
 		return m, nil
 	}
 	// Bounds validation - reject invalid indices
 	if msg.Index < 0 || msg.Index >= len(m.Choices) {
 		return m, nil
 	}
-	if m.ChoiceType == ChoiceReward {
+	if m.ChoiceType == model.ChoiceReward {
 		m.RewardChoicesLeft--
 		if m.RewardChoicesLeft > 0 {
 			m.Choices = []string{"Reward D", "Reward E", "Reward F"}
 		} else {
-			m.ChoiceType = ChoiceFight
+			m.ChoiceType = model.ChoiceFight
 			m.Choices = []string{"Fight: Easy", "Fight: Medium", "Fight: Hard"}
 		}
 	}
@@ -1763,11 +1554,11 @@ func (m Model) handleChoiceSelected(msg ChoiceSelected) (Model, Cmd) {
 
 // ===== Drag-and-Drop Handlers =====
 
-func (m Model) handleUnitDragStarted(msg UnitDragStarted) (Model, Cmd) {
-	if m.Phase != PhaseInterCombat {
+func (m Model) handleUnitDragStarted(msg model.UnitDragStarted) (Model, model.Cmd) {
+	if m.Phase != model.PhaseInterCombat {
 		return m, nil
 	}
-	m.DragState = DragState{
+	m.DragState = model.DragState{
 		IsDragging:    true,
 		DraggedUnitID: msg.UnitID,
 		OriginalIndex: msg.OriginalIndex,
@@ -1777,8 +1568,8 @@ func (m Model) handleUnitDragStarted(msg UnitDragStarted) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleUnitDragMoved(msg UnitDragMoved) (Model, Cmd) {
-	if m.Phase != PhaseInterCombat || !m.DragState.IsDragging {
+func (m Model) handleUnitDragMoved(msg model.UnitDragMoved) (Model, model.Cmd) {
+	if m.Phase != model.PhaseInterCombat || !m.DragState.IsDragging {
 		return m, nil
 	}
 	m.DragState.CurrentX = msg.CurrentX
@@ -1786,20 +1577,20 @@ func (m Model) handleUnitDragMoved(msg UnitDragMoved) (Model, Cmd) {
 	return m, nil
 }
 
-func (m Model) handleUnitDragEnded(msg UnitDragEnded) (Model, Cmd) {
-	if m.Phase != PhaseInterCombat || !m.DragState.IsDragging {
+func (m Model) handleUnitDragEnded(msg model.UnitDragEnded) (Model, model.Cmd) {
+	if m.Phase != model.PhaseInterCombat || !m.DragState.IsDragging {
 		return m, nil
 	}
 	// Reorder if valid and different position
 	if msg.InsertionIndex >= 0 && msg.InsertionIndex != m.DragState.OriginalIndex {
 		m.PlayerRoster = reorderRoster(m.PlayerRoster, m.DragState.OriginalIndex, msg.InsertionIndex)
 	}
-	m.DragState = DragState{} // Clear
+	m.DragState = model.DragState{} // Clear
 	return m, nil
 }
 
-func (m Model) handleUnitDragCanceled(_ UnitDragCanceled) (Model, Cmd) {
-	m.DragState = DragState{} // Clear
+func (m Model) handleUnitDragCanceled(_ model.UnitDragCanceled) (Model, model.Cmd) {
+	m.DragState = model.DragState{} // Clear
 	return m, nil
 }
 

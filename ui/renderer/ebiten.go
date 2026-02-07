@@ -469,14 +469,14 @@ func RenderEbiten(screen *ebiten.Image, m tea.Model, centerRect image.Rectangle)
 		float32(centerRect.Dx()), float32(centerRect.Dy()), colorBackground, false)
 
 	switch m.Phase {
-	case tea.PhaseMenu:
+	case model.PhaseMenu:
 		renderMenu(screen)
 		return nil
-	case tea.PhaseCombat:
+	case model.PhaseCombat:
 		return renderCombat(screen, m.Combat)
-	case tea.PhaseInterCombat:
+	case model.PhaseInterCombat:
 		return renderInterCombat(screen, m)
-	case tea.PhaseGameOver:
+	case model.PhaseGameOver:
 		renderGameOver(screen)
 		return nil
 	default:
@@ -716,7 +716,7 @@ func computeInsertionIndex(mouseX int, boardX float32, boardUnits []entity.Unit,
 // drawFloatingTexts renders all active floating combat texts above units.
 func drawFloatingTexts(screen *ebiten.Image, combat model.CombatModel, boardX float32) {
 	now := time.Now().UnixNano()
-	durationNano := int64(tea.CombatTextDuration)
+	durationNano := int64(model.CombatTextDuration)
 
 	for _, ft := range combat.FloatingTexts {
 		elapsed := now - ft.StartedAt

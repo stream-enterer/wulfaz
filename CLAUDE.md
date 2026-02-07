@@ -6,8 +6,10 @@ Mech autobattler roguelike in Go using TEA (The Elm Architecture).
 
 ```
 core ← entity ← model ← tea
-         ↑
-       event ← effect
+         ↑          ↑        ↑
+       event     resolve ----+
+         ↑          ↑
+       effect ------+
          ↑
       template
 ```

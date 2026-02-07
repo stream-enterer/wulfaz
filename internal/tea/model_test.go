@@ -25,7 +25,7 @@ func TestUpdate_TriggersCollected_ExecutesEffects(t *testing.T) {
 
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			PlayerUnits: []entity.Unit{playerUnit},
 			EnemyUnits:  []entity.Unit{enemyUnit},
@@ -34,13 +34,13 @@ func TestUpdate_TriggersCollected_ExecutesEffects(t *testing.T) {
 	}
 
 	// Simulate triggers collected
-	triggersMsg := TriggersCollected{
+	triggersMsg := model.TriggersCollected{
 		Event: string(core.EventOnDamaged),
-		Triggers: []CollectedTrigger{
+		Triggers: []model.CollectedTrigger{
 			{
 				EffectName: "deal_damage",
 				Params:     map[string]any{"damage": 20, "target": "enemy"},
-				Owner:      TriggerOwner{UnitID: "player1"},
+				Owner:      model.TriggerOwner{UnitID: "player1"},
 			},
 		},
 		Depth: 0,
@@ -53,7 +53,7 @@ func TestUpdate_TriggersCollected_ExecutesEffects(t *testing.T) {
 	}
 
 	msg := cmd()
-	effectsMsg, ok := msg.(EffectsResolved)
+	effectsMsg, ok := msg.(model.EffectsResolved)
 	if !ok {
 		t.Fatalf("expected EffectsResolved, got %T", msg)
 	}
@@ -81,8 +81,8 @@ func TestUpdate_TriggersCollected_CascadeDepthLimit(t *testing.T) {
 		},
 	}
 
-	triggersMsg := TriggersCollected{
-		Triggers: []CollectedTrigger{
+	triggersMsg := model.TriggersCollected{
+		Triggers: []model.CollectedTrigger{
 			{EffectName: "deal_damage", Params: map[string]any{"damage": 10}},
 		},
 		Depth: core.MaxCascadeDepth, // At limit
@@ -95,7 +95,7 @@ func TestUpdate_TriggersCollected_CascadeDepthLimit(t *testing.T) {
 		t.Errorf("expected 1 log entry, got %d", len(newModel.Combat.Log))
 	}
 
-	// Should return nil command
+	// Should return nil command (applyCombatEnd with CombatSetup phase returns nil)
 	if cmd != nil {
 		t.Error("expected nil command at cascade depth limit")
 	}
@@ -112,17 +112,17 @@ func TestUpdate_EffectsResolved_AppliesModifications(t *testing.T) {
 
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			EnemyUnits: []entity.Unit{enemyUnit},
 			Log:        []string{},
 		},
 	}
 
-	effectsMsg := EffectsResolved{
-		ModifiedUnits: ModifiedUnitsMap{
-			"enemy1": ModifiedUnit{
-				Attributes: map[string]AttributeValue{
+	effectsMsg := model.EffectsResolved{
+		ModifiedUnits: model.ModifiedUnitsMap{
+			"enemy1": model.ModifiedUnit{
+				Attributes: map[string]model.AttributeValue{
 					"health": {Base: 30, Min: 0},
 				},
 			},
@@ -168,16 +168,16 @@ func TestUpdate_EffectsResolved_DispatchesFollowUps(t *testing.T) {
 
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			EnemyUnits: []entity.Unit{enemyUnit},
 			Log:        []string{},
 		},
 	}
 
-	effectsMsg := EffectsResolved{
-		ModifiedUnits: ModifiedUnitsMap{},
-		FollowUpEvents: []FollowUpEvent{
+	effectsMsg := model.EffectsResolved{
+		ModifiedUnits: model.ModifiedUnitsMap{},
+		FollowUpEvents: []model.FollowUpEvent{
 			{Event: string(core.EventOnDamaged), SourceID: "player1", TargetID: "enemy1"},
 		},
 		LogEntries: []string{},
@@ -191,7 +191,7 @@ func TestUpdate_EffectsResolved_DispatchesFollowUps(t *testing.T) {
 	}
 
 	msg := cmd()
-	triggersMsg, ok := msg.(TriggersCollected)
+	triggersMsg, ok := msg.(model.TriggersCollected)
 	if !ok {
 		t.Fatalf("expected TriggersCollected, got %T", msg)
 	}
@@ -210,12 +210,12 @@ func TestUpdate_EffectsResolved_DispatchesFollowUps(t *testing.T) {
 func TestUpdate_PlayerQuit(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 	}
 
-	newModel, cmd := m.Update(PlayerQuit{})
+	newModel, cmd := m.Update(model.PlayerQuit{})
 
-	if newModel.Phase != PhaseGameOver {
+	if newModel.Phase != model.PhaseGameOver {
 		t.Errorf("expected PhaseGameOver, got %d", newModel.Phase)
 	}
 
@@ -246,7 +246,7 @@ func TestUpdate_TriggersCollected_ReEvaluatesSourceConditions(t *testing.T) {
 
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			PlayerUnits: []entity.Unit{playerUnit},
 			EnemyUnits:  []entity.Unit{enemyUnit},
@@ -257,20 +257,20 @@ func TestUpdate_TriggersCollected_ReEvaluatesSourceConditions(t *testing.T) {
 	// Simulate batch where enemy1 attacks first, then tries to attack again
 	// with a source condition requiring health >= 1.
 	// The second trigger should NOT execute because enemy1's health will be 0.
-	triggersMsg := TriggersCollected{
+	triggersMsg := model.TriggersCollected{
 		Event: string(core.EventOnDamaged),
-		Triggers: []CollectedTrigger{
+		Triggers: []model.CollectedTrigger{
 			{
 				// First: player kills enemy
 				EffectName: "deal_damage",
 				Params:     map[string]any{"damage": 100, "target": "enemy"},
-				Owner:      TriggerOwner{UnitID: "player1"},
+				Owner:      model.TriggerOwner{UnitID: "player1"},
 			},
 			{
 				// Second: enemy tries to attack, but should be dead
 				EffectName: "deal_damage",
 				Params:     map[string]any{"damage": 50, "target": "self"}, // target self to avoid "no target" issue
-				Owner:      TriggerOwner{UnitID: "enemy1"},
+				Owner:      model.TriggerOwner{UnitID: "enemy1"},
 				Conditions: []core.Condition{
 					{Type: core.ConditionAttrGTE, Params: map[string]any{"attribute": "health", "value": 1}},
 				},
@@ -285,7 +285,7 @@ func TestUpdate_TriggersCollected_ReEvaluatesSourceConditions(t *testing.T) {
 	}
 
 	msg := cmd()
-	effectsMsg, ok := msg.(EffectsResolved)
+	effectsMsg, ok := msg.(model.EffectsResolved)
 	if !ok {
 		t.Fatalf("expected EffectsResolved, got %T", msg)
 	}
@@ -311,15 +311,15 @@ func TestUpdate_TriggersCollected_ReEvaluatesSourceConditions(t *testing.T) {
 func TestUpdate_CombatEnded_PlayerWins(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 	}
 
-	newModel, cmd := m.Update(CombatEnded{Victor: VictorPlayer})
+	newModel, cmd := m.Update(model.CombatEnded{Victor: model.VictorPlayer})
 
-	if newModel.Phase != PhaseInterCombat {
+	if newModel.Phase != model.PhaseInterCombat {
 		t.Errorf("expected PhaseInterCombat, got %d", newModel.Phase)
 	}
-	if newModel.ChoiceType != ChoiceReward {
+	if newModel.ChoiceType != model.ChoiceReward {
 		t.Errorf("expected ChoiceReward, got %d", newModel.ChoiceType)
 	}
 	if newModel.RewardChoicesLeft != 2 {
@@ -336,12 +336,12 @@ func TestUpdate_CombatEnded_PlayerWins(t *testing.T) {
 func TestUpdate_CombatEnded_PlayerLoses(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 	}
 
-	newModel, cmd := m.Update(CombatEnded{Victor: VictorEnemy})
+	newModel, cmd := m.Update(model.CombatEnded{Victor: model.VictorEnemy})
 
-	if newModel.Phase != PhaseGameOver {
+	if newModel.Phase != model.PhaseGameOver {
 		t.Errorf("expected PhaseGameOver, got %d", newModel.Phase)
 	}
 	if cmd != nil {
@@ -352,12 +352,12 @@ func TestUpdate_CombatEnded_PlayerLoses(t *testing.T) {
 func TestUpdate_CombatEnded_Draw(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 	}
 
-	newModel, cmd := m.Update(CombatEnded{Victor: VictorDraw})
+	newModel, cmd := m.Update(model.CombatEnded{Victor: model.VictorDraw})
 
-	if newModel.Phase != PhaseGameOver {
+	if newModel.Phase != model.PhaseGameOver {
 		t.Errorf("expected PhaseGameOver, got %d", newModel.Phase)
 	}
 	if cmd != nil {
@@ -368,19 +368,19 @@ func TestUpdate_CombatEnded_Draw(t *testing.T) {
 func TestUpdate_ChoiceSelected_Reward(t *testing.T) {
 	m := Model{
 		Version:           1,
-		Phase:             PhaseInterCombat,
-		ChoiceType:        ChoiceReward,
+		Phase:             model.PhaseInterCombat,
+		ChoiceType:        model.ChoiceReward,
 		RewardChoicesLeft: 2,
 		Choices:           []string{"A", "B", "C"},
 	}
 
 	// First reward selection
-	newModel, cmd := m.Update(ChoiceSelected{Index: 0})
+	newModel, cmd := m.Update(model.ChoiceSelected{Index: 0})
 
 	if newModel.RewardChoicesLeft != 1 {
 		t.Errorf("expected 1 reward choice left, got %d", newModel.RewardChoicesLeft)
 	}
-	if newModel.ChoiceType != ChoiceReward {
+	if newModel.ChoiceType != model.ChoiceReward {
 		t.Errorf("expected ChoiceReward, got %d", newModel.ChoiceType)
 	}
 	if cmd != nil {
@@ -388,12 +388,12 @@ func TestUpdate_ChoiceSelected_Reward(t *testing.T) {
 	}
 
 	// Second reward selection should switch to fight selection
-	newModel, cmd = newModel.Update(ChoiceSelected{Index: 1})
+	newModel, cmd = newModel.Update(model.ChoiceSelected{Index: 1})
 
 	if newModel.RewardChoicesLeft != 0 {
 		t.Errorf("expected 0 reward choices left, got %d", newModel.RewardChoicesLeft)
 	}
-	if newModel.ChoiceType != ChoiceFight {
+	if newModel.ChoiceType != model.ChoiceFight {
 		t.Errorf("expected ChoiceFight, got %d", newModel.ChoiceType)
 	}
 	if len(newModel.Choices) != 3 {
@@ -407,7 +407,7 @@ func TestUpdate_ChoiceSelected_Reward(t *testing.T) {
 func TestUpdate_CombatStarted(t *testing.T) {
 	m := Model{
 		Version:     1,
-		Phase:       PhaseInterCombat,
+		Phase:       model.PhaseInterCombat,
 		FightNumber: 1,
 	}
 
@@ -416,9 +416,9 @@ func TestUpdate_CombatStarted(t *testing.T) {
 		Log:   []string{"Fight 2 started"},
 	}
 
-	newModel, cmd := m.Update(CombatStarted{Combat: combat})
+	newModel, cmd := m.Update(model.CombatStarted{Combat: combat})
 
-	if newModel.Phase != PhaseCombat {
+	if newModel.Phase != model.PhaseCombat {
 		t.Errorf("expected PhaseCombat, got %d", newModel.Phase)
 	}
 	if newModel.FightNumber != 2 {
@@ -436,19 +436,19 @@ func TestUpdate_CombatStarted(t *testing.T) {
 func TestChoiceSelected_ValidatesIndex(t *testing.T) {
 	m := Model{
 		Version:    1,
-		Phase:      PhaseInterCombat,
-		ChoiceType: ChoiceReward,
+		Phase:      model.PhaseInterCombat,
+		ChoiceType: model.ChoiceReward,
 		Choices:    []string{"A", "B", "C"},
 	}
 
 	// Out of bounds - should be no-op
-	newM, _ := m.Update(ChoiceSelected{Index: 99})
+	newM, _ := m.Update(model.ChoiceSelected{Index: 99})
 	if newM.Choices[0] != "A" {
 		t.Error("out-of-bounds index should not change state")
 	}
 
 	// Negative - should be no-op
-	newM2, _ := m.Update(ChoiceSelected{Index: -1})
+	newM2, _ := m.Update(model.ChoiceSelected{Index: -1})
 	if newM2.Choices[0] != "A" {
 		t.Error("negative index should not change state")
 	}
@@ -457,15 +457,15 @@ func TestChoiceSelected_ValidatesIndex(t *testing.T) {
 func TestChoiceSelected_RequiresChoicePhase(t *testing.T) {
 	m := Model{
 		Version:    1,
-		Phase:      PhaseCombat, // Wrong phase
-		ChoiceType: ChoiceReward,
+		Phase:      model.PhaseCombat, // Wrong phase
+		ChoiceType: model.ChoiceReward,
 		Choices:    []string{"A", "B", "C"},
 	}
 
-	newM, _ := m.Update(ChoiceSelected{Index: 0})
+	newM, _ := m.Update(model.ChoiceSelected{Index: 0})
 
 	// Should be no-op - not in choice phase
-	if newM.Phase != PhaseCombat {
+	if newM.Phase != model.PhaseCombat {
 		t.Error("should not change phase when not in PhaseInterCombat")
 	}
 }

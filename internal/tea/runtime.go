@@ -1,5 +1,7 @@
 package tea
 
+import "wulfaz/internal/model"
+
 type Runtime struct {
 	model Model
 }
@@ -8,7 +10,7 @@ func NewRuntime(seed int64) *Runtime {
 	return &Runtime{
 		model: Model{
 			Version: 1,
-			Phase:   PhaseMenu,
+			Phase:   model.PhaseMenu,
 			Seed:    seed,
 		},
 	}
@@ -19,16 +21,16 @@ func (r *Runtime) Model() Model {
 	return r.model
 }
 
-func (r *Runtime) Dispatch(msg Msg) {
+func (r *Runtime) Dispatch(msg model.Msg) {
 	// Unpack batched messages first
-	if batch, ok := msg.(BatchedMsgs); ok {
+	if batch, ok := msg.(model.BatchedMsgs); ok {
 		for _, m := range batch.Msgs {
 			r.Dispatch(m)
 		}
 		return
 	}
 
-	var cmd Cmd
+	var cmd model.Cmd
 	r.model, cmd = r.model.Update(msg)
 	if cmd != nil {
 		result := cmd()

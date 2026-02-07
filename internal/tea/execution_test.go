@@ -53,7 +53,7 @@ func TestRoundEnded_ShieldExpiration(t *testing.T) {
 		},
 	}
 
-	newM, _ := m.Update(RoundEnded{})
+	newM, _ := m.Update(model.RoundEnded{})
 
 	// All shields should be 0
 	for _, u := range newM.Combat.PlayerUnits {
@@ -78,7 +78,7 @@ func TestRoundEnded_ShieldExpiration(t *testing.T) {
 func TestCombatStarted_TriggersFirstRound(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseMenu,
+		Phase:   model.PhaseMenu,
 		Seed:    42,
 	}
 
@@ -108,10 +108,10 @@ func TestCombatStarted_TriggersFirstRound(t *testing.T) {
 		},
 	}
 
-	msg := CombatStarted{Combat: combat}
+	msg := model.CombatStarted{Combat: combat}
 	newM, cmd := m.Update(msg)
 
-	if newM.Phase != PhaseCombat {
+	if newM.Phase != model.PhaseCombat {
 		t.Errorf("Phase = %v, want PhaseCombat", newM.Phase)
 	}
 	if newM.FightNumber != 1 {
@@ -123,7 +123,7 @@ func TestCombatStarted_TriggersFirstRound(t *testing.T) {
 		t.Fatal("expected cmd for first round")
 	}
 	result := cmd()
-	if _, ok := result.(RoundStarted); !ok {
+	if _, ok := result.(model.RoundStarted); !ok {
 		t.Errorf("expected RoundStarted, got %T", result)
 	}
 }
@@ -133,12 +133,12 @@ func TestCheckCombatEnd_CommandUnitBased(t *testing.T) {
 		name           string
 		playerCmdAlive bool
 		enemyCmdAlive  bool
-		expected       Victor
+		expected       model.Victor
 	}{
-		{"both alive", true, true, VictorNone},
-		{"enemy cmd dead", true, false, VictorPlayer},
-		{"player cmd dead", false, true, VictorEnemy},
-		{"both dead - player wins tie", false, false, VictorPlayer},
+		{"both alive", true, true, model.VictorNone},
+		{"enemy cmd dead", true, false, model.VictorPlayer},
+		{"player cmd dead", false, true, model.VictorEnemy},
+		{"both dead - player wins tie", false, false, model.VictorPlayer},
 	}
 
 	for _, tt := range tests {
@@ -228,8 +228,8 @@ func TestAllAttacksResolved_AppliesDamage(t *testing.T) {
 		},
 	}
 
-	msg := AllAttacksResolved{
-		Attacks: []AttackResult{
+	msg := model.AllAttacksResolved{
+		Attacks: []model.AttackResult{
 			{
 				AttackerID: "player1",
 				TargetID:   "enemy1",
@@ -283,8 +283,8 @@ func TestAllAttacksResolved_VictoryCheck(t *testing.T) {
 		},
 	}
 
-	msg := AllAttacksResolved{
-		Attacks: []AttackResult{
+	msg := model.AllAttacksResolved{
+		Attacks: []model.AttackResult{
 			{
 				AttackerID: "player1",
 				TargetID:   "enemy_cmd",
@@ -305,7 +305,7 @@ func TestAllAttacksResolved_VictoryCheck(t *testing.T) {
 	}
 
 	// Step 2: RoundEndClicked triggers victory check
-	newM, cmd = newM.Update(RoundEndClicked{})
+	newM, cmd = newM.Update(model.RoundEndClicked{})
 
 	// Combat should end
 	if newM.Combat.Phase != model.CombatResolved {
@@ -318,7 +318,7 @@ func TestAllAttacksResolved_VictoryCheck(t *testing.T) {
 	// Should return CombatEnded
 	if cmd != nil {
 		result := cmd()
-		if ended, ok := result.(CombatEnded); !ok || ended.Victor != VictorPlayer {
+		if ended, ok := result.(model.CombatEnded); !ok || ended.Victor != model.VictorPlayer {
 			t.Errorf("expected CombatEnded{VictorPlayer}, got %T", result)
 		}
 	}
@@ -329,7 +329,7 @@ func TestAllAttacksResolved_VictoryCheck(t *testing.T) {
 func TestExecutionComplete_TransitionsToRoundEnd(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Seed:    42,
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
@@ -359,7 +359,7 @@ func TestExecutionComplete_TransitionsToRoundEnd(t *testing.T) {
 	}
 
 	// ExecutionComplete should transition to RoundEnd
-	m1, cmd1 := m.Update(ExecutionComplete{})
+	m1, cmd1 := m.Update(model.ExecutionComplete{})
 	if m1.Combat.DicePhase != model.DicePhaseRoundEnd {
 		t.Errorf("after ExecutionComplete: DicePhase = %v, want DicePhaseRoundEnd", m1.Combat.DicePhase)
 	}
@@ -369,7 +369,7 @@ func TestExecutionComplete_TransitionsToRoundEnd(t *testing.T) {
 
 	// Process the RoundEnded
 	msg1 := cmd1()
-	if _, ok := msg1.(RoundEnded); !ok {
+	if _, ok := msg1.(model.RoundEnded); !ok {
 		t.Fatalf("expected RoundEnded, got %T", msg1)
 	}
 
@@ -419,9 +419,9 @@ func TestAllAttacksResolved_DefenseResults(t *testing.T) {
 		},
 	}
 
-	msg := AllAttacksResolved{
-		Attacks: []AttackResult{}, // No damage attacks
-		DefenseResults: []DiceEffectResult{
+	msg := model.AllAttacksResolved{
+		Attacks: []model.AttackResult{}, // No damage attacks
+		DefenseResults: []model.DiceEffectResult{
 			{
 				TargetUnitID: "enemy1",
 				Effect:       entity.DieShield,

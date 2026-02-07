@@ -46,7 +46,7 @@ func New(seed int64) *App {
 	a := &App{
 		model: tea.Model{
 			Version:     1,
-			Phase:       tea.PhaseMenu,
+			Phase:       model.PhaseMenu,
 			Seed:        seed,
 			FightNumber: 0,
 			// F-155: PlayerRoster initialized below after App created
@@ -60,7 +60,7 @@ func New(seed int64) *App {
 
 	// Build first combat from roster
 	combat := a.buildCombatFromRoster()
-	a.dispatch(tea.CombatStarted{Combat: combat})
+	a.dispatch(model.CombatStarted{Combat: combat})
 	return a
 }
 
@@ -80,7 +80,7 @@ func (a *App) Update() error {
 
 	a.pollInput()
 
-	if a.model.Phase == tea.PhaseGameOver {
+	if a.model.Phase == model.PhaseGameOver {
 		return ebiten.Termination
 	}
 
@@ -104,13 +104,13 @@ func (a *App) Layout(outsideWidth, outsideHeight int) (int, int) {
 // syncUIState updates the sidebar UI widgets from the current model state
 func (a *App) syncUIState() {
 	switch a.model.Phase {
-	case tea.PhaseMenu:
+	case model.PhaseMenu:
 		a.gameUI.SetRoundText("WULFAZ")
 		a.gameUI.SetKeysText("SPACE=Start  ESC=Quit")
 		a.gameUI.SetHintText("")
 		a.gameUI.SetLogText("")
 
-	case tea.PhaseInterCombat:
+	case model.PhaseInterCombat:
 		a.gameUI.SetRoundText(fmt.Sprintf("Fight %d Complete", a.model.FightNumber))
 		a.gameUI.SetKeysText("1/2/3=Select  ESC=Quit")
 
@@ -120,7 +120,7 @@ func (a *App) syncUIState() {
 			hint = fmt.Sprintf("[1] %s\n[2] %s\n[3] %s\n\n",
 				a.model.Choices[0], a.model.Choices[1], a.model.Choices[2])
 		}
-		if a.model.ChoiceType == tea.ChoiceReward {
+		if a.model.ChoiceType == model.ChoiceReward {
 			hint += fmt.Sprintf("Rewards left: %d\n", a.model.RewardChoicesLeft)
 		}
 		// Add drag instructions
@@ -132,13 +132,13 @@ func (a *App) syncUIState() {
 		a.gameUI.SetHintText(hint)
 		a.gameUI.SetLogText("")
 
-	case tea.PhaseGameOver:
+	case model.PhaseGameOver:
 		a.gameUI.SetRoundText("GAME OVER")
 		a.gameUI.SetKeysText("ESC=Quit")
 		a.gameUI.SetHintText("")
 		a.gameUI.SetLogText("")
 
-	case tea.PhaseCombat:
+	case model.PhaseCombat:
 		combat := a.model.Combat
 		a.gameUI.SetRoundText(fmt.Sprintf("Round: %d", combat.Round))
 		a.gameUI.SetKeysText("SPACE=Pause  ESC=Quit")
@@ -200,32 +200,32 @@ func (a *App) syncUIState() {
 func (a *App) pollInput() {
 	// ESC handling - cancel drag first, then quit
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		if a.model.Phase == tea.PhaseInterCombat && a.model.DragState.IsDragging {
-			a.dispatch(tea.UnitDragCanceled{})
+		if a.model.Phase == model.PhaseInterCombat && a.model.DragState.IsDragging {
+			a.dispatch(model.UnitDragCanceled{})
 			return
 		}
-		a.dispatch(tea.PlayerQuit{})
+		a.dispatch(model.PlayerQuit{})
 		return
 	}
 
 	switch a.model.Phase {
-	case tea.PhaseMenu:
+	case model.PhaseMenu:
 		// Menu input handled elsewhere
-	case tea.PhaseCombat:
+	case model.PhaseCombat:
 		if a.model.Combat.Phase == model.CombatActive {
 			a.pollCombatInput()
 		}
 		// Pause/resume
 		if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 			if a.model.Combat.Phase == model.CombatActive {
-				a.dispatch(tea.PlayerPaused{})
+				a.dispatch(model.PlayerPaused{})
 			} else if a.model.Combat.Phase == model.CombatPaused {
-				a.dispatch(tea.PlayerResumed{})
+				a.dispatch(model.PlayerResumed{})
 			}
 		}
-	case tea.PhaseInterCombat:
+	case model.PhaseInterCombat:
 		a.pollInterCombatInput()
-	case tea.PhaseGameOver:
+	case model.PhaseGameOver:
 		// ESC handled above
 	}
 }
@@ -236,14 +236,14 @@ func (a *App) pollInterCombatInput() {
 
 	// Active drag handling
 	if a.model.DragState.IsDragging {
-		a.dispatch(tea.UnitDragMoved{CurrentX: mx, CurrentY: my})
+		a.dispatch(model.UnitDragMoved{CurrentX: mx, CurrentY: my})
 
 		if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
 			idx := a.computeInsertionIndex(mx)
-			a.dispatch(tea.UnitDragEnded{InsertionIndex: idx})
+			a.dispatch(model.UnitDragEnded{InsertionIndex: idx})
 		}
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
-			a.dispatch(tea.UnitDragCanceled{})
+			a.dispatch(model.UnitDragCanceled{})
 		}
 		return
 	}
@@ -252,18 +252,18 @@ func (a *App) pollInterCombatInput() {
 	for i, key := range []ebiten.Key{ebiten.Key1, ebiten.Key2, ebiten.Key3} {
 		if inpututil.IsKeyJustPressed(key) {
 			// Check if this is fight selection BEFORE dispatching
-			isFightSelection := a.model.ChoiceType == tea.ChoiceFight
+			isFightSelection := a.model.ChoiceType == model.ChoiceFight
 
-			a.dispatch(tea.ChoiceSelected{Index: i})
+			a.dispatch(model.ChoiceSelected{Index: i})
 
 			// If fight was selected, start combat (or end MVP game)
 			if isFightSelection {
 				// MVP: end game after fight 2
 				if a.model.FightNumber >= 2 {
-					a.dispatch(tea.PlayerQuit{})
+					a.dispatch(model.PlayerQuit{})
 				} else {
 					combat := a.buildCombatFromRoster()
-					a.dispatch(tea.CombatStarted{Combat: combat})
+					a.dispatch(model.CombatStarted{Combat: combat})
 				}
 			}
 			return
@@ -281,7 +281,7 @@ func (a *App) pollInterCombatInput() {
 				// Find roster index (excluding command unit)
 				idx := a.findRosterIndex(region.UnitID)
 				if idx >= 0 {
-					a.dispatch(tea.UnitDragStarted{
+					a.dispatch(model.UnitDragStarted{
 						UnitID: region.UnitID, OriginalIndex: idx,
 						StartX: mx, StartY: my,
 					})
@@ -343,7 +343,7 @@ func (a *App) pollCombatInput() {
 	// PREVIEW PHASE: any click advances to PlayerCommand
 	if combat.DicePhase == model.DicePhasePreview {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			a.dispatch(tea.PreviewDone{})
+			a.dispatch(model.PreviewDone{})
 		}
 		return
 	}
@@ -351,7 +351,7 @@ func (a *App) pollCombatInput() {
 	// EXECUTION PHASE: click to advance
 	if combat.DicePhase == model.DicePhaseExecution {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			a.dispatch(tea.ExecutionAdvanceClicked{Timestamp: time.Now().UnixNano()})
+			a.dispatch(model.ExecutionAdvanceClicked{Timestamp: time.Now().UnixNano()})
 		}
 		return
 	}
@@ -359,7 +359,7 @@ func (a *App) pollCombatInput() {
 	// ROUND END PHASE: click to advance to next round
 	if combat.DicePhase == model.DicePhaseRoundEnd {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			a.dispatch(tea.RoundEndClicked{})
+			a.dispatch(model.RoundEndClicked{})
 		}
 		return
 	}
@@ -369,10 +369,10 @@ func (a *App) pollCombatInput() {
 		// Confirmation blocks all other input
 		if combat.EndTurnConfirmPending {
 			if inpututil.IsKeyJustPressed(ebiten.KeyY) {
-				a.dispatch(tea.EndTurnConfirmed{})
+				a.dispatch(model.EndTurnConfirmed{})
 			}
 			if inpututil.IsKeyJustPressed(ebiten.KeyN) {
-				a.dispatch(tea.EndTurnCanceled{})
+				a.dispatch(model.EndTurnCanceled{})
 			}
 			return
 		}
@@ -380,10 +380,10 @@ func (a *App) pollCombatInput() {
 		// ENTER key = Done Rolling or End Turn
 		if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
 			if !tea.AllPlayerDiceLocked(combat) {
-				a.dispatch(tea.AllDiceLocked{})
+				a.dispatch(model.AllDiceLocked{})
 			} else {
 				count := tea.CountUsablePlayerDice(combat)
-				a.dispatch(tea.EndTurnRequested{UsableDiceCount: count})
+				a.dispatch(model.EndTurnRequested{UsableDiceCount: count})
 			}
 		}
 
@@ -399,9 +399,9 @@ func (a *App) pollCombatInput() {
 		if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
 			if tea.AllPlayerDiceLocked(combat) {
 				if len(combat.UndoStack) >= 2 {
-					a.dispatch(tea.UndoRequested{})
+					a.dispatch(model.UndoRequested{})
 				} else if combat.RerollsRemaining > 0 {
-					a.dispatch(tea.UnlockAllDiceRequested{})
+					a.dispatch(model.UnlockAllDiceRequested{})
 				}
 			}
 		}
@@ -416,7 +416,7 @@ func (a *App) pollCombatInput() {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
 			if combat.SelectedUnitID != "" {
 				// Cancel selection first (takes priority)
-				a.dispatch(tea.DieDeselected{})
+				a.dispatch(model.DieDeselected{})
 			} else if tea.AllPlayerDiceLocked(combat) && combat.RerollsRemaining > 0 {
 				// Try to unlock a die
 				mx, my := ebiten.CursorPosition()
@@ -424,7 +424,7 @@ func (a *App) pollCombatInput() {
 				for _, region := range a.hitRegions {
 					if region.Type == "die" && pt.In(region.Rect) {
 						if combat.IsPlayerUnit(region.UnitID) && !combat.ActivatedDice[region.UnitID] {
-							a.dispatch(tea.DieUnlocked{UnitID: region.UnitID})
+							a.dispatch(model.DieUnlocked{UnitID: region.UnitID})
 						}
 						break
 					}
@@ -461,7 +461,7 @@ func (a *App) handleLeftClick(mx, my int) {
 
 		if !allLocked {
 			// LOCK PHASE: toggle lock
-			a.dispatch(tea.DieLockToggled{UnitID: region.UnitID})
+			a.dispatch(model.DieLockToggled{UnitID: region.UnitID})
 		} else {
 			// ACTIVATION PHASE: check for blank before allowing selection
 			rolledDice, exists := combat.RolledDice[region.UnitID]
@@ -474,9 +474,9 @@ func (a *App) handleLeftClick(mx, my int) {
 			}
 			// Toggle selection
 			if combat.SelectedUnitID == region.UnitID {
-				a.dispatch(tea.DieDeselected{})
+				a.dispatch(model.DieDeselected{})
 			} else {
-				a.dispatch(tea.DieSelected{UnitID: region.UnitID})
+				a.dispatch(model.DieSelected{UnitID: region.UnitID})
 			}
 		}
 		return
@@ -507,7 +507,7 @@ func (a *App) handleLeftClick(mx, my int) {
 			default:
 				continue // Invalid target
 			}
-			a.dispatch(tea.DiceActivated{
+			a.dispatch(model.DiceActivated{
 				SourceUnitID: combat.SelectedUnitID,
 				TargetUnitID: region.UnitID,
 				Timestamp:    time.Now().UnixNano(),
@@ -520,23 +520,23 @@ func (a *App) handleLeftClick(mx, my int) {
 	if allLocked && combat.SelectedUnitID != "" {
 		rolledDice, exists := combat.RolledDice[combat.SelectedUnitID]
 		if !exists || entity.AllNonBlankFired(rolledDice) {
-			a.dispatch(tea.DieDeselected{})
+			a.dispatch(model.DieDeselected{})
 		}
 		// Otherwise keep selection (mid-split-activation)
 	}
 }
 
 // dispatch sends a message through the TEA update cycle
-func (a *App) dispatch(msg tea.Msg) {
+func (a *App) dispatch(msg model.Msg) {
 	// Handle batched messages (matches runtime.go behavior)
-	if batch, ok := msg.(tea.BatchedMsgs); ok {
+	if batch, ok := msg.(model.BatchedMsgs); ok {
 		for _, m := range batch.Msgs {
 			a.dispatch(m)
 		}
 		return
 	}
 
-	var cmd tea.Cmd
+	var cmd model.Cmd
 	a.model, cmd = a.model.Update(msg)
 
 	// Execute command if present

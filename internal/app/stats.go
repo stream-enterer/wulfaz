@@ -8,7 +8,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 
 	"wulfaz/internal/entity"
-	"wulfaz/internal/tea"
+	"wulfaz/internal/model"
 )
 
 // updateHoveredUnit polls mouse position and updates hoveredUnitID.
@@ -56,7 +56,7 @@ func (a *App) syncStatsDisplay() {
 // findUnit locates a unit by ID in the current phase's data.
 func (a *App) findUnit(unitID string) *entity.Unit {
 	switch a.model.Phase {
-	case tea.PhaseCombat:
+	case model.PhaseCombat:
 		for i := range a.model.Combat.PlayerUnits {
 			if a.model.Combat.PlayerUnits[i].ID == unitID {
 				return &a.model.Combat.PlayerUnits[i]
@@ -67,13 +67,13 @@ func (a *App) findUnit(unitID string) *entity.Unit {
 				return &a.model.Combat.EnemyUnits[i]
 			}
 		}
-	case tea.PhaseInterCombat:
+	case model.PhaseInterCombat:
 		for i := range a.model.PlayerRoster {
 			if a.model.PlayerRoster[i].ID == unitID {
 				return &a.model.PlayerRoster[i]
 			}
 		}
-	case tea.PhaseMenu, tea.PhaseGameOver:
+	case model.PhaseMenu, model.PhaseGameOver:
 		// No units to look up in these phases
 	}
 	return nil

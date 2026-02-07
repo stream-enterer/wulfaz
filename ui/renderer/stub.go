@@ -13,14 +13,14 @@ func Render(m tea.Model) string {
 	var sb strings.Builder
 
 	switch m.Phase {
-	case tea.PhaseMenu:
+	case model.PhaseMenu:
 		sb.WriteString("=== WULFAZ ===\n")
 		sb.WriteString("Menu\n")
-	case tea.PhaseCombat:
+	case model.PhaseCombat:
 		renderCombatText(&sb, m.Combat)
-	case tea.PhaseInterCombat:
+	case model.PhaseInterCombat:
 		sb.WriteString("=== CHOICE ===\n")
-	case tea.PhaseGameOver:
+	case model.PhaseGameOver:
 		sb.WriteString("=== GAME OVER ===\n")
 	}
 

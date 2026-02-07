@@ -26,7 +26,7 @@ func TestHandleRoundStarted(t *testing.T) {
 		},
 	}
 
-	msg := RoundStarted{
+	msg := model.RoundStarted{
 		Round:     1,
 		UnitRolls: map[string][]int{"unit1": {2}}, // face index 2 = value 3
 	}
@@ -69,9 +69,9 @@ func TestHandleDiceEffectApplied_DamageWithShields(t *testing.T) {
 		},
 	}
 
-	msg := UnitDiceEffectsApplied{
+	msg := model.UnitDiceEffectsApplied{
 		SourceUnitID: "player_cmd",
-		Results: []DiceEffectResult{{
+		Results: []model.DiceEffectResult{{
 			TargetUnitID: "enemy",
 			Effect:       entity.DieDamage,
 			Value:        12,
@@ -113,7 +113,7 @@ func TestHandleDiceActivated_TargetValidation(t *testing.T) {
 	}
 
 	// Damage die targeting friendly = invalid, should be no-op
-	msg := DiceActivated{
+	msg := model.DiceActivated{
 		SourceUnitID: "player_cmd",
 		TargetUnitID: "player_cmd", // friendly target
 	}
@@ -138,7 +138,7 @@ func TestHandleDieLockToggled(t *testing.T) {
 
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			PlayerUnits: []entity.Unit{playerCmd},
 			Phase:       model.CombatActive,
@@ -149,7 +149,7 @@ func TestHandleDieLockToggled(t *testing.T) {
 		},
 	}
 
-	msg := DieLockToggled{UnitID: "player_cmd"}
+	msg := model.DieLockToggled{UnitID: "player_cmd"}
 	newM, _ := m.Update(msg)
 
 	if !entity.IsUnitLocked(newM.Combat.RolledDice["player_cmd"]) {
@@ -172,7 +172,7 @@ func TestHandleDieSelected(t *testing.T) {
 
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			PlayerUnits:    []entity.Unit{playerCmd},
 			Phase:          model.CombatActive,
@@ -186,7 +186,7 @@ func TestHandleDieSelected(t *testing.T) {
 	}
 
 	// Non-existent unit should be rejected
-	msg := DieSelected{UnitID: "nonexistent"}
+	msg := model.DieSelected{UnitID: "nonexistent"}
 	newM, _ := m.Update(msg)
 
 	if newM.Combat.SelectedUnitID != "" {
@@ -194,7 +194,7 @@ func TestHandleDieSelected(t *testing.T) {
 	}
 
 	// Valid unit should be accepted
-	msg2 := DieSelected{UnitID: "player_cmd"}
+	msg2 := model.DieSelected{UnitID: "player_cmd"}
 	newM2, _ := m.Update(msg2)
 
 	if newM2.Combat.SelectedUnitID != "player_cmd" {
@@ -205,14 +205,14 @@ func TestHandleDieSelected(t *testing.T) {
 func TestHandlePreviewDone(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
 			DicePhase: model.DicePhasePreview,
 		},
 	}
 
-	newM, _ := m.Update(PreviewDone{})
+	newM, _ := m.Update(model.PreviewDone{})
 
 	if newM.Combat.DicePhase != model.DicePhasePlayerCommand {
 		t.Errorf("DicePhase = %v, want PlayerCommand", newM.Combat.DicePhase)
@@ -227,7 +227,7 @@ func TestHandlePlayerCommandDone(t *testing.T) {
 		},
 	}
 
-	newM, cmd := m.Update(PlayerCommandDone{})
+	newM, cmd := m.Update(model.PlayerCommandDone{})
 
 	if newM.Combat.DicePhase != model.DicePhaseExecution {
 		t.Errorf("DicePhase = %v, want Execution", newM.Combat.DicePhase)
@@ -248,7 +248,7 @@ func TestDieLockToggled_RequiresCombatActive(t *testing.T) {
 
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			PlayerUnits: []entity.Unit{playerCmd},
 			Phase:       model.CombatPaused, // PAUSED
@@ -259,7 +259,7 @@ func TestDieLockToggled_RequiresCombatActive(t *testing.T) {
 		},
 	}
 
-	msg := DieLockToggled{UnitID: "player_cmd"}
+	msg := model.DieLockToggled{UnitID: "player_cmd"}
 	newM, _ := m.Update(msg)
 
 	// Should NOT toggle - combat is paused
@@ -271,13 +271,13 @@ func TestDieLockToggled_RequiresCombatActive(t *testing.T) {
 func TestDieLockToggled_RequiresPhaseCombat(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseInterCombat, // Wrong phase
+		Phase:   model.PhaseInterCombat, // Wrong phase
 		Combat: model.CombatModel{
 			DicePhase: model.DicePhasePlayerCommand,
 		},
 	}
 
-	msg := DieLockToggled{UnitID: "player_cmd"}
+	msg := model.DieLockToggled{UnitID: "player_cmd"}
 	newM, _ := m.Update(msg)
 
 	// Should be no-op - not in combat phase
@@ -289,7 +289,7 @@ func TestDieLockToggled_RequiresPhaseCombat(t *testing.T) {
 func TestDieDeselected_RequiresPhaseCombat(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseInterCombat, // Wrong phase
+		Phase:   model.PhaseInterCombat, // Wrong phase
 		Combat: model.CombatModel{
 			Phase:          model.CombatActive,
 			DicePhase:      model.DicePhasePlayerCommand,
@@ -297,7 +297,7 @@ func TestDieDeselected_RequiresPhaseCombat(t *testing.T) {
 		},
 	}
 
-	newM, _ := m.Update(DieDeselected{})
+	newM, _ := m.Update(model.DieDeselected{})
 
 	// Should be no-op - not in combat phase
 	if newM.Combat.SelectedUnitID != "player_cmd" {
@@ -308,7 +308,7 @@ func TestDieDeselected_RequiresPhaseCombat(t *testing.T) {
 func TestDieDeselected_RequiresCombatActive(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:          model.CombatPaused, // Paused
 			DicePhase:      model.DicePhasePlayerCommand,
@@ -316,7 +316,7 @@ func TestDieDeselected_RequiresCombatActive(t *testing.T) {
 		},
 	}
 
-	newM, _ := m.Update(DieDeselected{})
+	newM, _ := m.Update(model.DieDeselected{})
 
 	// Should be no-op - combat is paused
 	if newM.Combat.SelectedUnitID != "player_cmd" {
@@ -327,14 +327,14 @@ func TestDieDeselected_RequiresCombatActive(t *testing.T) {
 func TestPreviewDone_RequiresPhaseCombat(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseInterCombat, // Wrong phase
+		Phase:   model.PhaseInterCombat, // Wrong phase
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
 			DicePhase: model.DicePhasePreview,
 		},
 	}
 
-	newM, _ := m.Update(PreviewDone{})
+	newM, _ := m.Update(model.PreviewDone{})
 
 	// Should be no-op - not in combat phase
 	if newM.Combat.DicePhase != model.DicePhasePreview {
@@ -345,14 +345,14 @@ func TestPreviewDone_RequiresPhaseCombat(t *testing.T) {
 func TestPreviewDone_RequiresCombatActive(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:     model.CombatPaused, // Paused
 			DicePhase: model.DicePhasePreview,
 		},
 	}
 
-	newM, _ := m.Update(PreviewDone{})
+	newM, _ := m.Update(model.PreviewDone{})
 
 	// Should be no-op - combat is paused
 	if newM.Combat.DicePhase != model.DicePhasePreview {
@@ -363,7 +363,7 @@ func TestPreviewDone_RequiresCombatActive(t *testing.T) {
 func TestUndoRequested_RequiresPhaseCombat(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseInterCombat, // Wrong phase
+		Phase:   model.PhaseInterCombat, // Wrong phase
 		Combat: model.CombatModel{
 			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
@@ -375,7 +375,7 @@ func TestUndoRequested_RequiresPhaseCombat(t *testing.T) {
 		},
 	}
 
-	newM, _ := m.Update(UndoRequested{})
+	newM, _ := m.Update(model.UndoRequested{})
 
 	// Should be no-op - not in combat phase
 	if len(newM.Combat.UndoStack) != 2 {
@@ -387,7 +387,7 @@ func TestUndoRequested_RequiresMultipleSnapshots(t *testing.T) {
 	// With only the initial snapshot, undo should be no-op
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
@@ -405,7 +405,7 @@ func TestUndoRequested_RequiresMultipleSnapshots(t *testing.T) {
 		},
 	}
 
-	newM, _ := m.Update(UndoRequested{})
+	newM, _ := m.Update(model.UndoRequested{})
 
 	// Should be no-op - only 1 snapshot
 	if !entity.IsUnitLocked(newM.Combat.RolledDice["p1"]) {
@@ -420,7 +420,7 @@ func TestUndoRequested_RequiresMultipleSnapshots(t *testing.T) {
 func TestUnlockAllDiceRequested_UnlocksAllDice(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
@@ -438,7 +438,7 @@ func TestUnlockAllDiceRequested_UnlocksAllDice(t *testing.T) {
 		},
 	}
 
-	newM, _ := m.Update(UnlockAllDiceRequested{})
+	newM, _ := m.Update(model.UnlockAllDiceRequested{})
 
 	if entity.IsUnitLocked(newM.Combat.RolledDice["p1"]) {
 		t.Error("p1 die should be unlocked")
@@ -455,7 +455,7 @@ func TestUnlockAllDiceRequested_UnlocksAllDice(t *testing.T) {
 func TestUnlockAllDiceRequested_SkipsActivatedDice(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
@@ -472,7 +472,7 @@ func TestUnlockAllDiceRequested_SkipsActivatedDice(t *testing.T) {
 		},
 	}
 
-	newM, _ := m.Update(UnlockAllDiceRequested{})
+	newM, _ := m.Update(model.UnlockAllDiceRequested{})
 
 	// p1 should remain locked (activated)
 	if !entity.IsUnitLocked(newM.Combat.RolledDice["p1"]) {
@@ -487,7 +487,7 @@ func TestUnlockAllDiceRequested_SkipsActivatedDice(t *testing.T) {
 func TestUnlockAllDiceRequested_RequiresRerolls(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
@@ -502,7 +502,7 @@ func TestUnlockAllDiceRequested_RequiresRerolls(t *testing.T) {
 		},
 	}
 
-	newM, _ := m.Update(UnlockAllDiceRequested{})
+	newM, _ := m.Update(model.UnlockAllDiceRequested{})
 
 	// Should be no-op - no rerolls
 	if !entity.IsUnitLocked(newM.Combat.RolledDice["p1"]) {
@@ -513,7 +513,7 @@ func TestUnlockAllDiceRequested_RequiresRerolls(t *testing.T) {
 func TestUnlockAllDiceRequested_ClearsSelection(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
@@ -529,7 +529,7 @@ func TestUnlockAllDiceRequested_ClearsSelection(t *testing.T) {
 		},
 	}
 
-	newM, _ := m.Update(UnlockAllDiceRequested{})
+	newM, _ := m.Update(model.UnlockAllDiceRequested{})
 
 	if newM.Combat.SelectedUnitID != "" {
 		t.Error("unlock-all should clear selection")
@@ -539,7 +539,7 @@ func TestUnlockAllDiceRequested_ClearsSelection(t *testing.T) {
 func TestDieUnlocked_RequiresRerolls(t *testing.T) {
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
@@ -554,7 +554,7 @@ func TestDieUnlocked_RequiresRerolls(t *testing.T) {
 		},
 	}
 
-	newM, _ := m.Update(DieUnlocked{UnitID: "p1"})
+	newM, _ := m.Update(model.DieUnlocked{UnitID: "p1"})
 
 	// Should be no-op - no rerolls remaining
 	if !entity.IsUnitLocked(newM.Combat.RolledDice["p1"]) {
@@ -568,7 +568,7 @@ func TestRoundStarted_NoDiceUnit(t *testing.T) {
 	// Setup: Create combat with a unit that has HasDie=false
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Seed:    42,
 		Combat: model.CombatModel{
 			Phase: model.CombatActive,
@@ -606,7 +606,7 @@ func TestRoundStarted_NoDiceUnit(t *testing.T) {
 	}
 
 	// Verify: RoundStarted doesn't panic, unit is skipped gracefully
-	msg := RoundStarted{
+	msg := model.RoundStarted{
 		Round:     1,
 		UnitRolls: map[string][]int{"player_cmd": {0}, "enemy_cmd": {0}}, // No rolls for no_dice_unit
 	}
@@ -680,7 +680,7 @@ func TestHandleDiceEffectApplied_KillsEnemyCommand_EndsCombat(t *testing.T) {
 
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:       model.CombatActive,
 			DicePhase:   model.DicePhasePlayerCommand,
@@ -690,9 +690,9 @@ func TestHandleDiceEffectApplied_KillsEnemyCommand_EndsCombat(t *testing.T) {
 	}
 
 	// Dice effect kills enemy command (health -> 0)
-	msg := UnitDiceEffectsApplied{
+	msg := model.UnitDiceEffectsApplied{
 		SourceUnitID: "player_cmd",
-		Results: []DiceEffectResult{{
+		Results: []model.DiceEffectResult{{
 			TargetUnitID: "enemy_cmd",
 			Effect:       entity.DieDamage,
 			Value:        10,
@@ -715,7 +715,7 @@ func TestHandleDiceEffectApplied_KillsEnemyCommand_EndsCombat(t *testing.T) {
 		t.Fatal("expected non-nil Cmd")
 	}
 	result := cmd()
-	if _, ok := result.(CombatEnded); !ok {
+	if _, ok := result.(model.CombatEnded); !ok {
 		t.Errorf("Cmd returned %T, want CombatEnded", result)
 	}
 }
@@ -727,7 +727,7 @@ func TestHandlePreviewDone_AllBlankDice(t *testing.T) {
 	}
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:       model.CombatActive,
 			DicePhase:   model.DicePhasePreview,
@@ -739,13 +739,13 @@ func TestHandlePreviewDone_AllBlankDice(t *testing.T) {
 		},
 	}
 
-	_, cmd := m.Update(PreviewDone{})
+	_, cmd := m.Update(model.PreviewDone{})
 
 	// Should return PlayerCommandDone cmd to auto-advance
 	if cmd == nil {
 		t.Fatal("expected cmd to auto-advance, got nil")
 	}
-	if _, ok := cmd().(PlayerCommandDone); !ok {
+	if _, ok := cmd().(model.PlayerCommandDone); !ok {
 		t.Error("expected PlayerCommandDone msg")
 	}
 }
@@ -760,7 +760,7 @@ func TestHandleRerollRequested_AllBlankAfterReroll(t *testing.T) {
 	}
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:            model.CombatActive,
 			DicePhase:        model.DicePhasePlayerCommand,
@@ -772,13 +772,13 @@ func TestHandleRerollRequested_AllBlankAfterReroll(t *testing.T) {
 		},
 	}
 
-	_, cmd := m.Update(RerollRequested{Results: map[string][]int{"player_cmd": {0}}})
+	_, cmd := m.Update(model.RerollRequested{Results: map[string][]int{"player_cmd": {0}}})
 
 	// Should return PlayerCommandDone cmd to auto-advance
 	if cmd == nil {
 		t.Fatal("expected cmd to auto-advance, got nil")
 	}
-	if _, ok := cmd().(PlayerCommandDone); !ok {
+	if _, ok := cmd().(model.PlayerCommandDone); !ok {
 		t.Error("expected PlayerCommandDone msg")
 	}
 }
@@ -789,7 +789,7 @@ func TestHandleDiceActivated_SplitActivation_DamageThenHeal(t *testing.T) {
 	// Mixed-dice unit: 1 damage + 1 shield. First click enemy fires damage, second click ally fires shield.
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
 			DicePhase: model.DicePhasePlayerCommand,
@@ -817,7 +817,7 @@ func TestHandleDiceActivated_SplitActivation_DamageThenHeal(t *testing.T) {
 	}
 
 	// Click 1: target enemy -> damage die fires
-	msg1 := DiceActivated{SourceUnitID: "p1", TargetUnitID: "enemy1", Timestamp: 1000}
+	msg1 := model.DiceActivated{SourceUnitID: "p1", TargetUnitID: "enemy1", Timestamp: 1000}
 	m1, cmd1 := m.Update(msg1)
 
 	// Damage die should be fired, shield die should not
@@ -840,7 +840,7 @@ func TestHandleDiceActivated_SplitActivation_DamageThenHeal(t *testing.T) {
 	}
 
 	// Click 2: target ally -> shield die fires
-	msg2 := DiceActivated{SourceUnitID: "p1", TargetUnitID: "player_cmd", Timestamp: 2000}
+	msg2 := model.DiceActivated{SourceUnitID: "p1", TargetUnitID: "player_cmd", Timestamp: 2000}
 	m2, cmd2 := m1.Update(msg2)
 
 	dice2 := m2.Combat.RolledDice["p1"]
@@ -865,7 +865,7 @@ func TestHandleDiceActivated_SplitActivation_UnitStaysSelected(t *testing.T) {
 	// After first target click on mixed-dice unit, SelectedUnitID should persist.
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
 			DicePhase: model.DicePhasePlayerCommand,
@@ -892,7 +892,7 @@ func TestHandleDiceActivated_SplitActivation_UnitStaysSelected(t *testing.T) {
 	}
 
 	// Click enemy -> fires damage die only
-	m1, _ := m.Update(DiceActivated{SourceUnitID: "p1", TargetUnitID: "enemy1", Timestamp: 1000})
+	m1, _ := m.Update(model.DiceActivated{SourceUnitID: "p1", TargetUnitID: "enemy1", Timestamp: 1000})
 
 	if m1.Combat.SelectedUnitID != "p1" {
 		t.Errorf("SelectedUnitID = %q, want p1 (unit should stay selected for second target)", m1.Combat.SelectedUnitID)
@@ -903,7 +903,7 @@ func TestHandleDiceActivated_SplitActivation_FullyDoneAfterBothTargets(t *testin
 	// After both target clicks, ActivatedDice should be true and SelectedUnitID cleared.
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
 			DicePhase: model.DicePhasePlayerCommand,
@@ -930,9 +930,9 @@ func TestHandleDiceActivated_SplitActivation_FullyDoneAfterBothTargets(t *testin
 	}
 
 	// Click 1: enemy
-	m1, _ := m.Update(DiceActivated{SourceUnitID: "p1", TargetUnitID: "enemy1", Timestamp: 1000})
+	m1, _ := m.Update(model.DiceActivated{SourceUnitID: "p1", TargetUnitID: "enemy1", Timestamp: 1000})
 	// Click 2: ally
-	m2, _ := m1.Update(DiceActivated{SourceUnitID: "p1", TargetUnitID: "player_cmd", Timestamp: 2000})
+	m2, _ := m1.Update(model.DiceActivated{SourceUnitID: "p1", TargetUnitID: "player_cmd", Timestamp: 2000})
 
 	if !m2.Combat.ActivatedDice["p1"] {
 		t.Error("ActivatedDice should be true after both targets clicked")
@@ -946,7 +946,7 @@ func TestHandleDiceActivated_SingleType_CompletesInOneClick(t *testing.T) {
 	// Damage-only unit should fully activate after one enemy click.
 	m := Model{
 		Version: 1,
-		Phase:   PhaseCombat,
+		Phase:   model.PhaseCombat,
 		Combat: model.CombatModel{
 			Phase:     model.CombatActive,
 			DicePhase: model.DicePhasePlayerCommand,
@@ -967,7 +967,7 @@ func TestHandleDiceActivated_SingleType_CompletesInOneClick(t *testing.T) {
 		},
 	}
 
-	m1, cmd := m.Update(DiceActivated{SourceUnitID: "player_cmd", TargetUnitID: "enemy1", Timestamp: 1000})
+	m1, cmd := m.Update(model.DiceActivated{SourceUnitID: "player_cmd", TargetUnitID: "enemy1", Timestamp: 1000})
 
 	if !m1.Combat.ActivatedDice["player_cmd"] {
 		t.Error("damage-only unit should be fully activated after one click")
