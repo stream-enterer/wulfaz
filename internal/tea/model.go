@@ -345,6 +345,31 @@ func removeDeadUnits(units []entity.Unit) []entity.Unit {
 	return alive
 }
 
+// pruneDeadTargets removes entries from a target map where the source or destination unit is dead.
+func pruneDeadTargets(targets map[string]string, sources, dests []entity.Unit) map[string]string {
+	if len(targets) == 0 {
+		return targets
+	}
+	alive := make(map[string]bool, len(sources)+len(dests))
+	for _, u := range sources {
+		if u.IsAlive() {
+			alive[u.ID] = true
+		}
+	}
+	for _, u := range dests {
+		if u.IsAlive() {
+			alive[u.ID] = true
+		}
+	}
+	pruned := make(map[string]string, len(targets))
+	for src, dst := range targets {
+		if alive[src] && alive[dst] {
+			pruned[src] = dst
+		}
+	}
+	return pruned
+}
+
 // syncRosterFromCombat returns deep copies of surviving combat units as new roster.
 // Filters dead units here (combat may end mid-execution before handleRoundEnded).
 func syncRosterFromCombat(combatUnits []entity.Unit) []entity.Unit {
@@ -882,6 +907,10 @@ func (m Model) handleUnitDiceEffectsApplied(msg model.UnitDiceEffectsApplied) (M
 		combat.Log = appendLogEntry(combat.Log, fmt.Sprintf("%s -> %s: %s %d",
 			msg.SourceUnitID, result.TargetUnitID, result.Effect, result.Value))
 	}
+
+	// Prune target entries for dead units so subsequent execution steps skip them.
+	combat.EnemyTargets = pruneDeadTargets(combat.EnemyTargets, combat.EnemyUnits, combat.PlayerUnits)
+	combat.EnemyDefenseTargets = pruneDeadTargets(combat.EnemyDefenseTargets, combat.EnemyUnits, combat.EnemyUnits)
 
 	m.Combat = combat
 

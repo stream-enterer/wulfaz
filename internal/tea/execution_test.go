@@ -625,3 +625,274 @@ func TestApplyEnemyUnitEffects_OnlyHealDice(t *testing.T) {
 		t.Errorf("NewHealth = %d, want 85", result.Results[0].NewHealth)
 	}
 }
+
+// ===== Dead Unit Target Pruning Tests =====
+
+func TestPruneDeadTargets_RemovesDeadSource(t *testing.T) {
+	targets := map[string]string{"alive1": "dest1", "dead1": "dest2"}
+	sources := []entity.Unit{
+		{ID: "alive1", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+		{ID: "dead1", Attributes: map[string]core.Attribute{"health": {Base: 0}}},
+	}
+	dests := []entity.Unit{
+		{ID: "dest1", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+		{ID: "dest2", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+	}
+	pruned := pruneDeadTargets(targets, sources, dests)
+	if _, ok := pruned["dead1"]; ok {
+		t.Error("dead source should be pruned")
+	}
+	if _, ok := pruned["alive1"]; !ok {
+		t.Error("alive source should remain")
+	}
+}
+
+func TestPruneDeadTargets_RemovesDeadDest(t *testing.T) {
+	targets := map[string]string{"src1": "alive1", "src2": "dead1"}
+	sources := []entity.Unit{
+		{ID: "src1", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+		{ID: "src2", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+	}
+	dests := []entity.Unit{
+		{ID: "alive1", Attributes: map[string]core.Attribute{"health": {Base: 10}}},
+		{ID: "dead1", Attributes: map[string]core.Attribute{"health": {Base: 0}}},
+	}
+	pruned := pruneDeadTargets(targets, sources, dests)
+	if _, ok := pruned["src2"]; ok {
+		t.Error("entry pointing to dead dest should be pruned")
+	}
+	if _, ok := pruned["src1"]; !ok {
+		t.Error("entry pointing to alive dest should remain")
+	}
+}
+
+func TestEnemyExecution_SkipsDeadSource(t *testing.T) {
+	// Bug 1: Dead enemy (killed during player command) should not execute.
+	// enemy1 is dead (HP=0) but has a target entry. After processing any
+	// UnitDiceEffectsApplied, pruning should remove enemy1's entry so
+	// advanceEnemyExecution skips it.
+	m := Model{
+		Version: 1,
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhaseExecution,
+			EnemyTargets: map[string]string{
+				"enemy1": "player1", // enemy1 is dead, should be pruned
+				"enemy2": "player1", // enemy2 is alive, should execute
+			},
+			EnemyDefenseTargets: map[string]string{},
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+				{
+					ID:       "player1",
+					Position: 0,
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 50},
+					},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+				{
+					ID:       "enemy1",
+					Position: 0,
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 0}, // Dead!
+					},
+				},
+				{
+					ID:       "enemy2",
+					Position: 1,
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 30},
+					},
+				},
+			},
+			RolledDice: map[string][]entity.RolledDie{
+				"enemy2": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0}},
+			},
+		},
+	}
+
+	// Simulate enemy2 executing (which triggers pruning). enemy2 deals 5 damage to player1.
+	msg := model.UnitDiceEffectsApplied{
+		SourceUnitID: "enemy2",
+		Results: []model.DiceEffectResult{
+			{
+				TargetUnitID: "player1",
+				Effect:       entity.DieDamage,
+				Value:        5,
+				NewHealth:    45,
+				NewShields:   0,
+			},
+		},
+		Timestamp: 1000,
+	}
+
+	newM, _ := m.Update(msg)
+
+	// enemy1's target entry should have been pruned (dead source)
+	if _, ok := newM.Combat.EnemyTargets["enemy1"]; ok {
+		t.Error("dead enemy1 should be pruned from EnemyTargets")
+	}
+}
+
+func TestEnemyExecution_SkipsDeadTarget_ChainKill(t *testing.T) {
+	// Bug 2: enemy1 kills player1, then enemy2 should not target the dead player1.
+	// After enemy1's results are applied, pruning removes enemy2→player1 entry.
+	m := Model{
+		Version: 1,
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhaseExecution,
+			EnemyTargets: map[string]string{
+				"enemy1": "player1", // enemy1 just killed player1
+				"enemy2": "player1", // enemy2 also targets player1 — should be pruned
+			},
+			EnemyDefenseTargets: map[string]string{},
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+				{
+					ID:       "player1",
+					Position: 0,
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 10}, // Will die from enemy1's attack
+					},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+				{
+					ID:       "enemy1",
+					Position: 0,
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 40},
+					},
+				},
+				{
+					ID:       "enemy2",
+					Position: 1,
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 30},
+					},
+				},
+			},
+			RolledDice: map[string][]entity.RolledDie{
+				"enemy2": {{Faces: []entity.DieFace{{Type: entity.DieDamage, Value: 5}}, FaceIndex: 0}},
+			},
+		},
+	}
+
+	// enemy1's effects kill player1 (HP 10 → 0)
+	msg := model.UnitDiceEffectsApplied{
+		SourceUnitID: "enemy1",
+		Results: []model.DiceEffectResult{
+			{
+				TargetUnitID: "player1",
+				Effect:       entity.DieDamage,
+				Value:        10,
+				NewHealth:    0,
+				NewShields:   0,
+			},
+		},
+		Timestamp: 1000,
+	}
+
+	newM, cmd := m.Update(msg)
+
+	// enemy2's target entry should have been pruned (dead destination)
+	if _, ok := newM.Combat.EnemyTargets["enemy2"]; ok {
+		t.Error("enemy2→player1 should be pruned after player1 dies")
+	}
+
+	// The chained cmd should be for enemy2 but with no targets left,
+	// so execution should transition to DicePhaseRoundEnd.
+	if cmd != nil {
+		t.Errorf("expected nil cmd (all remaining targets pruned), got non-nil")
+	}
+	if newM.Combat.DicePhase != model.DicePhaseRoundEnd {
+		t.Errorf("DicePhase = %v, want DicePhaseRoundEnd", newM.Combat.DicePhase)
+	}
+}
+
+func TestEnemyExecution_SkipsDeadDefenseTarget(t *testing.T) {
+	// Bug 2 (defense variant): enemy_cmd has heal targeting dead enemy1.
+	// Pruning should remove the entry.
+	m := Model{
+		Version: 1,
+		Combat: model.CombatModel{
+			Phase:     model.CombatActive,
+			DicePhase: model.DicePhaseExecution,
+			EnemyTargets:        map[string]string{},
+			EnemyDefenseTargets: map[string]string{"enemy_cmd": "enemy1"},
+			PlayerUnits: []entity.Unit{
+				{
+					ID:       "player_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+			},
+			EnemyUnits: []entity.Unit{
+				{
+					ID:       "enemy_cmd",
+					Position: -1,
+					Tags:     []core.Tag{"command"},
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 100},
+					},
+				},
+				{
+					ID:       "enemy1",
+					Position: 0,
+					Attributes: map[string]core.Attribute{
+						"health": {Base: 0}, // Dead!
+					},
+				},
+			},
+		},
+	}
+
+	// Process a no-op UnitDiceEffectsApplied to trigger pruning
+	msg := model.UnitDiceEffectsApplied{
+		SourceUnitID: "enemy_cmd",
+		Results:      nil,
+		Timestamp:    1000,
+	}
+
+	newM, _ := m.Update(msg)
+
+	if _, ok := newM.Combat.EnemyDefenseTargets["enemy_cmd"]; ok {
+		t.Error("defense target pointing to dead enemy1 should be pruned")
+	}
+}
