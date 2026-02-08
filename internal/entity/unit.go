@@ -7,9 +7,6 @@ type Unit struct {
 	TemplateID string
 	Tags       []core.Tag
 	Attributes map[string]core.Attribute
-	Parts      map[string]Part // VALUE type
-	Triggers   []core.Trigger
-	Abilities  []core.Ability
 	Dice       []Die
 	Pilot      Pilot
 	HasPilot   bool

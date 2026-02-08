@@ -39,10 +39,6 @@ func New(seed int64) *App {
 	if err := template.LoadUnitsFromDir("data/templates/units", reg); err != nil {
 		log.Fatalf("load unit templates: %v", err)
 	}
-	if err := template.LoadItemsFromDir("data/templates/items", reg); err != nil {
-		log.Fatalf("load item templates: %v", err)
-	}
-
 	a := &App{
 		model: tea.Model{
 			Version:     1,
@@ -570,34 +566,6 @@ func (a *App) buildInitialRoster() []entity.Unit {
 	}
 	player2.Position = 2
 
-	// Equip weapons
-	laser1, err := template.InstantiateItem(a.registry, "medium_laser", "p1_laser_r")
-	if err != nil {
-		log.Fatalf("instantiate p1_laser_r: %v", err)
-	}
-	player1, err = template.EquipItem(player1, "right_arm", 0, laser1)
-	if err != nil {
-		log.Fatalf("equip player_1 right_arm: %v", err)
-	}
-
-	laser2, err := template.InstantiateItem(a.registry, "medium_laser", "p1_laser_l")
-	if err != nil {
-		log.Fatalf("instantiate p1_laser_l: %v", err)
-	}
-	player1, err = template.EquipItem(player1, "left_arm", 0, laser2)
-	if err != nil {
-		log.Fatalf("equip player_1 left_arm: %v", err)
-	}
-
-	laser3, err := template.InstantiateItem(a.registry, "medium_laser", "p2_laser")
-	if err != nil {
-		log.Fatalf("instantiate p2_laser: %v", err)
-	}
-	player2, err = template.EquipItem(player2, "right_arm", 0, laser3)
-	if err != nil {
-		log.Fatalf("equip player_2 right_arm: %v", err)
-	}
-
 	return []entity.Unit{playerCmd, player1, player2}
 }
 
@@ -624,25 +592,6 @@ func (a *App) buildCombatFromRoster() model.CombatModel {
 		log.Fatalf("instantiate enemy_2: %v", err)
 	}
 	enemy2.Position = 1
-
-	// Equip enemy weapons
-	eLaser1, err := template.InstantiateItem(a.registry, "medium_laser", "e1_laser")
-	if err != nil {
-		log.Fatalf("instantiate e1_laser: %v", err)
-	}
-	enemy1, err = template.EquipItem(enemy1, "right_arm", 0, eLaser1)
-	if err != nil {
-		log.Fatalf("equip enemy_1: %v", err)
-	}
-
-	eLaser2, err := template.InstantiateItem(a.registry, "medium_laser", "e2_laser")
-	if err != nil {
-		log.Fatalf("instantiate e2_laser: %v", err)
-	}
-	enemy2, err = template.EquipItem(enemy2, "right_arm", 0, eLaser2)
-	if err != nil {
-		log.Fatalf("equip enemy_2: %v", err)
-	}
 
 	return model.CombatModel{
 		Phase:       model.CombatActive,

@@ -8,7 +8,6 @@ import (
 	"wulfaz/internal/core"
 	"wulfaz/internal/entity"
 	"wulfaz/internal/model"
-	"wulfaz/internal/resolve"
 )
 
 type Model struct {
@@ -64,12 +63,6 @@ func (m Model) Update(msg model.Msg) (Model, model.Cmd) {
 		combat.Phase = model.CombatActive
 		m.Combat = combat
 		return m, nil
-
-	case model.TriggersCollected:
-		return m.handleTriggersCollected(msg)
-
-	case model.EffectsResolved:
-		return m.handleEffectsResolved(msg)
 
 	case model.RoundStarted:
 		return m.handleRoundStarted(msg)
@@ -133,67 +126,6 @@ func (m Model) Update(msg model.Msg) (Model, model.Cmd) {
 	panic(fmt.Sprintf("tea.Update: unhandled Msg type %T", msg))
 }
 
-// handleTriggersCollected delegates effect execution to resolve package
-func (m Model) handleTriggersCollected(msg model.TriggersCollected) (Model, model.Cmd) {
-	if msg.Depth >= core.MaxCascadeDepth {
-		combat := m.Combat
-		combat.Log = appendLogEntry(combat.Log, "cascade depth limit reached")
-		m.Combat = combat
-		return m.applyCombatEnd()
-	}
-
-	if len(msg.Triggers) == 0 {
-		return m.applyCombatEnd()
-	}
-
-	unitMap := buildUnitMap(m.Combat)
-	playerIDs := buildPlayerUnitIDs(m.Combat)
-
-	return m, resolve.ResolveEffects(msg.Triggers, unitMap, playerIDs, msg.Rolls, msg.Depth)
-}
-
-// handleEffectsResolved applies modifications and dispatches follow-up events
-func (m Model) handleEffectsResolved(msg model.EffectsResolved) (Model, model.Cmd) {
-	combat := m.Combat
-
-	// Add log entries (bounded for safety)
-	combat.Log = appendLogEntries(combat.Log, msg.LogEntries)
-
-	// Copy unit slices before modification (TEA immutability)
-	if len(msg.ModifiedUnits) > 0 {
-		combat.PlayerUnits = slices.Clone(combat.PlayerUnits)
-		combat.EnemyUnits = slices.Clone(combat.EnemyUnits)
-
-		// Apply modified units to combat model
-		for unitID, mods := range msg.ModifiedUnits {
-			// Check player units
-			for i, unit := range combat.PlayerUnits {
-				if unit.ID == unitID {
-					combat.PlayerUnits[i] = applyModifications(unit, mods)
-					break
-				}
-			}
-			// Check enemy units
-			for i, unit := range combat.EnemyUnits {
-				if unit.ID == unitID {
-					combat.EnemyUnits[i] = applyModifications(unit, mods)
-					break
-				}
-			}
-		}
-	}
-
-	m.Combat = combat
-
-	// Check for follow-up events
-	if len(msg.FollowUpEvents) == 0 {
-		return m.applyCombatEnd()
-	}
-
-	allUnits := getAllUnits(m.Combat)
-	return m, resolve.CollectFollowUpTriggers(msg.FollowUpEvents, allUnits, msg.Depth)
-}
-
 // checkCombatEnd returns the victor if combat has ended, or VictorNone if ongoing.
 // Combat ends when a command unit dies.
 func (m Model) checkCombatEnd() model.Victor {
@@ -255,25 +187,6 @@ func getAllUnits(combat model.CombatModel) []entity.Unit {
 	all = append(all, combat.PlayerUnits...)
 	all = append(all, combat.EnemyUnits...)
 	return all
-}
-
-func buildUnitMap(combat model.CombatModel) map[string]entity.Unit {
-	m := make(map[string]entity.Unit)
-	for _, u := range combat.PlayerUnits {
-		m[u.ID] = u
-	}
-	for _, u := range combat.EnemyUnits {
-		m[u.ID] = u
-	}
-	return m
-}
-
-func buildPlayerUnitIDs(combat model.CombatModel) map[string]bool {
-	ids := make(map[string]bool)
-	for _, u := range combat.PlayerUnits {
-		ids[u.ID] = true
-	}
-	return ids
 }
 
 // appendLogEntry adds an entry, pruning oldest if over MaxLogEntries.
@@ -375,37 +288,6 @@ func pruneDeadTargets(targets map[string]string, sources, dests []entity.Unit) m
 func syncRosterFromCombat(combatUnits []entity.Unit) []entity.Unit {
 	alive := removeDeadUnits(combatUnits)
 	return DeepCopyUnits(alive)
-}
-
-// applyModifications applies serialized modifications to a unit
-func applyModifications(unit entity.Unit, mods model.ModifiedUnit) entity.Unit {
-	// Copy attributes map
-	newAttrs := maps.Clone(unit.Attributes)
-
-	// Apply attribute modifications
-	for name, attrVal := range mods.Attributes {
-		newAttrs[name] = core.Attribute{
-			Name: name,
-			Base: attrVal.Base,
-			Min:  attrVal.Min,
-			Max:  attrVal.Max,
-		}
-	}
-
-	// Return new unit with updated attributes
-	return entity.Unit{
-		ID:         unit.ID,
-		TemplateID: unit.TemplateID,
-		Tags:       unit.Tags,
-		Attributes: newAttrs,
-		Parts:      unit.Parts,
-		Triggers:   unit.Triggers,
-		Abilities:  unit.Abilities,
-		Dice:       unit.Dice,
-		Pilot:      unit.Pilot,
-		HasPilot:   unit.HasPilot,
-		Position:   unit.Position,
-	}
 }
 
 // ===== Dice Phase Helpers (Wave 2) =====

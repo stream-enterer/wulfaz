@@ -6,15 +6,13 @@ Mech autobattler roguelike in Go using TEA (The Elm Architecture).
 
 ```
 Layer 4 (top):    tea
-Layer 3:          model   resolve
-Layer 2:          effect  template
-Layer 1:          event
+Layer 3:          model
+Layer 2:          template
 Layer 0 (bottom): entity
 Foundation:       core
 ```
 
 A package may only import from strictly lower layers or `core`.
-Permitted same-layer edge: `resolve → model`.
 `app` and `ui` sit above all layers and are unconstrained.
 New `internal/` packages must be assigned a layer here before use.
 Templates in `data/templates/` as KDL 1.0 *NOT* 2.0.

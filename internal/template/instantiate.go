@@ -17,15 +17,3 @@ func InstantiateUnit(reg *Registry, templateID, instanceID string) (entity.Unit,
 	unit.TemplateID = templateID
 	return unit, nil
 }
-
-// InstantiateItem creates an item instance from a registered template.
-// Returns error if template not found.
-func InstantiateItem(reg *Registry, templateID, instanceID string) (entity.Item, error) {
-	tmpl, ok := reg.GetItem(templateID)
-	if !ok {
-		return entity.Item{}, fmt.Errorf("item template %q not found", templateID)
-	}
-	item := entity.CopyItem(tmpl, instanceID)
-	item.TemplateID = templateID
-	return item, nil
-}
