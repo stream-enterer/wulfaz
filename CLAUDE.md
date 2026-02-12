@@ -166,21 +166,29 @@ world.tiles.set_temperature(x, y, temp)
 Systems that read/write tile data use these methods. Do not index the
 Vec arrays directly.
 
-## Data Files (TOML)
+## Data Files (KDL)
 
-Content is defined in `data/*.toml`. The engine does not hardcode entity types.
+Content is defined in `data/*.kdl`. The engine does not hardcode entity types.
+Parsed with the `kdl` crate (https://github.com/kdl-org/kdl-rs).
 
-```toml
-[[creature]]
-name = "Goblin"
-icon = "g"
-max_hunger = 100
-aggression = 0.8
-speed = 2
+```kdl
+creature "Goblin" {
+    icon "g"
+    max_hunger 100
+    aggression 0.8
+    speed 2
+}
+
+creature "Troll" {
+    icon "T"
+    max_hunger 200
+    aggression 0.6
+    speed 1
+}
 ```
 
-To add a new creature/item type: add an entry to the relevant TOML file.
-No code changes needed. `loading.rs` maps TOML entries to spawned entities.
+To add a new creature/item type: add a node to the relevant KDL file.
+No code changes needed. `loading.rs` maps KDL nodes to spawned entities.
 
 ## Code Rules
 
@@ -241,16 +249,16 @@ dependencies from source code.
 CLAUDE.md
 Cargo.toml
 data/
-  creatures.toml         # creature definitions
-  items.toml             # item definitions
-  terrain.toml           # terrain definitions
+  creatures.kdl          # creature definitions
+  items.kdl              # item definitions
+  terrain.kdl            # terrain definitions
 src/
   main.rs                # phased main loop
   world.rs               # World struct, spawn, despawn, validate
   events.rs              # Event enum + EventLog ring buffer
   components.rs          # property structs (Position, Hunger, etc.)
   tile_map.rs            # TileMap with flat Vec arrays
-  loading.rs             # TOML parsing, entity spawning
+  loading.rs             # KDL parsing, entity spawning
   render.rs              # display output
   rng.rs                 # deterministic seeded RNG wrapper
   systems/
