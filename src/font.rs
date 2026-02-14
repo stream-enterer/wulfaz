@@ -289,10 +289,16 @@ impl FontRenderer {
         let mut vertices: Vec<TextVertex> = Vec::new();
         let cell_w = self.metrics.cell_width;
         let mut pen_x = x.floor();
-        let pen_y = (y + self.metrics.ascender).floor();
+        let mut pen_y = (y + self.metrics.ascender).floor();
+        let line_height = self.metrics.line_height;
         let question = self.glyphs.get(&(b'?' as u32)).copied();
 
         for ch in text.chars() {
+            if ch == '\n' {
+                pen_x = x.floor();
+                pen_y += line_height;
+                continue;
+            }
             let cp = ch as u32;
             let glyph = match self.glyphs.get(&cp) {
                 Some(g) => *g,
