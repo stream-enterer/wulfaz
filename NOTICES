@@ -1,0 +1,70 @@
+THIRD-PARTY NOTICES
+
+This project includes or depends on the following third-party software:
+
+--------------------------------------------------------------------------------
+
+freetype-rs
+License: MIT
+https://github.com/nicokoch/freetype-rs
+
+--------------------------------------------------------------------------------
+
+wgpu
+License: MIT OR Apache-2.0
+https://github.com/gfx-rs/wgpu
+
+--------------------------------------------------------------------------------
+
+winit
+License: Apache-2.0
+https://github.com/rust-windowing/winit
+
+--------------------------------------------------------------------------------
+
+bytemuck
+License: Zlib OR Apache-2.0 OR MIT
+https://github.com/Lokathor/bytemuck
+
+--------------------------------------------------------------------------------
+
+pollster
+License: MIT OR Apache-2.0
+https://github.com/zesterer/pollster
+
+--------------------------------------------------------------------------------
+
+env_logger
+License: MIT OR Apache-2.0
+https://github.com/rust-cli/env_logger
+
+--------------------------------------------------------------------------------
+
+log
+License: MIT OR Apache-2.0
+https://github.com/rust-lang/log
+
+--------------------------------------------------------------------------------
+
+FreeType (system library, linked via freetype-rs)
+License: FreeType License (FTL) OR GPL-2.0-or-later
+https://freetype.org
+
+--------------------------------------------------------------------------------
+
+Fontconfig (system library, linked via FFI)
+License: MIT
+https://www.freedesktop.org/wiki/Software/fontconfig/
+
+--------------------------------------------------------------------------------
+
+kitty (reference implementation)
+License: GPL-3.0
+https://github.com/kovidgoyal/kitty
+
+The font rendering pipeline in this project (src/font.rs, src/text.wgsl) was
+independently implemented using kitty's source code as a reference for
+technique and correctness. No kitty source code was copied. Specifically,
+kitty's approach to FreeType hinting flag selection, glyph atlas construction,
+monospace cell grid computation, and sRGB-aware contrast adjustment informed
+our implementation.
