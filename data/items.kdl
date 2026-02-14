@@ -1,0 +1,23 @@
+item "Meat" {
+    icon "%"
+    nutrition 40
+    weight 2
+}
+
+item "Berry" {
+    icon "*"
+    nutrition 15
+    weight 1
+}
+
+item "Bone" {
+    icon "/"
+    nutrition 0
+    weight 1
+}
+
+item "Stone" {
+    icon "o"
+    nutrition 0
+    weight 3
+}

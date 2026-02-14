@@ -1,0 +1,27 @@
+creature "Goblin" {
+    icon "g"
+    max_hunger 100
+    aggression 0.8
+    speed 2
+}
+
+creature "Troll" {
+    icon "T"
+    max_hunger 200
+    aggression 0.6
+    speed 1
+}
+
+creature "Wolf" {
+    icon "w"
+    max_hunger 80
+    aggression 0.7
+    speed 3
+}
+
+creature "Deer" {
+    icon "d"
+    max_hunger 60
+    aggression 0.1
+    speed 4
+}

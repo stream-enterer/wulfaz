@@ -6,7 +6,23 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
+mod components;
+mod events;
 mod font;
+mod loading;
+mod render;
+mod rng;
+mod systems;
+mod tile_map;
+mod world;
+
+use components::Tick;
+use systems::combat::run_combat;
+use systems::death::run_death;
+use systems::eating::run_eating;
+use systems::hunger::run_hunger;
+use systems::wander::run_wander;
+use world::World;
 
 /// Convert sRGB component (0-1) to linear for use as wgpu clear color.
 fn srgb_to_linear(s: f64) -> f64 {
@@ -156,6 +172,7 @@ impl GpuState {
 struct App {
     gpu: Option<GpuState>,
     font: Option<font::FontRenderer>,
+    world: World,
 }
 
 impl ApplicationHandler for App {
@@ -208,11 +225,42 @@ impl ApplicationHandler for App {
                 ));
             }
             WindowEvent::RedrawRequested => {
+                // === Simulation Tick ===
+                let tick = self.world.tick;
+
+                // === Phase 1: Environment ===
+                // (no environment systems yet)
+
+                // === Phase 2: Needs ===
+                run_hunger(&mut self.world, tick);
+
+                // === Phase 3: Decisions ===
+                // (no decision systems yet)
+
+                // === Phase 4: Actions ===
+                run_wander(&mut self.world, tick);
+                run_eating(&mut self.world, tick);
+                run_combat(&mut self.world, tick);
+
+                // === Phase 5: Consequences ===
+                // run_death() is ALWAYS last in Phase 5
+                run_death(&mut self.world, tick);
+
+                // === Debug Validation ===
+                #[cfg(debug_assertions)]
+                world::validate_world(&self.world);
+
+                self.world.tick = Tick(tick.0 + 1);
+
+                // === Render ===
                 if let Some(font) = self.font.as_mut() {
+                    let display_text = render::render_world_to_string(&self.world);
+                    let status = render::render_status(&self.world);
+                    let full_text = format!("{}\n{}", status, display_text);
                     let vertex_count = font.prepare(
                         &gpu.queue,
                         &gpu.device,
-                        "Hello, Wulfaz!",
+                        &full_text,
                         10.0,
                         10.0,
                         gpu.config.width,
@@ -232,10 +280,18 @@ impl ApplicationHandler for App {
 fn main() {
     env_logger::init();
 
+    let mut world = World::new_with_seed(42);
+
+    // Load data from KDL files
+    loading::load_terrain(&mut world, "data/terrain.kdl");
+    loading::load_creatures(&mut world, "data/creatures.kdl");
+    loading::load_items(&mut world, "data/items.kdl");
+
     let event_loop = EventLoop::new().unwrap();
     let mut app = App {
         gpu: None,
         font: None,
+        world,
     };
     event_loop.run_app(&mut app).unwrap();
 }
