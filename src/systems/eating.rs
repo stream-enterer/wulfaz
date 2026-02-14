@@ -4,7 +4,9 @@ use crate::world::World;
 
 pub fn run_eating(world: &mut World, tick: Tick) {
     // Collect hungry entities and their positions, sorted for determinism
-    let mut hungry: Vec<(Entity, i32, i32, f32)> = world.hungers.iter()
+    let mut hungry: Vec<(Entity, i32, i32, f32)> = world
+        .hungers
+        .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
         .filter(|&(_, h)| h.current > h.max * 0.5) // hungry enough to eat
         .filter_map(|(&e, _)| {
@@ -15,7 +17,9 @@ pub fn run_eating(world: &mut World, tick: Tick) {
     hungry.sort_by_key(|(e, _, _, _)| e.0);
 
     // Collect food items sorted for determinism
-    let mut food_items: Vec<(Entity, f32, i32, i32)> = world.nutritions.iter()
+    let mut food_items: Vec<(Entity, f32, i32, i32)> = world
+        .nutritions
+        .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
         .filter_map(|(&e, n)| {
             let pos = world.positions.get(&e)?;
@@ -30,7 +34,9 @@ pub fn run_eating(world: &mut World, tick: Tick) {
 
     for (eater, ex, ey, _) in &hungry {
         for &(food_entity, nutrition_value, fx, fy) in &food_items {
-            if consumed.contains(&food_entity) { continue; }
+            if consumed.contains(&food_entity) {
+                continue;
+            }
             if fx == *ex && fy == *ey && nutrition_value > 0.0 {
                 eat_actions.push((*eater, food_entity, nutrition_value));
                 consumed.push(food_entity);
@@ -46,7 +52,12 @@ pub fn run_eating(world: &mut World, tick: Tick) {
         }
 
         // Push event BEFORE pending_deaths (per ADD-003 rule for lethal events)
-        world.events.push(Event::Ate { entity: eater, food, tick });
+        world.events.push(Event::Ate {
+            entity: eater,
+            food,
+            tick,
+        });
+        world.events.push(Event::Died { entity: food, tick });
         world.pending_deaths.push(food);
     }
 }
@@ -62,7 +73,13 @@ mod tests {
         let mut world = World::new_with_seed(42);
         let eater = world.spawn();
         world.positions.insert(eater, Position { x: 5, y: 5 });
-        world.hungers.insert(eater, Hunger { current: 80.0, max: 100.0 });
+        world.hungers.insert(
+            eater,
+            Hunger {
+                current: 80.0,
+                max: 100.0,
+            },
+        );
 
         let food = world.spawn();
         world.positions.insert(food, Position { x: 5, y: 5 }); // same position
@@ -79,7 +96,13 @@ mod tests {
         let mut world = World::new_with_seed(42);
         let eater = world.spawn();
         world.positions.insert(eater, Position { x: 5, y: 5 });
-        world.hungers.insert(eater, Hunger { current: 30.0, max: 100.0 }); // not hungry enough
+        world.hungers.insert(
+            eater,
+            Hunger {
+                current: 30.0,
+                max: 100.0,
+            },
+        ); // not hungry enough
 
         let food = world.spawn();
         world.positions.insert(food, Position { x: 5, y: 5 });
@@ -96,7 +119,13 @@ mod tests {
         let mut world = World::new_with_seed(42);
         let eater = world.spawn();
         world.positions.insert(eater, Position { x: 5, y: 5 });
-        world.hungers.insert(eater, Hunger { current: 80.0, max: 100.0 });
+        world.hungers.insert(
+            eater,
+            Hunger {
+                current: 80.0,
+                max: 100.0,
+            },
+        );
         world.pending_deaths.push(eater);
 
         let food = world.spawn();
@@ -113,7 +142,13 @@ mod tests {
         let mut world = World::new_with_seed(42);
         let eater = world.spawn();
         world.positions.insert(eater, Position { x: 5, y: 5 });
-        world.hungers.insert(eater, Hunger { current: 80.0, max: 100.0 });
+        world.hungers.insert(
+            eater,
+            Hunger {
+                current: 80.0,
+                max: 100.0,
+            },
+        );
 
         let food = world.spawn();
         world.positions.insert(food, Position { x: 10, y: 10 }); // different position

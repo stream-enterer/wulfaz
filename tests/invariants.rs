@@ -16,28 +16,48 @@
 //! ```
 
 use wulfaz::components::*;
+use wulfaz::systems::combat::run_combat;
 use wulfaz::systems::death::run_death;
+use wulfaz::systems::eating::run_eating;
 use wulfaz::systems::hunger::run_hunger;
 use wulfaz::systems::wander::run_wander;
-use wulfaz::systems::eating::run_eating;
-use wulfaz::systems::combat::run_combat;
-use wulfaz::world::{validate_world, World};
+use wulfaz::world::{World, validate_world};
 
 /// Spawn a creature with a full set of property table entries.
 /// Placed at the given grid position.
 fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
     let e = world.spawn();
     world.positions.insert(e, Position { x, y });
-    world.hungers.insert(e, Hunger { current: 20.0, max: 100.0 });
-    world.healths.insert(e, Health { current: 100.0, max: 100.0 });
-    world.combat_stats.insert(e, CombatStats {
-        attack: 10.0,
-        defense: 5.0,
-        aggression: 0.6,
-    });
+    world.hungers.insert(
+        e,
+        Hunger {
+            current: 20.0,
+            max: 100.0,
+        },
+    );
+    world.healths.insert(
+        e,
+        Health {
+            current: 100.0,
+            max: 100.0,
+        },
+    );
+    world.combat_stats.insert(
+        e,
+        CombatStats {
+            attack: 10.0,
+            defense: 5.0,
+            aggression: 0.6,
+        },
+    );
     world.speeds.insert(e, Speed { value: 1 });
     world.icons.insert(e, Icon { ch: 'c' });
-    world.names.insert(e, Name { value: "Creature".to_string() });
+    world.names.insert(
+        e,
+        Name {
+            value: "Creature".to_string(),
+        },
+    );
     e
 }
 
@@ -47,7 +67,12 @@ fn spawn_food(world: &mut World, x: i32, y: i32) -> Entity {
     world.positions.insert(e, Position { x, y });
     world.nutritions.insert(e, Nutrition { value: 30.0 });
     world.icons.insert(e, Icon { ch: 'f' });
-    world.names.insert(e, Name { value: "Food".to_string() });
+    world.names.insert(
+        e,
+        Name {
+            value: "Food".to_string(),
+        },
+    );
     e
 }
 
@@ -115,7 +140,9 @@ fn entity_count_conservation() {
     run_n_ticks(&mut world, 50);
 
     // Count died events
-    let died_count = world.events.iter()
+    let died_count = world
+        .events
+        .iter()
         .filter(|e| matches!(e, wulfaz::events::Event::Died { .. }))
         .count();
 
@@ -221,9 +248,7 @@ fn no_zombies_with_dense_population() {
 fn dead_entities_removed_from_all_tables() {
     let mut world = World::new_with_seed(42);
 
-    let entities: Vec<Entity> = (0..10)
-        .map(|i| spawn_creature(&mut world, i, 0))
-        .collect();
+    let entities: Vec<Entity> = (0..10).map(|i| spawn_creature(&mut world, i, 0)).collect();
 
     // Kill half of them manually
     for &e in &entities[..5] {
@@ -234,19 +259,43 @@ fn dead_entities_removed_from_all_tables() {
 
     for &e in &entities[..5] {
         assert!(!world.alive.contains(&e), "entity should not be alive");
-        assert!(!world.positions.contains_key(&e), "entity should not be in positions");
-        assert!(!world.hungers.contains_key(&e), "entity should not be in hungers");
-        assert!(!world.healths.contains_key(&e), "entity should not be in healths");
-        assert!(!world.combat_stats.contains_key(&e), "entity should not be in combat_stats");
-        assert!(!world.speeds.contains_key(&e), "entity should not be in speeds");
-        assert!(!world.icons.contains_key(&e), "entity should not be in icons");
-        assert!(!world.names.contains_key(&e), "entity should not be in names");
+        assert!(
+            !world.positions.contains_key(&e),
+            "entity should not be in positions"
+        );
+        assert!(
+            !world.hungers.contains_key(&e),
+            "entity should not be in hungers"
+        );
+        assert!(
+            !world.healths.contains_key(&e),
+            "entity should not be in healths"
+        );
+        assert!(
+            !world.combat_stats.contains_key(&e),
+            "entity should not be in combat_stats"
+        );
+        assert!(
+            !world.speeds.contains_key(&e),
+            "entity should not be in speeds"
+        );
+        assert!(
+            !world.icons.contains_key(&e),
+            "entity should not be in icons"
+        );
+        assert!(
+            !world.names.contains_key(&e),
+            "entity should not be in names"
+        );
     }
 
     // The other half should still be alive
     for &e in &entities[5..] {
         assert!(world.alive.contains(&e), "entity should still be alive");
-        assert!(world.positions.contains_key(&e), "entity should still be in positions");
+        assert!(
+            world.positions.contains_key(&e),
+            "entity should still be in positions"
+        );
     }
 
     validate_world(&world);

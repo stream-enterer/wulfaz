@@ -17,27 +17,47 @@
 //! ```
 
 use wulfaz::components::*;
+use wulfaz::systems::combat::run_combat;
 use wulfaz::systems::death::run_death;
+use wulfaz::systems::eating::run_eating;
 use wulfaz::systems::hunger::run_hunger;
 use wulfaz::systems::wander::run_wander;
-use wulfaz::systems::eating::run_eating;
-use wulfaz::systems::combat::run_combat;
 use wulfaz::world::World;
 
 /// Spawn a creature with full components at the given position.
 fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
     let e = world.spawn();
     world.positions.insert(e, Position { x, y });
-    world.hungers.insert(e, Hunger { current: 20.0, max: 100.0 });
-    world.healths.insert(e, Health { current: 100.0, max: 100.0 });
-    world.combat_stats.insert(e, CombatStats {
-        attack: 10.0,
-        defense: 5.0,
-        aggression: 0.6,
-    });
+    world.hungers.insert(
+        e,
+        Hunger {
+            current: 20.0,
+            max: 100.0,
+        },
+    );
+    world.healths.insert(
+        e,
+        Health {
+            current: 100.0,
+            max: 100.0,
+        },
+    );
+    world.combat_stats.insert(
+        e,
+        CombatStats {
+            attack: 10.0,
+            defense: 5.0,
+            aggression: 0.6,
+        },
+    );
     world.speeds.insert(e, Speed { value: 1 });
     world.icons.insert(e, Icon { ch: 'c' });
-    world.names.insert(e, Name { value: "Creature".to_string() });
+    world.names.insert(
+        e,
+        Name {
+            value: "Creature".to_string(),
+        },
+    );
     e
 }
 
@@ -47,7 +67,12 @@ fn spawn_food(world: &mut World, x: i32, y: i32) -> Entity {
     world.positions.insert(e, Position { x, y });
     world.nutritions.insert(e, Nutrition { value: 30.0 });
     world.icons.insert(e, Icon { ch: 'f' });
-    world.names.insert(e, Name { value: "Food".to_string() });
+    world.names.insert(
+        e,
+        Name {
+            value: "Food".to_string(),
+        },
+    );
     e
 }
 
@@ -109,17 +134,23 @@ impl WorldSnapshot {
         let mut alive_ids: Vec<u64> = world.alive.iter().map(|e| e.0).collect();
         alive_ids.sort();
 
-        let mut positions: Vec<(u64, i32, i32)> = world.positions.iter()
+        let mut positions: Vec<(u64, i32, i32)> = world
+            .positions
+            .iter()
             .map(|(&e, p)| (e.0, p.x, p.y))
             .collect();
         positions.sort_by_key(|&(id, _, _)| id);
 
-        let mut hungers: Vec<(u64, u32)> = world.hungers.iter()
+        let mut hungers: Vec<(u64, u32)> = world
+            .hungers
+            .iter()
             .map(|(&e, h)| (e.0, h.current.to_bits()))
             .collect();
         hungers.sort_by_key(|&(id, _)| id);
 
-        let mut healths: Vec<(u64, u32)> = world.healths.iter()
+        let mut healths: Vec<(u64, u32)> = world
+            .healths
+            .iter()
             .map(|(&e, h)| (e.0, h.current.to_bits()))
             .collect();
         healths.sort_by_key(|&(id, _)| id);
@@ -177,7 +208,10 @@ fn same_seed_same_result() {
     setup_scenario(&mut world2);
     let snap2 = run_and_snapshot(&mut world2, tick_count);
 
-    assert_eq!(snap1, snap2, "two runs with seed 42 diverged after {tick_count} ticks");
+    assert_eq!(
+        snap1, snap2,
+        "two runs with seed 42 diverged after {tick_count} ticks"
+    );
 }
 
 // ---------------------------------------------------------------------------

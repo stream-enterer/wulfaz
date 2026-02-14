@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::c_int;
 
-use freetype::face::LoadFlag;
 use freetype::Library;
+use freetype::face::LoadFlag;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -249,6 +249,7 @@ impl FontRenderer {
         self.metrics
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         &mut self,
         queue: &wgpu::Queue,
@@ -316,13 +317,31 @@ impl FontRenderer {
             let y1 = y0 + glyph.height as f32;
 
             // Two triangles per glyph quad
-            vertices.push(TextVertex { position: [x0, y0], uv: [glyph.u0, glyph.v0] });
-            vertices.push(TextVertex { position: [x1, y0], uv: [glyph.u1, glyph.v0] });
-            vertices.push(TextVertex { position: [x0, y1], uv: [glyph.u0, glyph.v1] });
+            vertices.push(TextVertex {
+                position: [x0, y0],
+                uv: [glyph.u0, glyph.v0],
+            });
+            vertices.push(TextVertex {
+                position: [x1, y0],
+                uv: [glyph.u1, glyph.v0],
+            });
+            vertices.push(TextVertex {
+                position: [x0, y1],
+                uv: [glyph.u0, glyph.v1],
+            });
 
-            vertices.push(TextVertex { position: [x1, y0], uv: [glyph.u1, glyph.v0] });
-            vertices.push(TextVertex { position: [x1, y1], uv: [glyph.u1, glyph.v1] });
-            vertices.push(TextVertex { position: [x0, y1], uv: [glyph.u0, glyph.v1] });
+            vertices.push(TextVertex {
+                position: [x1, y0],
+                uv: [glyph.u1, glyph.v0],
+            });
+            vertices.push(TextVertex {
+                position: [x1, y1],
+                uv: [glyph.u1, glyph.v1],
+            });
+            vertices.push(TextVertex {
+                position: [x0, y1],
+                uv: [glyph.u0, glyph.v1],
+            });
 
             pen_x += cell_w;
         }
@@ -343,11 +362,7 @@ impl FontRenderer {
             });
         }
 
-        queue.write_buffer(
-            &self.vertex_buffer,
-            0,
-            bytemuck::cast_slice(&vertices),
-        );
+        queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
 
         vertex_count
     }

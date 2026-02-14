@@ -21,7 +21,13 @@ mod tests {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
         world.positions.insert(e, Position { x: 5, y: 5 });
-        world.hungers.insert(e, Hunger { current: 50.0, max: 100.0 });
+        world.hungers.insert(
+            e,
+            Hunger {
+                current: 50.0,
+                max: 100.0,
+            },
+        );
 
         world.pending_deaths.push(e);
         run_death(&mut world, Tick(0));

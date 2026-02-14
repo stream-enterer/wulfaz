@@ -1,6 +1,7 @@
-use rand::RngExt;
 use crate::components::{Entity, Position, Tick};
+use crate::events::Event;
 use crate::world::World;
+use rand::RngExt;
 
 /// Phase 4 (Actions): Wander/movement system.
 ///
@@ -8,10 +9,10 @@ use crate::world::World;
 /// cardinal direction each tick. Entities in pending_deaths are skipped.
 /// Uses collect-then-apply mutation pattern.
 pub fn run_wander(world: &mut World, tick: Tick) {
-    let _ = tick; // available for future use
-
     // Collect entities that have both position and speed, sorted for determinism
-    let mut movers: Vec<Entity> = world.positions.keys()
+    let mut movers: Vec<Entity> = world
+        .positions
+        .keys()
         .filter(|e| world.speeds.contains_key(e))
         .filter(|e| !world.pending_deaths.contains(e))
         .copied()
@@ -19,17 +20,24 @@ pub fn run_wander(world: &mut World, tick: Tick) {
     movers.sort_by_key(|e| e.0);
 
     // Generate random moves
-    let moves: Vec<(Entity, Position)> = movers.into_iter()
+    let moves: Vec<(Entity, Position)> = movers
+        .into_iter()
         .filter_map(|e| {
             let pos = world.positions.get(&e)?;
             let direction = world.rng.random_range(0..4);
             let (dx, dy) = match direction {
-                0 => (0, -1),  // up
-                1 => (0, 1),   // down
-                2 => (-1, 0),  // left
-                _ => (1, 0),   // right
+                0 => (0, -1), // up
+                1 => (0, 1),  // down
+                2 => (-1, 0), // left
+                _ => (1, 0),  // right
             };
-            Some((e, Position { x: pos.x + dx, y: pos.y + dy }))
+            Some((
+                e,
+                Position {
+                    x: pos.x + dx,
+                    y: pos.y + dy,
+                },
+            ))
         })
         .collect();
 
@@ -37,6 +45,12 @@ pub fn run_wander(world: &mut World, tick: Tick) {
     for (e, new_pos) in moves {
         if let Some(pos) = world.positions.get_mut(&e) {
             *pos = new_pos;
+            world.events.push(Event::Moved {
+                entity: e,
+                x: new_pos.x,
+                y: new_pos.y,
+                tick,
+            });
         }
     }
 }

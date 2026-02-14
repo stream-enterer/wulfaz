@@ -88,9 +88,13 @@ pub fn load_creatures(world: &mut World, path: &str) {
         world.names.insert(e, Name { value: name });
         world.icons.insert(e, Icon { ch: icon_ch });
         world.positions.insert(e, Position { x, y });
-        world
-            .hungers
-            .insert(e, Hunger { current: 0.0, max: max_hunger });
+        world.hungers.insert(
+            e,
+            Hunger {
+                current: 0.0,
+                max: max_hunger,
+            },
+        );
         world.healths.insert(
             e,
             Health {
@@ -158,9 +162,7 @@ pub fn load_items(world: &mut World, path: &str) {
         world.names.insert(e, Name { value: name });
         world.icons.insert(e, Icon { ch: icon_ch });
         world.positions.insert(e, Position { x, y });
-        world
-            .nutritions
-            .insert(e, Nutrition { value: nutrition });
+        world.nutritions.insert(e, Nutrition { value: nutrition });
 
         world.events.push(Event::Spawned {
             entity: e,

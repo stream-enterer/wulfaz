@@ -1,5 +1,5 @@
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Create a deterministic StdRng from a u64 seed.
 /// This is the ONLY way to create an RNG in the simulation.

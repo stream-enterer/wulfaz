@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use crate::components::*;
 use crate::tile_map::Terrain;
 use crate::world::World;
 
@@ -88,16 +87,13 @@ pub fn render_world_to_string(world: &World) -> String {
 ///
 /// This function is READ-ONLY and does not modify world state.
 pub fn render_status(world: &World) -> String {
-    format!(
-        "Tick: {} | Entities: {}",
-        world.tick.0,
-        world.alive.len()
-    )
+    format!("Tick: {} | Entities: {}", world.tick.0, world.alive.len())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::components::*;
     use crate::tile_map::Terrain;
     use crate::world::World;
 

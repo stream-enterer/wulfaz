@@ -1,7 +1,7 @@
-use rand::RngExt;
 use crate::components::{Entity, Tick};
 use crate::events::Event;
 use crate::world::World;
+use rand::RngExt;
 
 /// Phase 4 (Actions): Combat resolution.
 ///
@@ -12,7 +12,9 @@ use crate::world::World;
 /// pushed and the defender is added to pending_deaths.
 pub fn run_combat(world: &mut World, tick: Tick) {
     // Collect combatants with position, health, and combat_stats, sorted for determinism
-    let mut combatants: Vec<(Entity, i32, i32, f32)> = world.combat_stats.iter()
+    let mut combatants: Vec<(Entity, i32, i32, f32)> = world
+        .combat_stats
+        .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
         .filter_map(|(&e, cs)| {
             let pos = world.positions.get(&e)?;
@@ -27,19 +29,32 @@ pub fn run_combat(world: &mut World, tick: Tick) {
 
     for i in 0..combatants.len() {
         let (attacker, ax, ay, aggression) = combatants[i];
-        if aggression <= 0.5 { continue; }
+        if aggression <= 0.5 {
+            continue;
+        }
 
         // RNG check: aggression is probability of attacking
         let roll: f32 = world.rng.random();
-        if roll > aggression { continue; }
+        if roll > aggression {
+            continue;
+        }
 
-        for j in 0..combatants.len() {
-            if i == j { continue; }
-            let (defender, dx, dy, _) = combatants[j];
+        for (j, &(defender, dx, dy, _)) in combatants.iter().enumerate() {
+            if i == j {
+                continue;
+            }
             if ax == dx && ay == dy {
                 // Calculate damage
-                let atk = world.combat_stats.get(&attacker).map(|cs| cs.attack).unwrap_or(0.0);
-                let def = world.combat_stats.get(&defender).map(|cs| cs.defense).unwrap_or(0.0);
+                let atk = world
+                    .combat_stats
+                    .get(&attacker)
+                    .map(|cs| cs.attack)
+                    .unwrap_or(0.0);
+                let def = world
+                    .combat_stats
+                    .get(&defender)
+                    .map(|cs| cs.defense)
+                    .unwrap_or(0.0);
                 let damage = (atk - def).max(1.0);
                 attacks.push((attacker, defender, damage));
                 break; // one attack per attacker per tick
@@ -61,7 +76,10 @@ pub fn run_combat(world: &mut World, tick: Tick) {
 
             if health.current <= 0.0 {
                 // Lethal event: push AFTER the decision, BEFORE pending_deaths
-                world.events.push(Event::Died { entity: defender, tick });
+                world.events.push(Event::Died {
+                    entity: defender,
+                    tick,
+                });
                 world.pending_deaths.push(defender);
             }
         }
@@ -80,13 +98,39 @@ mod tests {
 
         let attacker = world.spawn();
         world.positions.insert(attacker, Position { x: 5, y: 5 });
-        world.healths.insert(attacker, Health { current: 100.0, max: 100.0 });
-        world.combat_stats.insert(attacker, CombatStats { attack: 15.0, defense: 5.0, aggression: 1.0 });
+        world.healths.insert(
+            attacker,
+            Health {
+                current: 100.0,
+                max: 100.0,
+            },
+        );
+        world.combat_stats.insert(
+            attacker,
+            CombatStats {
+                attack: 15.0,
+                defense: 5.0,
+                aggression: 1.0,
+            },
+        );
 
         let defender = world.spawn();
         world.positions.insert(defender, Position { x: 5, y: 5 }); // same position
-        world.healths.insert(defender, Health { current: 100.0, max: 100.0 });
-        world.combat_stats.insert(defender, CombatStats { attack: 5.0, defense: 3.0, aggression: 0.0 });
+        world.healths.insert(
+            defender,
+            Health {
+                current: 100.0,
+                max: 100.0,
+            },
+        );
+        world.combat_stats.insert(
+            defender,
+            CombatStats {
+                attack: 5.0,
+                defense: 3.0,
+                aggression: 0.0,
+            },
+        );
 
         run_combat(&mut world, Tick(0));
 
@@ -100,13 +144,39 @@ mod tests {
 
         let attacker = world.spawn();
         world.positions.insert(attacker, Position { x: 5, y: 5 });
-        world.healths.insert(attacker, Health { current: 100.0, max: 100.0 });
-        world.combat_stats.insert(attacker, CombatStats { attack: 50.0, defense: 5.0, aggression: 1.0 });
+        world.healths.insert(
+            attacker,
+            Health {
+                current: 100.0,
+                max: 100.0,
+            },
+        );
+        world.combat_stats.insert(
+            attacker,
+            CombatStats {
+                attack: 50.0,
+                defense: 5.0,
+                aggression: 1.0,
+            },
+        );
 
         let defender = world.spawn();
         world.positions.insert(defender, Position { x: 5, y: 5 });
-        world.healths.insert(defender, Health { current: 5.0, max: 100.0 });
-        world.combat_stats.insert(defender, CombatStats { attack: 5.0, defense: 3.0, aggression: 0.0 });
+        world.healths.insert(
+            defender,
+            Health {
+                current: 5.0,
+                max: 100.0,
+            },
+        );
+        world.combat_stats.insert(
+            defender,
+            CombatStats {
+                attack: 5.0,
+                defense: 3.0,
+                aggression: 0.0,
+            },
+        );
 
         run_combat(&mut world, Tick(0));
 
@@ -119,14 +189,40 @@ mod tests {
 
         let attacker = world.spawn();
         world.positions.insert(attacker, Position { x: 5, y: 5 });
-        world.healths.insert(attacker, Health { current: 100.0, max: 100.0 });
-        world.combat_stats.insert(attacker, CombatStats { attack: 15.0, defense: 5.0, aggression: 1.0 });
+        world.healths.insert(
+            attacker,
+            Health {
+                current: 100.0,
+                max: 100.0,
+            },
+        );
+        world.combat_stats.insert(
+            attacker,
+            CombatStats {
+                attack: 15.0,
+                defense: 5.0,
+                aggression: 1.0,
+            },
+        );
         world.pending_deaths.push(attacker); // already dying
 
         let defender = world.spawn();
         world.positions.insert(defender, Position { x: 5, y: 5 });
-        world.healths.insert(defender, Health { current: 100.0, max: 100.0 });
-        world.combat_stats.insert(defender, CombatStats { attack: 5.0, defense: 3.0, aggression: 0.0 });
+        world.healths.insert(
+            defender,
+            Health {
+                current: 100.0,
+                max: 100.0,
+            },
+        );
+        world.combat_stats.insert(
+            defender,
+            CombatStats {
+                attack: 5.0,
+                defense: 3.0,
+                aggression: 0.0,
+            },
+        );
 
         run_combat(&mut world, Tick(0));
 
@@ -139,13 +235,39 @@ mod tests {
 
         let attacker = world.spawn();
         world.positions.insert(attacker, Position { x: 5, y: 5 });
-        world.healths.insert(attacker, Health { current: 100.0, max: 100.0 });
-        world.combat_stats.insert(attacker, CombatStats { attack: 15.0, defense: 5.0, aggression: 1.0 });
+        world.healths.insert(
+            attacker,
+            Health {
+                current: 100.0,
+                max: 100.0,
+            },
+        );
+        world.combat_stats.insert(
+            attacker,
+            CombatStats {
+                attack: 15.0,
+                defense: 5.0,
+                aggression: 1.0,
+            },
+        );
 
         let defender = world.spawn();
         world.positions.insert(defender, Position { x: 10, y: 10 }); // different position
-        world.healths.insert(defender, Health { current: 100.0, max: 100.0 });
-        world.combat_stats.insert(defender, CombatStats { attack: 5.0, defense: 3.0, aggression: 0.0 });
+        world.healths.insert(
+            defender,
+            Health {
+                current: 100.0,
+                max: 100.0,
+            },
+        );
+        world.combat_stats.insert(
+            defender,
+            CombatStats {
+                attack: 5.0,
+                defense: 3.0,
+                aggression: 0.0,
+            },
+        );
 
         run_combat(&mut world, Tick(0));
 
