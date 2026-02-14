@@ -134,7 +134,6 @@ When adding a new `HashMap<Entity, T>` to World, do ALL of these:
 3. Add `.remove(&entity)` in `World::despawn()`
 4. Add an alive-check in `validate_world()`
 5. Initialize to `HashMap::new()` in `World::new()`
-6. Update "Current Tables" below
 
 Skip any step and you will create zombie entity bugs.
 
@@ -144,7 +143,6 @@ Skip any step and you will create zombie entity bugs.
 2. Every variant MUST include `tick: Tick`
 3. For lethal events: push AFTER the decision, BEFORE `pending_deaths.push()`
 4. For non-lethal events: push immediately after the state change
-5. Update "Current Events" below
 
 ## Event Log
 
@@ -273,11 +271,3 @@ tests/
   determinism.rs         # replay/seed tests
 ```
 
-## Current Tables
-
-positions, hungers, healths, names, combats, foods
-(`alive: HashSet<Entity>` — not a property table, tracks living entities)
-
-## Current Events
-
-Spawned, Died, Ate, Attacked, Moved, Starved
