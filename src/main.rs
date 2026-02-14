@@ -170,10 +170,16 @@ impl GpuState {
     }
 }
 
+struct Camera {
+    x: i32,
+    y: i32,
+}
+
 struct App {
     gpu: Option<GpuState>,
     font: Option<font::FontRenderer>,
     world: World,
+    camera: Camera,
 }
 
 impl ApplicationHandler for App {
@@ -208,10 +214,27 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::KeyboardInput { event, .. }
-                if event.physical_key == PhysicalKey::Code(KeyCode::Escape) =>
-            {
-                event_loop.exit();
+            WindowEvent::KeyboardInput { event, .. } => {
+                if event.state != winit::event::ElementState::Pressed {
+                    return;
+                }
+                match event.physical_key {
+                    PhysicalKey::Code(KeyCode::Escape) => event_loop.exit(),
+                    // Camera movement: WASD + arrow keys
+                    PhysicalKey::Code(KeyCode::KeyW | KeyCode::ArrowUp) => {
+                        self.camera.y -= 1;
+                    }
+                    PhysicalKey::Code(KeyCode::KeyS | KeyCode::ArrowDown) => {
+                        self.camera.y += 1;
+                    }
+                    PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft) => {
+                        self.camera.x -= 1;
+                    }
+                    PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight) => {
+                        self.camera.x += 1;
+                    }
+                    _ => {}
+                }
             }
             WindowEvent::Resized(new_size) => {
                 gpu.resize(new_size);
@@ -255,25 +278,55 @@ impl ApplicationHandler for App {
 
                 // === Render ===
                 if let Some(font) = self.font.as_mut() {
-                    let display_text = render::render_world_to_string(&self.world);
+                    let m = font.metrics();
+                    let screen_w = gpu.config.width;
+                    let screen_h = gpu.config.height;
+                    let padding = 4.0_f32;
+
+                    // Layout: status bar (top), map (center, square cells), event log (bottom)
+                    let status_lines = 1_usize;
+                    let event_lines = 5_usize;
+                    let status_h = status_lines as f32 * m.line_height;
+                    let event_h = event_lines as f32 * m.line_height;
+                    let map_cell = m.line_height; // square cells
+                    let map_pixel_h = screen_h as f32 - status_h - event_h - padding * 4.0;
+                    let map_pixel_w = screen_w as f32 - padding * 2.0;
+
+                    let viewport_cols = (map_pixel_w / map_cell).floor().max(1.0) as usize;
+                    let viewport_rows = (map_pixel_h / map_cell).floor().max(1.0) as usize;
+
+                    // Clamp camera so viewport overlaps the tilemap
+                    let map_w = self.world.tiles.width() as i32;
+                    let map_h = self.world.tiles.height() as i32;
+                    let max_cam_x = (map_w - 1).max(0);
+                    let max_cam_y = (map_h - 1).max(0);
+                    self.camera.x = self.camera.x.clamp(0, max_cam_x);
+                    self.camera.y = self.camera.y.clamp(0, max_cam_y);
+
                     let status = render::render_status(&self.world);
-                    let events = render::render_recent_events(&self.world, 5);
-                    let full_text = if events.is_empty() {
-                        format!("{}\n{}", status, display_text)
-                    } else {
-                        format!("{}\n{}\n{}", status, events, display_text)
-                    };
-                    let vertex_count = font.prepare(
-                        &gpu.queue,
-                        &gpu.device,
-                        &full_text,
-                        10.0,
-                        10.0,
-                        gpu.config.width,
-                        gpu.config.height,
-                        FG_SRGB,
-                        BG_SRGB,
+                    let map_text = render::render_world_to_string(
+                        &self.world,
+                        self.camera.x,
+                        self.camera.y,
+                        viewport_cols,
+                        viewport_rows,
                     );
+                    let events = render::render_recent_events(&self.world, event_lines);
+
+                    font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
+
+                    // Status bar at top
+                    font.prepare_text(&status, padding, padding);
+
+                    // Map in center with square cells
+                    let map_y = padding * 2.0 + status_h;
+                    font.prepare_map(&map_text, padding, map_y);
+
+                    // Event log at bottom
+                    let event_y = screen_h as f32 - event_h - padding;
+                    font.prepare_text(&events, padding, event_y);
+
+                    let vertex_count = font.flush(&gpu.queue, &gpu.device);
                     gpu.render(font, vertex_count);
                 }
                 gpu.window.request_redraw();
@@ -298,6 +351,7 @@ fn main() {
         gpu: None,
         font: None,
         world,
+        camera: Camera { x: 0, y: 0 },
     };
     event_loop.run_app(&mut app).unwrap();
 }

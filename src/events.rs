@@ -1,7 +1,10 @@
 use crate::components::{Entity, Tick};
 
 /// All event types in the simulation. Every variant includes tick: Tick.
+/// Fields are structural data stored in the ring buffer — not all are read
+/// in every code path, but all are part of the event record.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Event {
     Spawned {
         entity: Entity,

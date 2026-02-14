@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use crate::components::Name;
 use crate::events::Event;
@@ -16,28 +16,48 @@ fn terrain_char(terrain: Terrain) -> char {
     }
 }
 
-/// Render the simulation world as a text grid string.
+/// Render a viewport of the simulation world as a text grid string.
 ///
-/// Places terrain characters as background, then overlays entity icons at
-/// their positions. Only alive entities are rendered. Entities with positions
-/// outside the tile grid or missing an icon are skipped.
+/// `cam_x` and `cam_y` are the world coordinates of the top-left visible tile.
+/// `viewport_cols` and `viewport_rows` define the size of the visible area.
+/// World coordinates outside the tilemap render as spaces. Entity icons are
+/// overlaid if they fall within the viewport rectangle. Only alive entities
+/// are rendered.
 ///
 /// This function is READ-ONLY and does not modify world state.
-pub fn render_world_to_string(world: &World) -> String {
-    let width = world.tiles.width();
-    let height = world.tiles.height();
-
-    if width == 0 || height == 0 {
+pub fn render_world_to_string(
+    world: &World,
+    cam_x: i32,
+    cam_y: i32,
+    viewport_cols: usize,
+    viewport_rows: usize,
+) -> String {
+    if viewport_cols == 0 || viewport_rows == 0 {
         return String::new();
     }
 
-    // Build the terrain grid.
-    let mut grid: Vec<Vec<char>> = Vec::with_capacity(height);
-    for y in 0..height {
-        let mut row = Vec::with_capacity(width);
-        for x in 0..width {
-            if let Some(terrain) = world.tiles.get_terrain(x, y) {
-                row.push(terrain_char(terrain));
+    let map_w = world.tiles.width();
+    let map_h = world.tiles.height();
+
+    // Build the terrain grid for the viewport.
+    let mut grid: Vec<Vec<char>> = Vec::with_capacity(viewport_rows);
+    for vy in 0..viewport_rows {
+        let mut row = Vec::with_capacity(viewport_cols);
+        for vx in 0..viewport_cols {
+            let wx = cam_x + vx as i32;
+            let wy = cam_y + vy as i32;
+            if wx >= 0 && wy >= 0 {
+                let ux = wx as usize;
+                let uy = wy as usize;
+                if ux < map_w && uy < map_h {
+                    if let Some(terrain) = world.tiles.get_terrain(ux, uy) {
+                        row.push(terrain_char(terrain));
+                    } else {
+                        row.push(' ');
+                    }
+                } else {
+                    row.push(' ');
+                }
             } else {
                 row.push(' ');
             }
@@ -45,32 +65,26 @@ pub fn render_world_to_string(world: &World) -> String {
         grid.push(row);
     }
 
-    // Build a position-to-icon map for alive entities, so last-inserted wins.
-    let mut entity_icons: HashMap<(usize, usize), char> = HashMap::new();
+    // Overlay alive entity icons that fall within the viewport.
     for (&entity, pos) in &world.positions {
         if !world.alive.contains(&entity) {
             continue;
         }
         if let Some(icon) = world.icons.get(&entity) {
-            // Convert i32 position to usize grid coordinates, skip if negative
-            // or out of bounds.
-            if pos.x >= 0 && pos.y >= 0 {
-                let ux = pos.x as usize;
-                let uy = pos.y as usize;
-                if ux < width && uy < height {
-                    entity_icons.insert((ux, uy), icon.ch);
+            let vx = pos.x - cam_x;
+            let vy = pos.y - cam_y;
+            if vx >= 0 && vy >= 0 {
+                let vxu = vx as usize;
+                let vyu = vy as usize;
+                if vxu < viewport_cols && vyu < viewport_rows {
+                    grid[vyu][vxu] = icon.ch;
                 }
             }
         }
     }
 
-    // Overlay entity icons onto the grid.
-    for ((x, y), ch) in &entity_icons {
-        grid[*y][*x] = *ch;
-    }
-
     // Build the final string. Each row is one line, no trailing newline.
-    let mut result = String::with_capacity((width + 1) * height);
+    let mut result = String::with_capacity((viewport_cols + 1) * viewport_rows);
     for (i, row) in grid.iter().enumerate() {
         if i > 0 {
             result.push('\n');
@@ -109,11 +123,11 @@ pub fn render_status(world: &World) -> String {
     status
 }
 
-/// Render recent events as a multi-line string.
+/// Render recent significant events as a multi-line string.
 ///
-/// Uses `world.events.recent(count)` to get the most recent events, then
-/// formats each one. Entity names are resolved via `world.names`, with a
-/// fallback of `"E{id}"` for despawned entities.
+/// Over-fetches from the ring buffer and filters to significant events only
+/// (Spawned, Died, Ate, Attacked). Moved and HungerChanged are skipped.
+/// Uses a friendlier format without tick brackets.
 ///
 /// This function is READ-ONLY and does not modify world state.
 pub fn render_recent_events(world: &World, count: usize) -> String {
@@ -129,53 +143,41 @@ pub fn render_recent_events(world: &World, count: usize) -> String {
             .unwrap_or_else(|| format!("E{}", e.0))
     };
 
-    let events = world.events.recent(count);
-    let mut lines: Vec<String> = Vec::with_capacity(events.len());
+    // Over-fetch to find enough significant events
+    let events = world.events.recent(count * 10);
+    let mut lines: Vec<String> = Vec::new();
 
     for event in events {
         let line = match event {
-            Event::Spawned { entity, tick } => {
-                format!("[{}] {} spawned", tick.0, resolve(entity))
+            Event::Spawned { entity, .. } => {
+                format!("{} spawned", resolve(entity))
             }
-            Event::Died { entity, tick } => {
-                format!("[{}] {} died", tick.0, resolve(entity))
+            Event::Died { entity, .. } => {
+                format!("{} died", resolve(entity))
             }
-            Event::Moved { entity, x, y, tick } => {
-                format!("[{}] {} moved to ({},{})", tick.0, resolve(entity), x, y)
-            }
-            Event::Ate { entity, food, tick } => {
-                format!("[{}] {} ate {}", tick.0, resolve(entity), resolve(food))
+            Event::Ate { entity, food, .. } => {
+                format!("{} ate {}", resolve(entity), resolve(food))
             }
             Event::Attacked {
                 attacker,
                 defender,
                 damage,
-                tick,
+                ..
             } => {
                 format!(
-                    "[{}] {} attacked {} for {:.0} dmg",
-                    tick.0,
+                    "{} attacks {} ({:.0} dmg)",
                     resolve(attacker),
                     resolve(defender),
                     damage
                 )
             }
-            Event::HungerChanged {
-                entity,
-                old,
-                new_val,
-                tick,
-            } => {
-                format!(
-                    "[{}] {} hunger {:.0}->{:.0}",
-                    tick.0,
-                    resolve(entity),
-                    old,
-                    new_val
-                )
-            }
+            // Skip noisy events
+            Event::Moved { .. } | Event::HungerChanged { .. } => continue,
         };
         lines.push(line);
+        if lines.len() >= count {
+            break;
+        }
     }
 
     lines.join("\n")
@@ -188,10 +190,17 @@ mod tests {
     use crate::tile_map::Terrain;
     use crate::world::World;
 
+    /// Helper: render full map (backward-compat wrapper for tests).
+    fn render_full(world: &World) -> String {
+        let w = world.tiles.width();
+        let h = world.tiles.height();
+        render_world_to_string(world, 0, 0, w, h)
+    }
+
     #[test]
     fn empty_world_renders_all_grass() {
         let world = World::new_with_seed(42);
-        let output = render_world_to_string(&world);
+        let output = render_full(&world);
         // Default TileMap is 64x64, all Grass.
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 64);
@@ -211,7 +220,7 @@ mod tests {
         world.tiles.set_terrain(3, 0, Terrain::Dirt);
         world.tiles.set_terrain(4, 0, Terrain::Sand);
 
-        let output = render_world_to_string(&world);
+        let output = render_full(&world);
         assert_eq!(output, ".~#,:");
     }
 
@@ -224,7 +233,7 @@ mod tests {
         world.positions.insert(e, Position { x: 2, y: 3 });
         world.icons.insert(e, Icon { ch: 'g' });
 
-        let output = render_world_to_string(&world);
+        let output = render_full(&world);
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines[3].chars().nth(2), Some('g'));
         // Other cells remain terrain.
@@ -241,7 +250,7 @@ mod tests {
         world.icons.insert(e, Icon { ch: 'T' });
         world.alive.remove(&e); // Entity is dead.
 
-        let output = render_world_to_string(&world);
+        let output = render_full(&world);
         let lines: Vec<&str> = output.lines().collect();
         // Should show terrain, not the entity icon.
         assert_eq!(lines[1].chars().nth(1), Some('.'));
@@ -256,7 +265,7 @@ mod tests {
         world.positions.insert(e, Position { x: 2, y: 2 });
         // No icon inserted.
 
-        let output = render_world_to_string(&world);
+        let output = render_full(&world);
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines[2].chars().nth(2), Some('.'));
     }
@@ -271,7 +280,7 @@ mod tests {
         world.icons.insert(e, Icon { ch: 'X' });
 
         // Should not panic, entity is just off-grid.
-        let output = render_world_to_string(&world);
+        let output = render_full(&world);
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 5);
     }
@@ -286,17 +295,15 @@ mod tests {
         world.icons.insert(e, Icon { ch: 'N' });
 
         // Should not panic.
-        let output = render_world_to_string(&world);
+        let output = render_full(&world);
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 5);
     }
 
     #[test]
-    fn zero_size_map_returns_empty_string() {
-        let mut world = World::new_with_seed(42);
-        world.tiles = crate::tile_map::TileMap::new(0, 0);
-
-        let output = render_world_to_string(&world);
+    fn zero_size_viewport_returns_empty_string() {
+        let world = World::new_with_seed(42);
+        let output = render_world_to_string(&world, 0, 0, 0, 0);
         assert!(output.is_empty());
     }
 
@@ -313,11 +320,48 @@ mod tests {
         world.positions.insert(e2, Position { x: 2, y: 2 });
         world.icons.insert(e2, Icon { ch: 'b' });
 
-        let output = render_world_to_string(&world);
+        let output = render_full(&world);
         let lines: Vec<&str> = output.lines().collect();
         let ch = lines[2].chars().nth(2).unwrap();
         // One of the two entities will be displayed (HashMap iteration order).
         assert!(ch == 'a' || ch == 'b');
+    }
+
+    #[test]
+    fn viewport_camera_offset() {
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(10, 10);
+        world.tiles.set_terrain(5, 5, Terrain::Water);
+
+        let e = world.spawn();
+        world.positions.insert(e, Position { x: 6, y: 6 });
+        world.icons.insert(e, Icon { ch: 'g' });
+
+        // Camera at (3,3), viewport 5x5 => shows world (3..8, 3..8)
+        let output = render_world_to_string(&world, 3, 3, 5, 5);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 5);
+        // Water at world (5,5) => viewport (2,2)
+        assert_eq!(lines[2].chars().nth(2), Some('~'));
+        // Entity at world (6,6) => viewport (3,3)
+        assert_eq!(lines[3].chars().nth(3), Some('g'));
+    }
+
+    #[test]
+    fn viewport_beyond_map_shows_spaces() {
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(3, 3);
+
+        // Camera at (1,1), viewport 4x4 => world coords (1..5, 1..5)
+        // Map is 3x3, so cols 3+ and rows 3+ are out of bounds
+        let output = render_world_to_string(&world, 1, 1, 4, 4);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 4);
+        // Row 0: world y=1, x=1..4 => two in-bounds grass, two spaces
+        assert_eq!(lines[0], "..  ");
+        // Row 2: world y=3, all out of bounds
+        assert_eq!(lines[2], "    ");
+        assert_eq!(lines[3], "    ");
     }
 
     #[test]
@@ -396,7 +440,7 @@ mod tests {
         });
 
         let output = render_recent_events(&world, 5);
-        assert_eq!(output, "[3] Goblin attacked Troll for 12 dmg");
+        assert_eq!(output, "Goblin attacks Troll (12 dmg)");
     }
 
     #[test]

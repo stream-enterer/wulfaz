@@ -50,6 +50,7 @@ pub struct FontRenderer {
     uniform_buffer: wgpu::Buffer,
     vertex_buffer: wgpu::Buffer,
     vertex_capacity: usize,
+    frame_vertices: Vec<TextVertex>,
 }
 
 impl FontRenderer {
@@ -238,26 +239,29 @@ impl FontRenderer {
             uniform_buffer,
             vertex_buffer,
             vertex_capacity: initial_capacity,
+            frame_vertices: Vec::new(),
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn prepare(
+    /// Return font metrics for layout calculations.
+    pub fn metrics(&self) -> FontMetrics {
+        self.metrics
+    }
+
+    /// Start a new frame. Clears accumulated vertices and writes uniforms.
+    pub fn begin_frame(
         &mut self,
         queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        text: &str,
-        x: f32,
-        y: f32,
         screen_w: u32,
         screen_h: u32,
         fg: [f32; 3],
         bg: [f32; 3],
-    ) -> u32 {
+    ) {
+        self.frame_vertices.clear();
+
         let sw = screen_w as f32;
         let sh = screen_h as f32;
 
-        // Orthographic projection: pixel coords → clip space
         #[rustfmt::skip]
         let projection: [[f32; 4]; 4] = [
             [2.0 / sw,  0.0,        0.0, 0.0],
@@ -276,82 +280,37 @@ impl FontRenderer {
         };
 
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+    }
 
-        // Build vertex data — monospace grid with integer-pixel positions (matching kitty)
-        let mut vertices: Vec<TextVertex> = Vec::new();
-        let cell_w = self.metrics.cell_width;
-        let mut pen_x = x.floor();
-        let mut pen_y = (y + self.metrics.ascender).floor();
-        let line_height = self.metrics.line_height;
-        let question = self.glyphs.get(&(b'?' as u32)).copied();
+    /// Append text vertices using normal cell_width spacing (for status/event log).
+    pub fn prepare_text(&mut self, text: &str, x: f32, y: f32) {
+        self.build_vertices(
+            text,
+            x,
+            y,
+            self.metrics.cell_width,
+            0.0,
+            self.metrics.line_height,
+        );
+    }
 
-        for ch in text.chars() {
-            if ch == '\n' {
-                pen_x = x.floor();
-                pen_y += line_height;
-                continue;
-            }
-            let cp = ch as u32;
-            let glyph = match self.glyphs.get(&cp) {
-                Some(g) => *g,
-                None => match question {
-                    Some(g) => g,
-                    None => {
-                        pen_x += cell_w;
-                        continue;
-                    }
-                },
-            };
+    /// Append text vertices using square cells (line_height x line_height) for the map.
+    /// Glyphs are centered horizontally within the square cell.
+    pub fn prepare_map(&mut self, text: &str, x: f32, y: f32) {
+        let cell_size = self.metrics.line_height;
+        let h_offset = ((cell_size - self.metrics.cell_width) / 2.0).floor();
+        self.build_vertices(text, x, y, cell_size, h_offset, cell_size);
+    }
 
-            if glyph.width == 0 || glyph.height == 0 {
-                pen_x += cell_w;
-                continue;
-            }
-
-            // Integer-snap glyph position within cell
-            let x0 = (pen_x + glyph.bearing_x as f32).floor();
-            let y0 = (pen_y - glyph.bearing_y as f32).floor();
-            let x1 = x0 + glyph.width as f32;
-            let y1 = y0 + glyph.height as f32;
-
-            // Two triangles per glyph quad
-            vertices.push(TextVertex {
-                position: [x0, y0],
-                uv: [glyph.u0, glyph.v0],
-            });
-            vertices.push(TextVertex {
-                position: [x1, y0],
-                uv: [glyph.u1, glyph.v0],
-            });
-            vertices.push(TextVertex {
-                position: [x0, y1],
-                uv: [glyph.u0, glyph.v1],
-            });
-
-            vertices.push(TextVertex {
-                position: [x1, y0],
-                uv: [glyph.u1, glyph.v0],
-            });
-            vertices.push(TextVertex {
-                position: [x1, y1],
-                uv: [glyph.u1, glyph.v1],
-            });
-            vertices.push(TextVertex {
-                position: [x0, y1],
-                uv: [glyph.u0, glyph.v1],
-            });
-
-            pen_x += cell_w;
-        }
-
-        let vertex_count = vertices.len() as u32;
-        if vertices.is_empty() {
+    /// Upload accumulated vertices to the GPU. Returns vertex count for render().
+    pub fn flush(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) -> u32 {
+        let vertex_count = self.frame_vertices.len() as u32;
+        if self.frame_vertices.is_empty() {
             return 0;
         }
 
-        // Grow vertex buffer if needed
-        if vertices.len() > self.vertex_capacity {
-            self.vertex_capacity = vertices.len().next_power_of_two();
+        if self.frame_vertices.len() > self.vertex_capacity {
+            self.vertex_capacity = self.frame_vertices.len().next_power_of_two();
             self.vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("text_vertices"),
                 size: (self.vertex_capacity * std::mem::size_of::<TextVertex>()) as u64,
@@ -360,9 +319,88 @@ impl FontRenderer {
             });
         }
 
-        queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+        queue.write_buffer(
+            &self.vertex_buffer,
+            0,
+            bytemuck::cast_slice(&self.frame_vertices),
+        );
 
         vertex_count
+    }
+
+    /// Build vertex quads for text and append to frame_vertices.
+    /// h_advance: horizontal distance between cell origins.
+    /// h_offset: extra horizontal offset for glyph within cell (centering).
+    /// v_advance: vertical distance between lines.
+    fn build_vertices(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        h_advance: f32,
+        h_offset: f32,
+        v_advance: f32,
+    ) {
+        let mut pen_x = x.floor();
+        let mut pen_y = (y + self.metrics.ascender).floor();
+        let question = self.glyphs.get(&(b'?' as u32)).copied();
+
+        for ch in text.chars() {
+            if ch == '\n' {
+                pen_x = x.floor();
+                pen_y += v_advance;
+                continue;
+            }
+            let cp = ch as u32;
+            let glyph = match self.glyphs.get(&cp) {
+                Some(g) => *g,
+                None => match question {
+                    Some(g) => g,
+                    None => {
+                        pen_x += h_advance;
+                        continue;
+                    }
+                },
+            };
+
+            if glyph.width == 0 || glyph.height == 0 {
+                pen_x += h_advance;
+                continue;
+            }
+
+            let x0 = (pen_x + h_offset + glyph.bearing_x as f32).floor();
+            let y0 = (pen_y - glyph.bearing_y as f32).floor();
+            let x1 = x0 + glyph.width as f32;
+            let y1 = y0 + glyph.height as f32;
+
+            self.frame_vertices.push(TextVertex {
+                position: [x0, y0],
+                uv: [glyph.u0, glyph.v0],
+            });
+            self.frame_vertices.push(TextVertex {
+                position: [x1, y0],
+                uv: [glyph.u1, glyph.v0],
+            });
+            self.frame_vertices.push(TextVertex {
+                position: [x0, y1],
+                uv: [glyph.u0, glyph.v1],
+            });
+
+            self.frame_vertices.push(TextVertex {
+                position: [x1, y0],
+                uv: [glyph.u1, glyph.v0],
+            });
+            self.frame_vertices.push(TextVertex {
+                position: [x1, y1],
+                uv: [glyph.u1, glyph.v1],
+            });
+            self.frame_vertices.push(TextVertex {
+                position: [x0, y1],
+                uv: [glyph.u0, glyph.v1],
+            });
+
+            pen_x += h_advance;
+        }
     }
 
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, vertex_count: u32) {
