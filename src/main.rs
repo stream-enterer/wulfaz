@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -170,6 +171,12 @@ impl GpuState {
     }
 }
 
+/// Simulation tick rate — matches Dwarf Fortress default FPS_CAP:100.
+const SIM_TICKS_PER_SEC: f64 = 100.0;
+const SIM_TICK_INTERVAL: f64 = 1.0 / SIM_TICKS_PER_SEC;
+/// Cap simulation catch-up to avoid spiral of death after long pauses.
+const MAX_TICKS_PER_FRAME: u32 = 5;
+
 struct Camera {
     x: i32,
     y: i32,
@@ -180,6 +187,8 @@ struct App {
     font: Option<font::FontRenderer>,
     world: World,
     camera: Camera,
+    last_frame_time: Instant,
+    tick_accumulator: f64,
 }
 
 impl ApplicationHandler for App {
@@ -249,32 +258,44 @@ impl ApplicationHandler for App {
                 ));
             }
             WindowEvent::RedrawRequested => {
-                // === Simulation Tick ===
-                let tick = self.world.tick;
+                // Fixed-timestep simulation: accumulate real time, run ticks at SIM_TICKS_PER_SEC
+                let now = Instant::now();
+                let dt = now.duration_since(self.last_frame_time).as_secs_f64();
+                self.last_frame_time = now;
+                self.tick_accumulator += dt;
 
-                // === Phase 1: Environment ===
-                run_temperature(&mut self.world, tick);
+                let mut ticks_this_frame = 0u32;
+                while self.tick_accumulator >= SIM_TICK_INTERVAL
+                    && ticks_this_frame < MAX_TICKS_PER_FRAME
+                {
+                    let tick = self.world.tick;
 
-                // === Phase 2: Needs ===
-                run_hunger(&mut self.world, tick);
+                    // === Phase 1: Environment ===
+                    run_temperature(&mut self.world, tick);
 
-                // === Phase 3: Decisions ===
-                // (no decision systems yet)
+                    // === Phase 2: Needs ===
+                    run_hunger(&mut self.world, tick);
 
-                // === Phase 4: Actions ===
-                run_wander(&mut self.world, tick);
-                run_eating(&mut self.world, tick);
-                run_combat(&mut self.world, tick);
+                    // === Phase 3: Decisions ===
+                    // (no decision systems yet)
 
-                // === Phase 5: Consequences ===
-                // run_death() is ALWAYS last in Phase 5
-                run_death(&mut self.world, tick);
+                    // === Phase 4: Actions ===
+                    run_wander(&mut self.world, tick);
+                    run_eating(&mut self.world, tick);
+                    run_combat(&mut self.world, tick);
 
-                // === Debug Validation ===
-                #[cfg(debug_assertions)]
-                world::validate_world(&self.world);
+                    // === Phase 5: Consequences ===
+                    // run_death() is ALWAYS last in Phase 5
+                    run_death(&mut self.world, tick);
 
-                self.world.tick = Tick(tick.0 + 1);
+                    // === Debug Validation ===
+                    #[cfg(debug_assertions)]
+                    world::validate_world(&self.world);
+
+                    self.world.tick = Tick(tick.0 + 1);
+                    self.tick_accumulator -= SIM_TICK_INTERVAL;
+                    ticks_this_frame += 1;
+                }
 
                 // === Render ===
                 if let Some(font) = self.font.as_mut() {
@@ -352,6 +373,8 @@ fn main() {
         font: None,
         world,
         camera: Camera { x: 0, y: 0 },
+        last_frame_time: Instant::now(),
+        tick_accumulator: 0.0,
     };
     event_loop.run_app(&mut app).unwrap();
 }

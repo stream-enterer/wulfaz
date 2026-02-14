@@ -45,10 +45,17 @@ pub struct CombatStats {
     pub aggression: f32,
 }
 
-/// Movement speed (tiles per tick).
+/// Movement speed (steps per move action).
 #[derive(Debug, Clone, Copy)]
 pub struct Speed {
     pub value: u32,
+}
+
+/// Ticks remaining until this entity can move again.
+/// Wander system decrements each tick; moves only when remaining == 0.
+#[derive(Debug, Clone, Copy)]
+pub struct MoveCooldown {
+    pub remaining: u32,
 }
 
 /// Display icon for rendering (single character).

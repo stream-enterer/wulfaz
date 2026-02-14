@@ -19,6 +19,7 @@ pub struct World {
     pub healths: HashMap<Entity, Health>,
     pub combat_stats: HashMap<Entity, CombatStats>,
     pub speeds: HashMap<Entity, Speed>,
+    pub move_cooldowns: HashMap<Entity, MoveCooldown>,
     pub icons: HashMap<Entity, Icon>,
     pub names: HashMap<Entity, Name>,
     pub nutritions: HashMap<Entity, Nutrition>,
@@ -43,6 +44,7 @@ impl World {
             healths: HashMap::new(),
             combat_stats: HashMap::new(),
             speeds: HashMap::new(),
+            move_cooldowns: HashMap::new(),
             icons: HashMap::new(),
             names: HashMap::new(),
             nutritions: HashMap::new(),
@@ -73,6 +75,7 @@ impl World {
         self.healths.remove(&entity);
         self.combat_stats.remove(&entity);
         self.speeds.remove(&entity);
+        self.move_cooldowns.remove(&entity);
         self.icons.remove(&entity);
         self.names.remove(&entity);
         self.nutritions.remove(&entity);
@@ -119,6 +122,14 @@ pub fn validate_world(world: &World) {
         assert!(
             world.alive.contains(entity),
             "zombie entity {:?} in speeds but not in alive",
+            entity
+        );
+    }
+
+    for entity in world.move_cooldowns.keys() {
+        assert!(
+            world.alive.contains(entity),
+            "zombie entity {:?} in move_cooldowns but not in alive",
             entity
         );
     }
@@ -193,6 +204,9 @@ mod tests {
             },
         );
         world.speeds.insert(e, Speed { value: 2 });
+        world
+            .move_cooldowns
+            .insert(e, MoveCooldown { remaining: 5 });
         world.icons.insert(e, Icon { ch: 'g' });
         world.names.insert(
             e,
@@ -210,6 +224,7 @@ mod tests {
         assert!(!world.healths.contains_key(&e));
         assert!(!world.combat_stats.contains_key(&e));
         assert!(!world.speeds.contains_key(&e));
+        assert!(!world.move_cooldowns.contains_key(&e));
         assert!(!world.icons.contains_key(&e));
         assert!(!world.names.contains_key(&e));
         assert!(!world.nutritions.contains_key(&e));
