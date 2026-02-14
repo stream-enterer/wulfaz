@@ -316,11 +316,11 @@ impl ApplicationHandler for App {
                     let viewport_cols = (map_pixel_w / map_cell).floor().max(1.0) as usize;
                     let viewport_rows = (map_pixel_h / map_cell).floor().max(1.0) as usize;
 
-                    // Clamp camera so viewport overlaps the tilemap
+                    // Clamp camera so viewport never shows beyond map edges
                     let map_w = self.world.tiles.width() as i32;
                     let map_h = self.world.tiles.height() as i32;
-                    let max_cam_x = (map_w - 1).max(0);
-                    let max_cam_y = (map_h - 1).max(0);
+                    let max_cam_x = (map_w - viewport_cols as i32).max(0);
+                    let max_cam_y = (map_h - viewport_rows as i32).max(0);
                     self.camera.x = self.camera.x.clamp(0, max_cam_x);
                     self.camera.y = self.camera.y.clamp(0, max_cam_y);
 
