@@ -215,10 +215,10 @@
 - **Acceptance Criteria:**
   - [x] Environment systems run first in the tick loop
   - [x] Environment systems read and write TileMap data
-  - [x] Environment systems handle weather, temperature, growth, decay, fluid flow
+  - [ ] Environment systems handle weather, temperature, growth, decay, fluid flow
   - [x] No environment system modifies entity external state (position, HP, inventory)
 - **Dependencies:** CORE-005, TILE-001
-- **Status:** `[x]`
+- **Status:** `[ ]`
 
 ### PHASE-002 — Phase 2: Needs
 
@@ -241,11 +241,11 @@
   will attempt this tick).
 - **Acceptance Criteria:**
   - [x] Decision systems run after needs phase
-  - [x] Decision systems read needs and environment state
-  - [x] Decision systems write intention/goal state on entities
+  - [ ] Decision systems read needs and environment state
+  - [ ] Decision systems write intention/goal state on entities
   - [x] Decision systems do not modify external world state
 - **Dependencies:** CORE-005, PHASE-002
-- **Status:** `[x]`
+- **Status:** `[ ]`
 
 ### PHASE-004 — Phase 4: Actions
 
@@ -871,13 +871,13 @@
   `world.body.positions`, `world.mind.emotions`, `world.social.friendships`.
   Readability change, not architectural change.
 - **Acceptance Criteria:**
-  - [x] Threshold trigger: World has >25 HashMap fields
-  - [x] Fields grouped by domain: body, mind, social (or similar)
-  - [x] Sub-structs are plain structs, not trait objects
-  - [x] All existing code patterns still apply (despawn removes from all sub-tables)
-  - [x] This is a refactor, not a redesign
+  - [ ] Threshold trigger: World has >25 HashMap fields
+  - [ ] Fields grouped by domain: body, mind, social (or similar)
+  - [ ] Sub-structs are plain structs, not trait objects
+  - [ ] All existing code patterns still apply (despawn removes from all sub-tables)
+  - [ ] This is a refactor, not a redesign
 - **Dependencies:** CORE-001
-- **Status:** `[x]`
+- **Status:** `[ ]`
 
 ### GROW-002 — Phase Function Grouping at 30+ Systems
 
@@ -886,13 +886,13 @@
   into functions: `run_environment_phase(&mut world, tick)`. Same phase rules
   still apply.
 - **Acceptance Criteria:**
-  - [x] Threshold trigger: main loop has >30 system calls
-  - [x] Each phase gets its own function: `run_X_phase(world, tick)`
-  - [x] Phase functions are plain functions, not trait impls
-  - [x] Phase ordering rules are preserved
-  - [x] Phase functions live in main.rs or a dedicated phase module
+  - [ ] Threshold trigger: main loop has >30 system calls
+  - [ ] Each phase gets its own function: `run_X_phase(world, tick)`
+  - [ ] Phase functions are plain functions, not trait impls
+  - [ ] Phase ordering rules are preserved
+  - [ ] Phase functions live in main.rs or a dedicated phase module
 - **Dependencies:** CORE-005, PHASE-007
-- **Status:** `[x]`
+- **Status:** `[ ]`
 
 ### GROW-003 — System Dependency Analyzer at 15+ Systems
 
@@ -900,13 +900,13 @@
 - **Description:** At 15+ systems, build `src/bin/analyze_systems.rs` to
   extract read/write dependencies from source code. Static analysis tool.
 - **Acceptance Criteria:**
-  - [x] Threshold trigger: 15+ system files in `src/systems/`
-  - [x] `src/bin/analyze_systems.rs` exists
-  - [x] Analyzer reads system source files
-  - [x] Outputs which World fields each system reads and writes
-  - [x] Helps detect phase violations and ordering issues
+  - [ ] Threshold trigger: 15+ system files in `src/systems/`
+  - [ ] `src/bin/analyze_systems.rs` exists
+  - [ ] Analyzer reads system source files
+  - [ ] Outputs which World fields each system reads and writes
+  - [ ] Helps detect phase violations and ordering issues
 - **Dependencies:** SYS-002
-- **Status:** `[x]`
+- **Status:** `[ ]`
 
 ---
 
@@ -1117,3 +1117,24 @@
   connects to PROHIB-005. Phase assignment (PHASE-007) connects to all phase
   features. VALID-001 connects to ADD-002 step 4 and PHASE-006.
 - **Gap found:** None. All cross-references consistent.
+
+### Pass 5 (Accuracy Audit — 2026-02-14)
+- Removed `#![allow(dead_code)]` from lib.rs/main.rs/font.rs and ran `cargo check`.
+  15 dead-code warnings revealed scaffolding without consumers.
+- **5 features corrected from `[x]` to `[ ]`:**
+  - PHASE-001: No environment systems exist. Phase slot is in main loop but no
+    weather, temperature, growth, decay, or fluid flow systems. TileMap temperature
+    methods exist but are unused. (2 of 4 criteria met)
+  - PHASE-003: No decision systems exist. Phase slot is in main loop but no AI
+    planning, pathfinding, or task selection. No intention/goal component on entities.
+    (2 of 4 criteria met)
+  - GROW-001: Below threshold. World has 8 HashMap fields (trigger: >25).
+  - GROW-002: Below threshold. Main loop has 5 system calls (trigger: >30).
+  - GROW-003: Below threshold. 5 system files (trigger: >15).
+- **Dead code noted but not affecting feature status** (criteria require existence,
+  not consumption): Event variant fields (write-only audit log), EventLog query
+  API (iter/recent/len/is_empty used only by tests), Health.max, Speed.value,
+  Name.value, TileMap temperature, FontRenderer::metrics(),
+  GlyphInfo::advance_x, FontMetrics::descender.
+- **Revised totals:** 65 of 70 features complete. 2 incomplete (PHASE-001,
+  PHASE-003). 3 pending (GROW-001, GROW-002, GROW-003).

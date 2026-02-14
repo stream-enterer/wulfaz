@@ -21,6 +21,7 @@ use wulfaz::systems::combat::run_combat;
 use wulfaz::systems::death::run_death;
 use wulfaz::systems::eating::run_eating;
 use wulfaz::systems::hunger::run_hunger;
+use wulfaz::systems::temperature::run_temperature;
 use wulfaz::systems::wander::run_wander;
 use wulfaz::world::World;
 
@@ -78,7 +79,8 @@ fn spawn_food(world: &mut World, x: i32, y: i32) -> Entity {
 
 /// Run all five phases in order.
 fn run_full_tick(world: &mut World, tick: Tick) {
-    // Phase 1: Environment (no systems yet)
+    // Phase 1: Environment
+    run_temperature(world, tick);
     // Phase 2: Needs
     run_hunger(world, tick);
     // Phase 3: Decisions (no systems yet)

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
@@ -23,6 +21,7 @@ use systems::combat::run_combat;
 use systems::death::run_death;
 use systems::eating::run_eating;
 use systems::hunger::run_hunger;
+use systems::temperature::run_temperature;
 use systems::wander::run_wander;
 use world::World;
 
@@ -231,7 +230,7 @@ impl ApplicationHandler for App {
                 let tick = self.world.tick;
 
                 // === Phase 1: Environment ===
-                // (no environment systems yet)
+                run_temperature(&mut self.world, tick);
 
                 // === Phase 2: Needs ===
                 run_hunger(&mut self.world, tick);
@@ -258,7 +257,12 @@ impl ApplicationHandler for App {
                 if let Some(font) = self.font.as_mut() {
                     let display_text = render::render_world_to_string(&self.world);
                     let status = render::render_status(&self.world);
-                    let full_text = format!("{}\n{}", status, display_text);
+                    let events = render::render_recent_events(&self.world, 5);
+                    let full_text = if events.is_empty() {
+                        format!("{}\n{}", status, display_text)
+                    } else {
+                        format!("{}\n{}\n{}", status, events, display_text)
+                    };
                     let vertex_count = font.prepare(
                         &gpu.queue,
                         &gpu.device,

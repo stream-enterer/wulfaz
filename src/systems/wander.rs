@@ -5,8 +5,8 @@ use rand::RngExt;
 
 /// Phase 4 (Actions): Wander/movement system.
 ///
-/// Entities with both a Position and a Speed component move 1 tile in a random
-/// cardinal direction each tick. Entities in pending_deaths are skipped.
+/// Entities with both a Position and a Speed component take `speed.value`
+/// random cardinal steps per tick. Entities in pending_deaths are skipped.
 /// Uses collect-then-apply mutation pattern.
 pub fn run_wander(world: &mut World, tick: Tick) {
     // Collect entities that have both position and speed, sorted for determinism
@@ -19,25 +19,26 @@ pub fn run_wander(world: &mut World, tick: Tick) {
         .collect();
     movers.sort_by_key(|e| e.0);
 
-    // Generate random moves
+    // Generate random moves: each entity takes speed.value steps
     let moves: Vec<(Entity, Position)> = movers
         .into_iter()
         .filter_map(|e| {
             let pos = world.positions.get(&e)?;
-            let direction = world.rng.random_range(0..4);
-            let (dx, dy) = match direction {
-                0 => (0, -1), // up
-                1 => (0, 1),  // down
-                2 => (-1, 0), // left
-                _ => (1, 0),  // right
-            };
-            Some((
-                e,
-                Position {
-                    x: pos.x + dx,
-                    y: pos.y + dy,
-                },
-            ))
+            let steps = world.speeds.get(&e)?.value;
+            let mut x = pos.x;
+            let mut y = pos.y;
+            for _ in 0..steps {
+                let direction = world.rng.random_range(0..4);
+                let (dx, dy) = match direction {
+                    0 => (0, -1), // up
+                    1 => (0, 1),  // down
+                    2 => (-1, 0), // left
+                    _ => (1, 0),  // right
+                };
+                x += dx;
+                y += dy;
+            }
+            Some((e, Position { x, y }))
         })
         .collect();
 
@@ -97,6 +98,20 @@ mod tests {
         run_wander(&mut world, Tick(0));
         assert_eq!(world.positions[&e].x, 5);
         assert_eq!(world.positions[&e].y, 5);
+    }
+
+    #[test]
+    fn test_wander_respects_speed() {
+        let mut world = World::new_with_seed(42);
+        let e = world.spawn();
+        world.positions.insert(e, Position { x: 10, y: 10 });
+        world.speeds.insert(e, Speed { value: 3 });
+        run_wander(&mut world, Tick(0));
+        let new_pos = world.positions[&e];
+        let dx = (new_pos.x - 10).abs();
+        let dy = (new_pos.y - 10).abs();
+        // Manhattan distance must be at most speed (3), since each step is 1 tile
+        assert!(dx + dy <= 3, "displacement {} exceeds speed 3", dx + dy);
     }
 
     #[test]

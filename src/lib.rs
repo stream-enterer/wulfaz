@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod components;
 pub mod events;
 pub mod loading;

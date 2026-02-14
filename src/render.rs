@@ -1,5 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
+use crate::components::Name;
+use crate::events::Event;
 use crate::tile_map::Terrain;
 use crate::world::World;
 
@@ -81,13 +83,102 @@ pub fn render_world_to_string(world: &World) -> String {
     result
 }
 
-/// Render a status line showing current tick and entity count.
+/// Render a status line showing current tick, entity count, and name breakdown.
 ///
-/// Format: "Tick: N | Entities: M"
+/// Format: "Tick: N | Entities: M | Name1:count Name2:count"
 ///
 /// This function is READ-ONLY and does not modify world state.
 pub fn render_status(world: &World) -> String {
-    format!("Tick: {} | Entities: {}", world.tick.0, world.alive.len())
+    let mut status = format!("Tick: {} | Entities: {}", world.tick.0, world.alive.len());
+
+    let mut name_counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for (&entity, Name { value }) in &world.names {
+        if world.alive.contains(&entity) {
+            *name_counts.entry(value.as_str()).or_insert(0) += 1;
+        }
+    }
+    if !name_counts.is_empty() {
+        status.push_str(" | ");
+        let parts: Vec<String> = name_counts
+            .iter()
+            .map(|(name, count)| format!("{name}:{count}"))
+            .collect();
+        status.push_str(&parts.join(" "));
+    }
+
+    status
+}
+
+/// Render recent events as a multi-line string.
+///
+/// Uses `world.events.recent(count)` to get the most recent events, then
+/// formats each one. Entity names are resolved via `world.names`, with a
+/// fallback of `"E{id}"` for despawned entities.
+///
+/// This function is READ-ONLY and does not modify world state.
+pub fn render_recent_events(world: &World, count: usize) -> String {
+    if world.events.is_empty() {
+        return String::new();
+    }
+
+    let resolve = |e: &crate::components::Entity| -> String {
+        world
+            .names
+            .get(e)
+            .map(|n| n.value.clone())
+            .unwrap_or_else(|| format!("E{}", e.0))
+    };
+
+    let events = world.events.recent(count);
+    let mut lines: Vec<String> = Vec::with_capacity(events.len());
+
+    for event in events {
+        let line = match event {
+            Event::Spawned { entity, tick } => {
+                format!("[{}] {} spawned", tick.0, resolve(entity))
+            }
+            Event::Died { entity, tick } => {
+                format!("[{}] {} died", tick.0, resolve(entity))
+            }
+            Event::Moved { entity, x, y, tick } => {
+                format!("[{}] {} moved to ({},{})", tick.0, resolve(entity), x, y)
+            }
+            Event::Ate { entity, food, tick } => {
+                format!("[{}] {} ate {}", tick.0, resolve(entity), resolve(food))
+            }
+            Event::Attacked {
+                attacker,
+                defender,
+                damage,
+                tick,
+            } => {
+                format!(
+                    "[{}] {} attacked {} for {:.0} dmg",
+                    tick.0,
+                    resolve(attacker),
+                    resolve(defender),
+                    damage
+                )
+            }
+            Event::HungerChanged {
+                entity,
+                old,
+                new_val,
+                tick,
+            } => {
+                format!(
+                    "[{}] {} hunger {:.0}->{:.0}",
+                    tick.0,
+                    resolve(entity),
+                    old,
+                    new_val
+                )
+            }
+        };
+        lines.push(line);
+    }
+
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -238,6 +329,7 @@ mod tests {
         let _e3 = world.spawn();
 
         let status = render_status(&world);
+        // No names assigned, so no name breakdown appended
         assert_eq!(status, "Tick: 42 | Entities: 3");
     }
 
@@ -246,5 +338,71 @@ mod tests {
         let world = World::new_with_seed(42);
         let status = render_status(&world);
         assert_eq!(status, "Tick: 0 | Entities: 0");
+    }
+
+    #[test]
+    fn status_shows_entity_names() {
+        let mut world = World::new_with_seed(42);
+        world.tick = Tick(5);
+        let e1 = world.spawn();
+        world.names.insert(
+            e1,
+            Name {
+                value: "Goblin".to_string(),
+            },
+        );
+        let e2 = world.spawn();
+        world.names.insert(
+            e2,
+            Name {
+                value: "Goblin".to_string(),
+            },
+        );
+        let e3 = world.spawn();
+        world.names.insert(
+            e3,
+            Name {
+                value: "Troll".to_string(),
+            },
+        );
+
+        let status = render_status(&world);
+        assert_eq!(status, "Tick: 5 | Entities: 3 | Goblin:2 Troll:1");
+    }
+
+    #[test]
+    fn recent_events_renders_attack() {
+        let mut world = World::new_with_seed(42);
+        let a = world.spawn();
+        world.names.insert(
+            a,
+            Name {
+                value: "Goblin".to_string(),
+            },
+        );
+        let d = world.spawn();
+        world.names.insert(
+            d,
+            Name {
+                value: "Troll".to_string(),
+            },
+        );
+
+        world.events.push(crate::events::Event::Attacked {
+            attacker: a,
+            defender: d,
+            damage: 12.0,
+            tick: Tick(3),
+        });
+
+        let output = render_recent_events(&world, 5);
+        assert_eq!(output, "[3] Goblin attacked Troll for 12 dmg");
+    }
+
+    #[test]
+    fn recent_events_empty_log() {
+        let world = World::new_with_seed(42);
+        let output = render_recent_events(&world, 5);
+        assert!(output.is_empty());
     }
 }

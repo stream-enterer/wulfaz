@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::c_int;
@@ -31,7 +29,6 @@ pub struct GlyphInfo {
     pub height: u32,
     pub bearing_x: i32,
     pub bearing_y: i32,
-    pub advance_x: f32,
     pub u0: f32,
     pub v0: f32,
     pub u1: f32,
@@ -41,7 +38,6 @@ pub struct GlyphInfo {
 #[derive(Clone, Copy)]
 pub struct FontMetrics {
     pub ascender: f32,
-    pub descender: f32,
     pub line_height: f32,
     pub cell_width: f32,
 }
@@ -243,10 +239,6 @@ impl FontRenderer {
             vertex_buffer,
             vertex_capacity: initial_capacity,
         }
-    }
-
-    pub fn metrics(&self) -> FontMetrics {
-        self.metrics
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -569,7 +561,6 @@ fn rasterize_glyphs(
     let size_metrics = face.size_metrics().expect("no size metrics");
     let metrics = FontMetrics {
         ascender: (size_metrics.ascender as f32 / 64.0).ceil(),
-        descender: (size_metrics.descender as f32 / 64.0).ceil(),
         line_height: (size_metrics.height as f32 / 64.0).ceil(),
         cell_width,
     };
@@ -581,7 +572,6 @@ fn rasterize_glyphs(
         height: u32,
         bearing_x: i32,
         bearing_y: i32,
-        advance_x: f32,
         pixels: Vec<u8>,
     }
 
@@ -596,7 +586,6 @@ fn rasterize_glyphs(
         let w = bitmap.width() as u32;
         let h = bitmap.rows() as u32;
         let pitch = bitmap.pitch();
-        let advance_x = glyph.advance().x as f32 / 64.0;
 
         let mut pixels = Vec::new();
         if w > 0 && h > 0 {
@@ -621,7 +610,6 @@ fn rasterize_glyphs(
             height: h,
             bearing_x: glyph.bitmap_left(),
             bearing_y: glyph.bitmap_top(),
-            advance_x,
             pixels,
         });
     }
@@ -688,7 +676,6 @@ fn rasterize_glyphs(
             height: g.height,
             bearing_x: g.bearing_x,
             bearing_y: g.bearing_y,
-            advance_x: g.advance_x,
             u0: pos.x as f32 / aw,
             v0: pos.y as f32 / ah,
             u1: (pos.x + g.width) as f32 / aw,

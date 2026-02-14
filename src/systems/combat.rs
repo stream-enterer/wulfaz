@@ -66,6 +66,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
     for (attacker, defender, damage) in attacks {
         if let Some(health) = world.healths.get_mut(&defender) {
             health.current -= damage;
+            health.current = health.current.clamp(0.0, health.max);
 
             world.events.push(Event::Attacked {
                 attacker,
@@ -181,6 +182,52 @@ mod tests {
         run_combat(&mut world, Tick(0));
 
         assert!(world.pending_deaths.contains(&defender));
+    }
+
+    #[test]
+    fn test_combat_clamps_health_to_zero() {
+        let mut world = World::new_with_seed(42);
+
+        let attacker = world.spawn();
+        world.positions.insert(attacker, Position { x: 5, y: 5 });
+        world.healths.insert(
+            attacker,
+            Health {
+                current: 100.0,
+                max: 100.0,
+            },
+        );
+        world.combat_stats.insert(
+            attacker,
+            CombatStats {
+                attack: 200.0,
+                defense: 5.0,
+                aggression: 1.0,
+            },
+        );
+
+        let defender = world.spawn();
+        world.positions.insert(defender, Position { x: 5, y: 5 });
+        world.healths.insert(
+            defender,
+            Health {
+                current: 3.0,
+                max: 50.0,
+            },
+        );
+        world.combat_stats.insert(
+            defender,
+            CombatStats {
+                attack: 5.0,
+                defense: 1.0,
+                aggression: 0.0,
+            },
+        );
+
+        run_combat(&mut world, Tick(0));
+
+        // Health should be clamped to 0.0, not negative
+        assert_eq!(world.healths[&defender].current, 0.0);
     }
 
     #[test]

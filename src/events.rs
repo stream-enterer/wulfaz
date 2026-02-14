@@ -71,6 +71,7 @@ impl EventLog {
     }
 
     /// Iterate over all events from oldest to newest.
+    #[allow(dead_code)] // Used via lib crate in integration tests
     pub fn iter(&self) -> impl Iterator<Item = &Event> {
         let start = if self.count < self.capacity {
             0
@@ -102,6 +103,7 @@ impl EventLog {
     }
 
     /// Total number of events currently stored.
+    #[allow(dead_code)] // Used via lib crate in integration tests
     pub fn len(&self) -> usize {
         self.count
     }
