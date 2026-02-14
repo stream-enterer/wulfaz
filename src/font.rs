@@ -487,7 +487,7 @@ fn hinting_load_flags(config: &HintingConfig) -> LoadFlag {
 /// Find system monospace font path and hinting config via fontconfig, with fallbacks.
 fn find_font_with_hinting() -> (String, LoadFlag) {
     let families = &[
-        "JetBrains Mono",
+        "Noto Sans Mono",
         "monospace",
         "DejaVu Sans Mono",
         "Liberation Mono",
