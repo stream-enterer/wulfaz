@@ -246,6 +246,10 @@ dependencies from source code.
 ```
 CLAUDE.md
 Cargo.toml
+.workflow/
+  features.md            # immutable feature contract
+  phases.md              # work phases and session protocol
+  progress.jsonl         # cross-session state tracker
 data/
   creatures.kdl          # creature definitions
   items.kdl              # item definitions
@@ -270,4 +274,12 @@ tests/
   invariants.rs          # property-based cross-system tests
   determinism.rs         # replay/seed tests
 ```
+
+## Workflow Tracking
+
+`.workflow/` tracks feature implementation across sessions. The files are
+self-documenting — read them before starting on a new feature.
+
+Immutability rule: MAY mark features complete after verification. MAY NOT
+modify acceptance criteria, delete features, or mark features not applicable.
 
