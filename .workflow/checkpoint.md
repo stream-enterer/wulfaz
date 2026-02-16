@@ -1,21 +1,30 @@
 # Checkpoint
 
 ## Active Task
-cdda_porting_prompt_final.md — ALL PHASES COMPLETE.
+None — utility scorer implementation complete.
 
 ## Completed
-- Phase 1: 00_DEPENDENCY_GRAPH.md, 01_JSON_TYPE_REGISTRY.md (commit 0ae51b0)
-- Phase 2: 02_TERRAIN_AND_FURNITURE.md, 03_MAP_AND_SUBMAP.md (commit 4122759)
-- Phase 3: 04_OVERMAP_GENERATION.md, 05_REGION_SETTINGS.md (commit 2a61b0d)
-- Phase 4: 06_LOCAL_MAPGEN.md, 07_PALETTE_SYSTEM.md, 08_MAP_EXTRAS_AND_FIELDS.md,
-  09_SUPPORTING_SYSTEMS.md, 10_ANTIPATTERN_CHECKLIST.md (pending commit)
+- Utility scorer (Phase 3 decision system) fully implemented and tested.
 
-## Deliverables
-11 reference documents in docs/cdda_reference/ covering:
-- Dependency graph, type registry, terrain/furniture, map/submap storage
-- Overmap generation, region settings, local mapgen, palette system
-- Map extras/fields/traps, supporting systems, antipattern checklist
-Tag: cdda-reference-v1
+## Modified Files
+- `Cargo.toml` — added serde + ron deps
+- `src/components.rs` — ActionId, Intention, ActionState types
+- `src/world.rs` — new tables, despawn, validate_world
+- `src/systems/decisions.rs` — scorer system (config types, curves, run_decisions) + 18 tests
+- `src/systems/mod.rs` — added decisions module
+- `src/main.rs` — wired run_decisions into Phase 3, load_utility_config call
+- `src/loading.rs` — load_utility_config, ActionState init in load_creatures
+- `src/systems/eating.rs` — gates on Eat intention with legacy fallback
+- `src/systems/combat.rs` — gates on Attack intention with legacy fallback
+- `src/systems/wander.rs` — skips entities with non-Wander intention
+- `data/utility.ron` — RON config with Idle/Wander/Eat/Attack curves
+- `tests/determinism.rs` — updated for Phase 3 (run_decisions, ActionState, intentions snapshot)
+
+## Decisions
+- Config types live in decisions.rs, imported by world.rs (Option A)
+- RON for config (separates engine tuning from KDL game content)
+- Phase 4 systems use fallback logic when no intention present (backward compat)
+- Rust 2024 edition requires `|&(&e, _)|` pattern in filter closures
 
 ## Next Action
-Commit Phase 4 files and tag cdda-reference-v1.
+All tests pass (225 total). Ready for commit.

@@ -1,4 +1,4 @@
-use crate::components::{Entity, MoveCooldown, Position, Tick};
+use crate::components::{ActionId, Entity, MoveCooldown, Position, Tick};
 use crate::events::Event;
 use crate::world::World;
 use rand::RngExt;
@@ -27,6 +27,13 @@ pub fn run_wander(world: &mut World, tick: Tick) {
         .keys()
         .filter(|e| world.speeds.contains_key(e))
         .filter(|e| !world.pending_deaths.contains(e))
+        .filter(|e| {
+            // Skip if entity has a non-Wander intention
+            world
+                .intentions
+                .get(e)
+                .is_none_or(|i| i.action == ActionId::Wander)
+        })
         .copied()
         .collect();
     candidates.sort_by_key(|e| e.0);

@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+
+use serde::{Deserialize, Serialize};
 
 /// Unique entity identifier. Never use raw u64 where an Entity is meant.
 /// Never cast between Entity and Tick.
@@ -74,6 +77,30 @@ pub struct Name {
 #[derive(Debug, Clone, Copy)]
 pub struct Nutrition {
     pub value: f32,
+}
+
+/// Available actions for the utility scorer. Variant order determines tiebreaking priority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ActionId {
+    Idle,
+    Wander,
+    Eat,
+    Attack,
+}
+
+/// What an entity intends to do this tick, written by the Phase 3 scorer.
+#[derive(Debug, Clone)]
+pub struct Intention {
+    pub action: ActionId,
+    pub target: Option<Entity>,
+}
+
+/// Per-entity scoring state: current action, how long it's been doing it, cooldowns.
+#[derive(Debug, Clone)]
+pub struct ActionState {
+    pub current_action: Option<ActionId>,
+    pub ticks_in_action: u64,
+    pub cooldowns: HashMap<ActionId, u64>,
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use crate::components::{Entity, Tick};
+use crate::components::{ActionId, Entity, Tick};
 use crate::events::Event;
 use crate::world::World;
 
@@ -8,7 +8,13 @@ pub fn run_eating(world: &mut World, tick: Tick) {
         .hungers
         .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
-        .filter(|&(_, h)| h.current > h.max * 0.5) // hungry enough to eat
+        .filter(|&(&e, h)| {
+            if let Some(intention) = world.intentions.get(&e) {
+                intention.action == ActionId::Eat
+            } else {
+                h.current > h.max * 0.5 // legacy fallback
+            }
+        })
         .filter_map(|(&e, _)| {
             let pos = world.positions.get(&e)?;
             Some((e, pos.x, pos.y, 0.0))
@@ -33,6 +39,20 @@ pub fn run_eating(world: &mut World, tick: Tick) {
     let mut consumed: Vec<Entity> = Vec::new();
 
     for (eater, ex, ey, _) in &hungry {
+        // Prefer intention target if set and valid
+        if let Some(target) = world.intentions.get(eater).and_then(|i| i.target)
+            && let Some(&(_, nutrition_value, fx, fy)) =
+                food_items.iter().find(|(e, _, _, _)| *e == target)
+            && !consumed.contains(&target)
+            && fx == *ex
+            && fy == *ey
+            && nutrition_value > 0.0
+        {
+            eat_actions.push((*eater, target, nutrition_value));
+            consumed.push(target);
+            continue;
+        }
+        // Fallback: first food at same position
         for &(food_entity, nutrition_value, fx, fy) in &food_items {
             if consumed.contains(&food_entity) {
                 continue;

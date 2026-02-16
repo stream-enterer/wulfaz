@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use rand::RngExt;
 
 use crate::components::*;
 use crate::events::Event;
+use crate::systems::decisions::UtilityConfig;
 use crate::tile_map::Terrain;
 use crate::world::World;
 
@@ -39,6 +42,23 @@ fn child_f64(children: &kdl::KdlDocument, key: &str) -> Option<f64> {
     let val = children.get_arg(key)?;
     val.as_float()
         .or_else(|| val.as_integer().map(|i| i as f64))
+}
+
+/// Load utility scorer config from a RON file.
+pub fn load_utility_config(world: &mut World, path: &str) {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("failed to read {}: {}, using default config", path, e);
+            return;
+        }
+    };
+    match ron::from_str::<UtilityConfig>(&content) {
+        Ok(config) => world.utility_config = config,
+        Err(e) => {
+            log::warn!("failed to parse RON {}: {}, using default config", path, e);
+        }
+    }
 }
 
 /// Load creatures from a KDL file and spawn them into the world.
@@ -111,6 +131,14 @@ pub fn load_creatures(world: &mut World, path: &str) {
             },
         );
         world.speeds.insert(e, Speed { value: speed });
+        world.action_states.insert(
+            e,
+            ActionState {
+                current_action: None,
+                ticks_in_action: 0,
+                cooldowns: HashMap::new(),
+            },
+        );
 
         world.events.push(Event::Spawned {
             entity: e,

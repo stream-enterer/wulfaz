@@ -5,6 +5,7 @@ use rand::rngs::StdRng;
 use crate::components::*;
 use crate::events::EventLog;
 use crate::rng::create_rng;
+use crate::systems::decisions::UtilityConfig;
 use crate::tile_map::TileMap;
 
 pub struct World {
@@ -23,12 +24,15 @@ pub struct World {
     pub icons: HashMap<Entity, Icon>,
     pub names: HashMap<Entity, Name>,
     pub nutritions: HashMap<Entity, Nutrition>,
+    pub intentions: HashMap<Entity, Intention>,
+    pub action_states: HashMap<Entity, ActionState>,
 
     // Non-property-table fields
     pub tiles: TileMap,
     pub events: EventLog,
     pub rng: StdRng,
     pub tick: Tick,
+    pub utility_config: UtilityConfig,
 }
 
 impl World {
@@ -48,11 +52,14 @@ impl World {
             icons: HashMap::new(),
             names: HashMap::new(),
             nutritions: HashMap::new(),
+            intentions: HashMap::new(),
+            action_states: HashMap::new(),
 
             tiles: TileMap::new(64, 64),
             events: EventLog::default_capacity(),
             rng: create_rng(seed),
             tick: Tick(0),
+            utility_config: UtilityConfig::default(),
         }
     }
 
@@ -79,6 +86,8 @@ impl World {
         self.icons.remove(&entity);
         self.names.remove(&entity);
         self.nutritions.remove(&entity);
+        self.intentions.remove(&entity);
+        self.action_states.remove(&entity);
     }
 }
 
@@ -157,6 +166,22 @@ pub fn validate_world(world: &World) {
             entity
         );
     }
+
+    for entity in world.intentions.keys() {
+        assert!(
+            world.alive.contains(entity),
+            "zombie entity {:?} in intentions but not in alive",
+            entity
+        );
+    }
+
+    for entity in world.action_states.keys() {
+        assert!(
+            world.alive.contains(entity),
+            "zombie entity {:?} in action_states but not in alive",
+            entity
+        );
+    }
 }
 
 #[cfg(test)]
@@ -215,6 +240,21 @@ mod tests {
             },
         );
         world.nutritions.insert(e, Nutrition { value: 40.0 });
+        world.intentions.insert(
+            e,
+            Intention {
+                action: ActionId::Idle,
+                target: None,
+            },
+        );
+        world.action_states.insert(
+            e,
+            ActionState {
+                current_action: None,
+                ticks_in_action: 0,
+                cooldowns: HashMap::new(),
+            },
+        );
 
         world.despawn(e);
 
@@ -228,6 +268,8 @@ mod tests {
         assert!(!world.icons.contains_key(&e));
         assert!(!world.names.contains_key(&e));
         assert!(!world.nutritions.contains_key(&e));
+        assert!(!world.intentions.contains_key(&e));
+        assert!(!world.action_states.contains_key(&e));
     }
 
     #[test]

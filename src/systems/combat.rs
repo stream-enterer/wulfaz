@@ -1,4 +1,4 @@
-use crate::components::{Entity, Tick};
+use crate::components::{ActionId, Entity, Tick};
 use crate::events::Event;
 use crate::world::World;
 use rand::RngExt;
@@ -29,7 +29,13 @@ pub fn run_combat(world: &mut World, tick: Tick) {
 
     for i in 0..combatants.len() {
         let (attacker, ax, ay, aggression) = combatants[i];
-        if aggression <= 0.5 {
+
+        // Gate on intention if present, else legacy fallback
+        if let Some(intention) = world.intentions.get(&attacker) {
+            if intention.action != ActionId::Attack {
+                continue;
+            }
+        } else if aggression <= 0.5 {
             continue;
         }
 
@@ -39,25 +45,52 @@ pub fn run_combat(world: &mut World, tick: Tick) {
             continue;
         }
 
-        for (j, &(defender, dx, dy, _)) in combatants.iter().enumerate() {
-            if i == j {
-                continue;
-            }
-            if ax == dx && ay == dy {
-                // Calculate damage
-                let atk = world
-                    .combat_stats
-                    .get(&attacker)
-                    .map(|cs| cs.attack)
-                    .unwrap_or(0.0);
-                let def = world
-                    .combat_stats
-                    .get(&defender)
-                    .map(|cs| cs.defense)
-                    .unwrap_or(0.0);
-                let damage = (atk - def).max(1.0);
-                attacks.push((attacker, defender, damage));
-                break; // one attack per attacker per tick
+        // Prefer intention target if set and valid (same tile, alive)
+        let preferred_target = world.intentions.get(&attacker).and_then(|i| i.target);
+
+        let mut found_target = false;
+        if let Some(target) = preferred_target
+            && let Some(&(defender, dx, dy, _)) =
+                combatants.iter().find(|(e, _, _, _)| *e == target)
+            && defender != attacker
+            && ax == dx
+            && ay == dy
+        {
+            let atk = world
+                .combat_stats
+                .get(&attacker)
+                .map(|cs| cs.attack)
+                .unwrap_or(0.0);
+            let def = world
+                .combat_stats
+                .get(&defender)
+                .map(|cs| cs.defense)
+                .unwrap_or(0.0);
+            let damage = (atk - def).max(1.0);
+            attacks.push((attacker, defender, damage));
+            found_target = true;
+        }
+
+        if !found_target {
+            for (j, &(defender, dx, dy, _)) in combatants.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                if ax == dx && ay == dy {
+                    let atk = world
+                        .combat_stats
+                        .get(&attacker)
+                        .map(|cs| cs.attack)
+                        .unwrap_or(0.0);
+                    let def = world
+                        .combat_stats
+                        .get(&defender)
+                        .map(|cs| cs.defense)
+                        .unwrap_or(0.0);
+                    let damage = (atk - def).max(1.0);
+                    attacks.push((attacker, defender, damage));
+                    break; // one attack per attacker per tick
+                }
             }
         }
     }

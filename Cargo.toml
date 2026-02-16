@@ -13,3 +13,5 @@ freetype-rs = "0.38"
 bytemuck = { version = "1", features = ["derive"] }
 kdl = "6.5.0"
 rand = "0.10.0"
+serde = { version = "1", features = ["derive"] }
+ron = "0.9"

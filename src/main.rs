@@ -20,6 +20,7 @@ mod world;
 use components::Tick;
 use systems::combat::run_combat;
 use systems::death::run_death;
+use systems::decisions::run_decisions;
 use systems::eating::run_eating;
 use systems::hunger::run_hunger;
 use systems::temperature::run_temperature;
@@ -277,7 +278,7 @@ impl ApplicationHandler for App {
                     run_hunger(&mut self.world, tick);
 
                     // === Phase 3: Decisions ===
-                    // (no decision systems yet)
+                    run_decisions(&mut self.world, tick);
 
                     // === Phase 4: Actions ===
                     run_wander(&mut self.world, tick);
@@ -366,6 +367,7 @@ fn main() {
     loading::load_terrain(&mut world, "data/terrain.kdl");
     loading::load_creatures(&mut world, "data/creatures.kdl");
     loading::load_items(&mut world, "data/items.kdl");
+    loading::load_utility_config(&mut world, "data/utility.ron");
 
     let event_loop = EventLoop::new().unwrap();
     let mut app = App {

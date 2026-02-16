@@ -16,9 +16,12 @@
 //! pub mod world;
 //! ```
 
+use std::collections::HashMap;
+
 use wulfaz::components::*;
 use wulfaz::systems::combat::run_combat;
 use wulfaz::systems::death::run_death;
+use wulfaz::systems::decisions::run_decisions;
 use wulfaz::systems::eating::run_eating;
 use wulfaz::systems::hunger::run_hunger;
 use wulfaz::systems::temperature::run_temperature;
@@ -59,6 +62,14 @@ fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
             value: "Creature".to_string(),
         },
     );
+    world.action_states.insert(
+        e,
+        ActionState {
+            current_action: None,
+            ticks_in_action: 0,
+            cooldowns: HashMap::new(),
+        },
+    );
     e
 }
 
@@ -83,7 +94,8 @@ fn run_full_tick(world: &mut World, tick: Tick) {
     run_temperature(world, tick);
     // Phase 2: Needs
     run_hunger(world, tick);
-    // Phase 3: Decisions (no systems yet)
+    // Phase 3: Decisions
+    run_decisions(world, tick);
     // Phase 4: Actions
     run_wander(world, tick);
     run_eating(world, tick);
@@ -95,6 +107,7 @@ fn run_full_tick(world: &mut World, tick: Tick) {
 /// Set up a standard scenario for determinism testing.
 /// Uses the provided world (which already has its seed set).
 fn setup_scenario(world: &mut World) {
+    wulfaz::loading::load_utility_config(world, "data/utility.ron");
     // Spread creatures across the grid
     for i in 0..6 {
         spawn_creature(world, i * 4, i * 3);
@@ -127,6 +140,8 @@ struct WorldSnapshot {
     hungers: Vec<(u64, u32)>, // f32 bits as u32 for exact comparison
     /// Sorted (entity_id, health_current) for all entities with health.
     healths: Vec<(u64, u32)>,
+    /// Sorted (entity_id, action_id_ordinal) for all entities with intentions.
+    intentions: Vec<(u64, u8)>,
     /// Total event count in the log.
     event_count: usize,
 }
@@ -157,12 +172,20 @@ impl WorldSnapshot {
             .collect();
         healths.sort_by_key(|&(id, _)| id);
 
+        let mut intentions: Vec<(u64, u8)> = world
+            .intentions
+            .iter()
+            .map(|(&e, i)| (e.0, i.action as u8))
+            .collect();
+        intentions.sort_by_key(|&(id, _)| id);
+
         Self {
             alive_count: world.alive.len(),
             alive_ids,
             positions,
             hungers,
             healths,
+            intentions,
             event_count: world.events.len(),
         }
     }
@@ -175,6 +198,7 @@ impl PartialEq for WorldSnapshot {
             && self.positions == other.positions
             && self.hungers == other.hungers
             && self.healths == other.healths
+            && self.intentions == other.intentions
             && self.event_count == other.event_count
     }
 }
@@ -187,6 +211,7 @@ impl std::fmt::Debug for WorldSnapshot {
             .field("positions_len", &self.positions.len())
             .field("hungers_len", &self.hungers.len())
             .field("healths_len", &self.healths.len())
+            .field("intentions_len", &self.intentions.len())
             .field("event_count", &self.event_count)
             .finish()
     }
@@ -309,6 +334,7 @@ fn deterministic_with_dense_combat() {
 
     // Set up a scenario with lots of combat: many creatures on one tile
     let setup = |world: &mut World| {
+        wulfaz::loading::load_utility_config(world, "data/utility.ron");
         for _ in 0..12 {
             spawn_creature(world, 5, 5);
         }
