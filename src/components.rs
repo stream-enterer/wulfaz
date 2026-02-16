@@ -95,6 +95,13 @@ pub struct Intention {
     pub target: Option<Entity>,
 }
 
+/// Cached wander destination for A* pathfinding.
+#[derive(Debug, Clone, Copy)]
+pub struct WanderTarget {
+    pub goal_x: i32,
+    pub goal_y: i32,
+}
+
 /// Per-entity scoring state: current action, how long it's been doing it, cooldowns.
 #[derive(Debug, Clone)]
 pub struct ActionState {

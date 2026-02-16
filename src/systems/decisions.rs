@@ -5,6 +5,9 @@ use serde::Deserialize;
 use crate::components::{ActionId, Entity, Intention, Tick};
 use crate::world::World;
 
+/// Chebyshev distance within which entities sense food/enemies.
+const SENSE_RANGE: i32 = 20;
+
 // ---------------------------------------------------------------------------
 // Config types — scoring internals, not per-entity data
 // ---------------------------------------------------------------------------
@@ -110,7 +113,9 @@ fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
                 .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
                 .filter(|&(&e, _)| {
                     if let Some(fp) = world.positions.get(&e) {
-                        fp.x == pos.x && fp.y == pos.y
+                        let dx = (fp.x - pos.x).abs();
+                        let dy = (fp.y - pos.y).abs();
+                        dx.max(dy) <= SENSE_RANGE
                     } else {
                         false
                     }
@@ -129,7 +134,9 @@ fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
                 .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
                 .filter(|&(&e, _)| {
                     if let Some(ep) = world.positions.get(&e) {
-                        ep.x == pos.x && ep.y == pos.y
+                        let dx = (ep.x - pos.x).abs();
+                        let dy = (ep.y - pos.y).abs();
+                        dx.max(dy) <= SENSE_RANGE
                     } else {
                         false
                     }
@@ -158,20 +165,18 @@ fn select_eat_target(world: &World, entity: Entity) -> Option<Entity> {
         .nutritions
         .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
-        .filter(|&(&e, _)| {
-            if let Some(fp) = world.positions.get(&e) {
-                fp.x == pos.x && fp.y == pos.y
-            } else {
-                false
-            }
+        .filter_map(|(&e, n)| {
+            let fp = world.positions.get(&e)?;
+            let dist = (fp.x - pos.x).abs().max((fp.y - pos.y).abs());
+            Some((e, dist, n.value))
         })
-        .max_by(|a, b| {
-            a.1.value
-                .partial_cmp(&b.1.value)
-                .unwrap_or(std::cmp::Ordering::Equal)
+        .min_by(|a, b| {
+            // Nearest first, then highest nutrition, then lowest entity ID
+            a.1.cmp(&b.1)
+                .then_with(|| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal))
                 .then_with(|| a.0.0.cmp(&b.0.0))
         })
-        .map(|(&e, _)| e)
+        .map(|(e, _, _)| e)
 }
 
 fn select_attack_target(world: &World, entity: Entity) -> Option<Entity> {
@@ -181,23 +186,19 @@ fn select_attack_target(world: &World, entity: Entity) -> Option<Entity> {
         .iter()
         .filter(|&(&e, _)| e != entity)
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
-        .filter(|&(&e, _)| {
-            if let Some(ep) = world.positions.get(&e) {
-                ep.x == pos.x && ep.y == pos.y
-            } else {
-                false
-            }
-        })
         .filter_map(|(&e, _)| {
+            let ep = world.positions.get(&e)?;
             let health = world.healths.get(&e)?;
-            Some((e, health.current))
+            let dist = (ep.x - pos.x).abs().max((ep.y - pos.y).abs());
+            Some((e, dist, health.current))
         })
         .min_by(|a, b| {
-            a.1.partial_cmp(&b.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            // Nearest first, then lowest health, then lowest entity ID
+            a.1.cmp(&b.1)
+                .then_with(|| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
                 .then_with(|| a.0.0.cmp(&b.0.0))
         })
-        .map(|(e, _)| e)
+        .map(|(e, _, _)| e)
 }
 
 // ---------------------------------------------------------------------------
@@ -590,12 +591,12 @@ mod tests {
         let e = spawn_with_action_state(&mut world);
         world.positions.insert(e, Position { x: 5, y: 5 });
 
-        // Add 2 food items at same position
+        // Add 2 food items within sense range
         let f1 = world.spawn();
         world.positions.insert(f1, Position { x: 5, y: 5 });
         world.nutritions.insert(f1, Nutrition { value: 10.0 });
         let f2 = world.spawn();
-        world.positions.insert(f2, Position { x: 5, y: 5 });
+        world.positions.insert(f2, Position { x: 10, y: 10 }); // within SENSE_RANGE
         world.nutritions.insert(f2, Nutrition { value: 20.0 });
 
         let val = read_input(&InputAxis::FoodNearby, &world, e);
@@ -873,7 +874,28 @@ mod tests {
     // --- Target selection ---
 
     #[test]
-    fn test_eat_selects_highest_nutrition_target() {
+    fn test_eat_selects_nearest_target() {
+        let mut world = World::new_with_seed(42);
+        let e = world.spawn();
+        world.positions.insert(e, Position { x: 5, y: 5 });
+
+        // Far food with high nutrition
+        let f1 = world.spawn();
+        world.positions.insert(f1, Position { x: 15, y: 15 });
+        world.nutritions.insert(f1, Nutrition { value: 30.0 });
+
+        // Near food with low nutrition
+        let f2 = world.spawn();
+        world.positions.insert(f2, Position { x: 6, y: 5 });
+        world.nutritions.insert(f2, Nutrition { value: 10.0 });
+
+        // Nearest wins (distance 1 vs 10)
+        let target = select_eat_target(&world, e);
+        assert_eq!(target, Some(f2));
+    }
+
+    #[test]
+    fn test_eat_selects_highest_nutrition_at_same_distance() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
         world.positions.insert(e, Position { x: 5, y: 5 });
@@ -886,12 +908,70 @@ mod tests {
         world.positions.insert(f2, Position { x: 5, y: 5 });
         world.nutritions.insert(f2, Nutrition { value: 30.0 });
 
+        // Same distance → highest nutrition wins
         let target = select_eat_target(&world, e);
         assert_eq!(target, Some(f2));
     }
 
     #[test]
-    fn test_attack_selects_lowest_health_target() {
+    fn test_attack_selects_nearest_target() {
+        let mut world = World::new_with_seed(42);
+        let e = world.spawn();
+        world.positions.insert(e, Position { x: 5, y: 5 });
+        world.combat_stats.insert(
+            e,
+            CombatStats {
+                attack: 10.0,
+                defense: 5.0,
+                aggression: 0.8,
+            },
+        );
+
+        // Near enemy with high health
+        let t1 = world.spawn();
+        world.positions.insert(t1, Position { x: 6, y: 5 });
+        world.combat_stats.insert(
+            t1,
+            CombatStats {
+                attack: 5.0,
+                defense: 3.0,
+                aggression: 0.0,
+            },
+        );
+        world.healths.insert(
+            t1,
+            Health {
+                current: 80.0,
+                max: 100.0,
+            },
+        );
+
+        // Far enemy with low health
+        let t2 = world.spawn();
+        world.positions.insert(t2, Position { x: 15, y: 15 });
+        world.combat_stats.insert(
+            t2,
+            CombatStats {
+                attack: 5.0,
+                defense: 3.0,
+                aggression: 0.0,
+            },
+        );
+        world.healths.insert(
+            t2,
+            Health {
+                current: 30.0,
+                max: 100.0,
+            },
+        );
+
+        // Nearest wins (distance 1 vs 10)
+        let target = select_attack_target(&world, e);
+        assert_eq!(target, Some(t1));
+    }
+
+    #[test]
+    fn test_attack_selects_lowest_health_at_same_distance() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
         world.positions.insert(e, Position { x: 5, y: 5 });
@@ -940,6 +1020,7 @@ mod tests {
             },
         );
 
+        // Same distance → lowest health wins
         let target = select_attack_target(&world, e);
         assert_eq!(target, Some(t2));
     }

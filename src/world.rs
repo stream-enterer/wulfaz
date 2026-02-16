@@ -26,6 +26,7 @@ pub struct World {
     pub nutritions: HashMap<Entity, Nutrition>,
     pub intentions: HashMap<Entity, Intention>,
     pub action_states: HashMap<Entity, ActionState>,
+    pub wander_targets: HashMap<Entity, WanderTarget>,
 
     // Non-property-table fields
     pub tiles: TileMap,
@@ -54,6 +55,7 @@ impl World {
             nutritions: HashMap::new(),
             intentions: HashMap::new(),
             action_states: HashMap::new(),
+            wander_targets: HashMap::new(),
 
             tiles: TileMap::new(64, 64),
             events: EventLog::default_capacity(),
@@ -88,6 +90,7 @@ impl World {
         self.nutritions.remove(&entity);
         self.intentions.remove(&entity);
         self.action_states.remove(&entity);
+        self.wander_targets.remove(&entity);
     }
 }
 
@@ -182,6 +185,14 @@ pub fn validate_world(world: &World) {
             entity
         );
     }
+
+    for entity in world.wander_targets.keys() {
+        assert!(
+            world.alive.contains(entity),
+            "zombie entity {:?} in wander_targets but not in alive",
+            entity
+        );
+    }
 }
 
 #[cfg(test)]
@@ -255,6 +266,13 @@ mod tests {
                 cooldowns: HashMap::new(),
             },
         );
+        world.wander_targets.insert(
+            e,
+            WanderTarget {
+                goal_x: 3,
+                goal_y: 7,
+            },
+        );
 
         world.despawn(e);
 
@@ -270,6 +288,7 @@ mod tests {
         assert!(!world.nutritions.contains_key(&e));
         assert!(!world.intentions.contains_key(&e));
         assert!(!world.action_states.contains_key(&e));
+        assert!(!world.wander_targets.contains_key(&e));
     }
 
     #[test]
