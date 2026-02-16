@@ -1,8 +1,26 @@
 /target
 
+# IDE
+.idea
+.vscode
 
-# Added by cargo
-#
-# already existing elements were commented out
+# Claude Code
+.claude/
+.mcp.json
 
-#/target
+# Shell/personal dotfiles
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+.gitconfig
+.gitmodules
+.ripgreprc
+
+# Stray git internals (sandbox artifacts)
+HEAD
+config
+hooks
+objects
+refs
