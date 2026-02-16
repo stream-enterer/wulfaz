@@ -247,9 +247,8 @@ dependencies from source code.
 CLAUDE.md
 Cargo.toml
 .workflow/
-  features.md            # immutable feature contract
-  phases.md              # work phases and session protocol
-  progress.jsonl         # cross-session state tracker
+  backlog.md             # incomplete tasks only — delete when done
+  checkpoint.md          # rolling state snapshot — overwritten, never appended
 data/
   creatures.kdl          # creature definitions
   items.kdl              # item definitions
@@ -275,11 +274,17 @@ tests/
   determinism.rs         # replay/seed tests
 ```
 
-## Workflow Tracking
+## Checkpoint Protocol
 
-`.workflow/` tracks feature implementation across sessions. The files are
-self-documenting — read them before starting on a new feature.
-
-Immutability rule: MAY mark features complete after verification. MAY NOT
-modify acceptance criteria, delete features, or mark features not applicable.
+1. Read `.workflow/checkpoint.md` at session start before doing anything else.
+2. Overwrite `checkpoint.md` before every git commit. Capture: active task,
+   modified files, next action, decisions made, tests needed.
+3. Overwrite `checkpoint.md` when switching between tasks.
+4. When completing a task, delete it from `backlog.md` and reset `checkpoint.md`.
+5. `checkpoint.md` MUST stay under 50 lines. Capture decisions and next
+   actions, not history.
+6. Use the in-session task list (TaskCreate) for sub-task tracking within a
+   session. The checkpoint bridges sessions and compaction boundaries only.
+7. `backlog.md` contains only incomplete work. Completed tasks are deleted,
+   not marked done.
 
