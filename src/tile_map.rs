@@ -76,7 +76,7 @@ impl TileMap {
         self.get_terrain(x, y).is_some_and(|t| t.is_walkable())
     }
 
-    /// A* pathfinding from start to goal on the tile grid (8-directional, uniform cost).
+    /// A* pathfinding from start to goal on the tile grid (8-directional, √2 diagonal cost).
     /// Returns the path as positions from start (exclusive) to goal (inclusive).
     /// Returns None if no path exists within the search limit.
     pub fn find_path(&self, start: (i32, i32), goal: (i32, i32)) -> Option<Vec<(i32, i32)>> {
@@ -95,6 +95,9 @@ impl TileMap {
             return None;
         }
 
+        const CARDINAL_COST: u32 = 100;
+        const DIAGONAL_COST: u32 = 141; // √2 × 100, truncated
+
         const MAX_EXPANDED: usize = 8192;
         const DIRS: [(i32, i32); 8] = [
             (0, -1),
@@ -107,11 +110,13 @@ impl TileMap {
             (-1, -1),
         ];
 
-        // Chebyshev distance heuristic (consistent for 8-dir uniform cost)
+        // Octile distance heuristic (consistent for 8-dir with √2 diagonal cost)
         let heuristic = |a: (i32, i32), b: (i32, i32)| -> u32 {
             let dx = (a.0 - b.0).unsigned_abs();
             let dy = (a.1 - b.1).unsigned_abs();
-            dx.max(dy)
+            let diag = dx.min(dy);
+            let card = dx.max(dy) - diag;
+            diag * DIAGONAL_COST + card * CARDINAL_COST
         };
 
         // Open set: min-heap of (f_score, x, y)
@@ -169,7 +174,13 @@ impl TileMap {
                     continue;
                 }
 
-                let new_g = current_g + 1;
+                let is_diagonal = dx != 0 && dy != 0;
+                let step_cost = if is_diagonal {
+                    DIAGONAL_COST
+                } else {
+                    CARDINAL_COST
+                };
+                let new_g = current_g + step_cost;
 
                 if new_g < *g_score.get(&neighbor).unwrap_or(&u32::MAX) {
                     g_score.insert(neighbor, new_g);
@@ -182,6 +193,11 @@ impl TileMap {
 
         None
     }
+}
+
+/// Returns true if the step from `a` to `b` is diagonal (both axes change).
+pub fn is_diagonal_step(a: (i32, i32), b: (i32, i32)) -> bool {
+    a.0 != b.0 && a.1 != b.1
 }
 
 #[cfg(test)]
@@ -384,10 +400,44 @@ mod tests {
 
     #[test]
     fn test_find_path_optimal_length() {
-        // Open map, path should be Chebyshev distance
+        // Open map, path should be Chebyshev distance (step count)
         let map = TileMap::new(20, 20);
         let path = map.find_path((0, 0), (10, 7)).unwrap();
-        // Chebyshev distance = max(10, 7) = 10
+        // Chebyshev distance = max(10, 7) = 10 steps
         assert_eq!(path.len(), 10);
+    }
+
+    #[test]
+    fn test_find_path_prefers_cardinal_when_shorter() {
+        // Purely cardinal path: (0,0) to (3,0) should be 3 cardinal steps
+        let map = TileMap::new(10, 10);
+        let path = map.find_path((0, 0), (3, 0)).unwrap();
+        assert_eq!(path.len(), 3);
+        // Each step should only change x, not y (all cardinal)
+        let mut prev = (0, 0);
+        for &step in &path {
+            assert_eq!(step.1, 0, "y should not change for a horizontal path");
+            assert_eq!(
+                (step.0 - prev.0).abs(),
+                1,
+                "should advance one tile at a time"
+            );
+            prev = step;
+        }
+    }
+
+    #[test]
+    fn test_diagonal_step_detection() {
+        use super::is_diagonal_step;
+        // Cardinal steps
+        assert!(!is_diagonal_step((0, 0), (1, 0)));
+        assert!(!is_diagonal_step((0, 0), (0, 1)));
+        assert!(!is_diagonal_step((5, 3), (5, 4)));
+        assert!(!is_diagonal_step((5, 3), (4, 3)));
+        // Diagonal steps
+        assert!(is_diagonal_step((0, 0), (1, 1)));
+        assert!(is_diagonal_step((3, 3), (2, 4)));
+        assert!(is_diagonal_step((5, 5), (4, 4)));
+        assert!(is_diagonal_step((0, 0), (1, -1)));
     }
 }

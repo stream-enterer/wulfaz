@@ -1,11 +1,16 @@
 use crate::components::{ActionId, Entity, MoveCooldown, Position, Tick, WanderTarget};
 use crate::events::Event;
+use crate::tile_map::is_diagonal_step;
 use crate::world::World;
 use rand::RngExt;
 
 /// Ticks to cross one tile at speed 1. At 100 ticks/sec, speed 1 = 1 m/s.
 /// Cooldown = TICKS_PER_METER / speed.value.
 const TICKS_PER_METER: u32 = 100;
+
+/// Ticks for diagonal movement at speed 1: √2 × TICKS_PER_METER, truncated.
+/// Diagonal cooldown = TICKS_PER_DIAGONAL / speed.value.
+const TICKS_PER_DIAGONAL: u32 = 141;
 
 /// How far (Chebyshev) a wandering entity picks random destinations (30 meters).
 const WANDER_RANGE: i32 = 30;
@@ -58,13 +63,12 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             continue;
         };
 
-        let reset = TICKS_PER_METER / speed.value.max(1);
-
         let intention = world.intentions.get(&e);
         let action = intention.map(|i| i.action);
 
-        // Idle: skip movement but set cooldown
+        // Idle: skip movement but set cooldown (cardinal rate, no actual movement)
         if action == Some(ActionId::Idle) {
+            let reset = TICKS_PER_METER / speed.value.max(1);
             cooldown_updates.push((e, reset));
             continue;
         }
@@ -122,6 +126,13 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             let step_count = 1.min(path.len());
             if step_count > 0 {
                 let dest = path[step_count - 1];
+                let is_diag = is_diagonal_step((pos.x, pos.y), dest);
+                let base = if is_diag {
+                    TICKS_PER_DIAGONAL
+                } else {
+                    TICKS_PER_METER
+                };
+                let reset = base / speed.value.max(1);
                 moves.push((
                     e,
                     Position {
@@ -129,8 +140,10 @@ pub fn run_wander(world: &mut World, tick: Tick) {
                         y: dest.1,
                     },
                 ));
+                cooldown_updates.push((e, reset));
+            } else {
+                cooldown_updates.push((e, TICKS_PER_METER / speed.value.max(1)));
             }
-            cooldown_updates.push((e, reset));
 
             // Update wander target for Wander/no-intention entities
             if action != Some(ActionId::Eat) && action != Some(ActionId::Attack) {
@@ -165,6 +178,13 @@ pub fn run_wander(world: &mut World, tick: Tick) {
         // Clamp to tilemap bounds
         let x = (pos.x + dx).clamp(0, (map_w - 1).max(0));
         let y = (pos.y + dy).clamp(0, (map_h - 1).max(0));
+        let is_diag = is_diagonal_step((pos.x, pos.y), (x, y));
+        let base = if is_diag {
+            TICKS_PER_DIAGONAL
+        } else {
+            TICKS_PER_METER
+        };
+        let reset = base / speed.value.max(1);
         moves.push((e, Position { x, y }));
         cooldown_updates.push((e, reset));
         wander_target_updates.push((e, None));
@@ -253,9 +273,12 @@ mod tests {
         world.speeds.insert(e, Speed { value: 1 });
         // Move on first tick (no cooldown)
         run_wander(&mut world, Tick(0));
-        // Cooldown should now be TICKS_PER_METER / 1 = 100
+        // Cooldown depends on step direction: cardinal=100, diagonal=141
         let cd = world.move_cooldowns[&e].remaining;
-        assert_eq!(cd, TICKS_PER_METER);
+        assert!(
+            cd == TICKS_PER_METER || cd == TICKS_PER_DIAGONAL,
+            "cooldown {cd} should be {TICKS_PER_METER} (cardinal) or {TICKS_PER_DIAGONAL} (diagonal)"
+        );
     }
 
     #[test]
@@ -299,8 +322,14 @@ mod tests {
             dx,
             dy
         );
-        // Cooldown = TICKS_PER_METER / 3 = 33
-        assert_eq!(world.move_cooldowns[&e].remaining, TICKS_PER_METER / 3);
+        // Cooldown = base / 3: cardinal=33, diagonal=47
+        let cd = world.move_cooldowns[&e].remaining;
+        assert!(
+            cd == TICKS_PER_METER / 3 || cd == TICKS_PER_DIAGONAL / 3,
+            "cooldown {cd} should be {} (cardinal) or {} (diagonal)",
+            TICKS_PER_METER / 3,
+            TICKS_PER_DIAGONAL / 3
+        );
     }
 
     #[test]

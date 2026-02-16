@@ -173,7 +173,7 @@ Vec arrays directly.
 - `TICKS_PER_METER = 100` — at 100 ticks/sec, speed 1 = 1 tile per second = 1 m/s.
 - Default map: 256×256 (256m × 256m).
 - Melee/eat range: same tile (1m) — correct for sword/claw reach.
-- Diagonal movement costs 1 (known ~41% error vs √2, deferred fix).
+- Diagonal movement costs √2 (141/100 fixed-point). Cooldown scales accordingly.
 
 ## Data Files (KDL)
 
