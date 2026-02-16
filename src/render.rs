@@ -199,9 +199,9 @@ mod tests {
 
     #[test]
     fn empty_world_renders_all_grass() {
-        let world = World::new_with_seed(42);
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(64, 64);
         let output = render_full(&world);
-        // Default TileMap is 64x64, all Grass.
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 64);
         for line in &lines {

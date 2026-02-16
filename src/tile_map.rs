@@ -95,7 +95,7 @@ impl TileMap {
             return None;
         }
 
-        const MAX_EXPANDED: usize = 2048;
+        const MAX_EXPANDED: usize = 8192;
         const DIRS: [(i32, i32); 8] = [
             (0, -1),
             (1, -1),

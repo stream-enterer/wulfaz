@@ -164,6 +164,17 @@ world.tiles.set_temperature(x, y, temp)
 Systems that read/write tile data use these methods. Do not index the
 Vec arrays directly.
 
+## Spatial Scale
+
+**1 tile = 1 meter.** This is non-negotiable.
+
+- Every spatial constant MUST have a comment with real-world units.
+- Speed in `creatures.kdl` = meters per second.
+- `TICKS_PER_METER = 100` — at 100 ticks/sec, speed 1 = 1 tile per second = 1 m/s.
+- Default map: 256×256 (256m × 256m).
+- Melee/eat range: same tile (1m) — correct for sword/claw reach.
+- Diagonal movement costs 1 (known ~41% error vs √2, deferred fix).
+
 ## Data Files (KDL)
 
 Content is defined in `data/*.kdl`. The engine does not hardcode entity types.

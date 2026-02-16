@@ -22,7 +22,16 @@ use wulfaz::systems::eating::run_eating;
 use wulfaz::systems::hunger::run_hunger;
 use wulfaz::systems::temperature::run_temperature;
 use wulfaz::systems::wander::run_wander;
+use wulfaz::tile_map::TileMap;
 use wulfaz::world::{World, validate_world};
+
+/// Create a test world with a small 64×64 tilemap (instead of the default 256×256)
+/// to keep temperature iteration fast in tests.
+fn test_world(seed: u64) -> World {
+    let mut world = World::new_with_seed(seed);
+    world.tiles = TileMap::new(64, 64);
+    world
+}
 
 /// Spawn a creature with a full set of property table entries.
 /// Placed at the given grid position.
@@ -107,7 +116,7 @@ fn run_n_ticks(world: &mut World, n: u64) {
 
 #[test]
 fn no_zombie_entities_after_full_tick() {
-    let mut world = World::new_with_seed(42);
+    let mut world = test_world(42);
 
     // Spawn several creatures spread out so they don't immediately kill each other
     for i in 0..10 {
@@ -127,7 +136,7 @@ fn no_zombie_entities_after_full_tick() {
 
 #[test]
 fn entity_count_conservation() {
-    let mut world = World::new_with_seed(42);
+    let mut world = test_world(42);
 
     let initial_count = 8;
     for i in 0..initial_count {
@@ -165,7 +174,7 @@ fn entity_count_conservation() {
 
 #[test]
 fn pending_deaths_empty_after_death_phase() {
-    let mut world = World::new_with_seed(42);
+    let mut world = test_world(42);
 
     // Spawn creatures at same position to provoke combat deaths
     for _ in 0..6 {
@@ -199,7 +208,7 @@ fn pending_deaths_empty_after_death_phase() {
 
 #[test]
 fn all_property_table_keys_in_alive_set() {
-    let mut world = World::new_with_seed(42);
+    let mut world = test_world(42);
 
     // Mix of creatures and food items
     for i in 0..5 {
@@ -224,7 +233,7 @@ fn all_property_table_keys_in_alive_set() {
 
 #[test]
 fn no_zombies_with_dense_population() {
-    let mut world = World::new_with_seed(123);
+    let mut world = test_world(123);
 
     // Dense cluster: many creatures on same tile = lots of combat
     for _ in 0..20 {
@@ -248,7 +257,7 @@ fn no_zombies_with_dense_population() {
 
 #[test]
 fn dead_entities_removed_from_all_tables() {
-    let mut world = World::new_with_seed(42);
+    let mut world = test_world(42);
 
     let entities: Vec<Entity> = (0..10).map(|i| spawn_creature(&mut world, i, 0)).collect();
 

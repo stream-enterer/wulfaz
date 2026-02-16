@@ -37,7 +37,7 @@ pub fn run_temperature(world: &mut World, _tick: Tick) {
                 continue;
             }
 
-            // Drift 0.1 degrees toward target, but don't overshoot
+            // 0.1°C/tick = 10°C/sec drift rate (gameplay abstraction)
             let delta = diff.signum() * diff.abs().min(0.1);
             changes.push((x, y, current + delta));
         }

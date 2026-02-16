@@ -26,7 +26,16 @@ use wulfaz::systems::eating::run_eating;
 use wulfaz::systems::hunger::run_hunger;
 use wulfaz::systems::temperature::run_temperature;
 use wulfaz::systems::wander::run_wander;
+use wulfaz::tile_map::TileMap;
 use wulfaz::world::World;
+
+/// Create a test world with a small 64×64 tilemap (instead of the default 256×256)
+/// to keep temperature iteration fast in tests.
+fn test_world(seed: u64) -> World {
+    let mut world = World::new_with_seed(seed);
+    world.tiles = TileMap::new(64, 64);
+    world
+}
 
 /// Spawn a creature with full components at the given position.
 fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
@@ -226,12 +235,12 @@ fn same_seed_same_result() {
     let tick_count = 100;
 
     // Run 1
-    let mut world1 = World::new_with_seed(42);
+    let mut world1 = test_world(42);
     setup_scenario(&mut world1);
     let snap1 = run_and_snapshot(&mut world1, tick_count);
 
     // Run 2 — identical seed and setup
-    let mut world2 = World::new_with_seed(42);
+    let mut world2 = test_world(42);
     setup_scenario(&mut world2);
     let snap2 = run_and_snapshot(&mut world2, tick_count);
 
@@ -249,10 +258,10 @@ fn same_seed_same_result() {
 fn same_seed_identical_at_every_tick() {
     let tick_count = 50;
 
-    let mut world1 = World::new_with_seed(42);
+    let mut world1 = test_world(42);
     setup_scenario(&mut world1);
 
-    let mut world2 = World::new_with_seed(42);
+    let mut world2 = test_world(42);
     setup_scenario(&mut world2);
 
     for i in 0..tick_count {
@@ -275,13 +284,13 @@ fn same_seed_identical_at_every_tick() {
 
 #[test]
 fn different_seeds_different_results() {
-    let tick_count = 50;
+    let tick_count = 500;
 
-    let mut world1 = World::new_with_seed(42);
+    let mut world1 = test_world(42);
     setup_scenario(&mut world1);
     let snap1 = run_and_snapshot(&mut world1, tick_count);
 
-    let mut world2 = World::new_with_seed(99);
+    let mut world2 = test_world(99);
     setup_scenario(&mut world2);
     let snap2 = run_and_snapshot(&mut world2, tick_count);
 
@@ -309,11 +318,11 @@ fn multiple_replays_identical() {
     let seeds = [42u64, 7, 1337, 0, u64::MAX];
 
     for &seed in &seeds {
-        let mut world_a = World::new_with_seed(seed);
+        let mut world_a = test_world(seed);
         setup_scenario(&mut world_a);
         let snap_a = run_and_snapshot(&mut world_a, tick_count);
 
-        let mut world_b = World::new_with_seed(seed);
+        let mut world_b = test_world(seed);
         setup_scenario(&mut world_b);
         let snap_b = run_and_snapshot(&mut world_b, tick_count);
 
@@ -343,11 +352,11 @@ fn deterministic_with_dense_combat() {
         }
     };
 
-    let mut world1 = World::new_with_seed(42);
+    let mut world1 = test_world(42);
     setup(&mut world1);
     let snap1 = run_and_snapshot(&mut world1, tick_count);
 
-    let mut world2 = World::new_with_seed(42);
+    let mut world2 = test_world(42);
     setup(&mut world2);
     let snap2 = run_and_snapshot(&mut world2, tick_count);
 

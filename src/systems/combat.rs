@@ -6,7 +6,7 @@ use rand::RngExt;
 /// Phase 4 (Actions): Combat resolution.
 ///
 /// Finds entities with combat_stats, health, and position that share a tile
-/// with another combatant. Aggressive entities (aggression > 0.5) attack if
+/// with another combatant. Melee range: same tile = within 1 meter. Aggressive entities (aggression > 0.5) attack if
 /// an RNG check passes. Damage = attacker.attack - defender.defense (min 1.0).
 /// Defender health is reduced; if it drops to 0 or below, a death event is
 /// pushed and the defender is added to pending_deaths.

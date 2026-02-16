@@ -3,13 +3,12 @@ use crate::events::Event;
 use crate::world::World;
 use rand::RngExt;
 
-/// Base ticks between moves. Higher speed reduces this:
-/// interval = BASE_MOVE_TICKS / speed.value.
-/// At 100 ticks/sec with speed=2, entity moves ~10 times/sec.
-const BASE_MOVE_TICKS: u32 = 20;
+/// Ticks to cross one tile at speed 1. At 100 ticks/sec, speed 1 = 1 m/s.
+/// Cooldown = TICKS_PER_METER / speed.value.
+const TICKS_PER_METER: u32 = 100;
 
-/// How far (Chebyshev) a wandering entity picks random destinations.
-const WANDER_RANGE: i32 = 10;
+/// How far (Chebyshev) a wandering entity picks random destinations (30 meters).
+const WANDER_RANGE: i32 = 30;
 
 /// Phase 4 (Actions): Unified movement system.
 ///
@@ -59,8 +58,7 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             continue;
         };
 
-        let steps = speed.value;
-        let reset = BASE_MOVE_TICKS / steps.max(1);
+        let reset = TICKS_PER_METER / speed.value.max(1);
 
         let intention = world.intentions.get(&e);
         let action = intention.map(|i| i.action);
@@ -121,7 +119,7 @@ pub fn run_wander(world: &mut World, tick: Tick) {
         if let Some((gx, gy)) = goal
             && let Some(path) = world.tiles.find_path((pos.x, pos.y), (gx, gy))
         {
-            let step_count = (steps as usize).min(path.len());
+            let step_count = 1.min(path.len());
             if step_count > 0 {
                 let dest = path[step_count - 1];
                 moves.push((
@@ -152,27 +150,21 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             continue;
         }
 
-        // Fallback: random 8-directional steps
-        let mut x = pos.x;
-        let mut y = pos.y;
-        for _ in 0..steps {
-            let direction = world.rng.random_range(0..8);
-            let (dx, dy) = match direction {
-                0 => (0, -1),  // N
-                1 => (1, -1),  // NE
-                2 => (1, 0),   // E
-                3 => (1, 1),   // SE
-                4 => (0, 1),   // S
-                5 => (-1, 1),  // SW
-                6 => (-1, 0),  // W
-                _ => (-1, -1), // NW
-            };
-            x += dx;
-            y += dy;
-        }
+        // Fallback: single random 8-directional step
+        let direction = world.rng.random_range(0..8);
+        let (dx, dy) = match direction {
+            0 => (0, -1),  // N
+            1 => (1, -1),  // NE
+            2 => (1, 0),   // E
+            3 => (1, 1),   // SE
+            4 => (0, 1),   // S
+            5 => (-1, 1),  // SW
+            6 => (-1, 0),  // W
+            _ => (-1, -1), // NW
+        };
         // Clamp to tilemap bounds
-        x = x.clamp(0, (map_w - 1).max(0));
-        y = y.clamp(0, (map_h - 1).max(0));
+        let x = (pos.x + dx).clamp(0, (map_w - 1).max(0));
+        let y = (pos.y + dy).clamp(0, (map_h - 1).max(0));
         moves.push((e, Position { x, y }));
         cooldown_updates.push((e, reset));
         wander_target_updates.push((e, None));
@@ -261,9 +253,9 @@ mod tests {
         world.speeds.insert(e, Speed { value: 1 });
         // Move on first tick (no cooldown)
         run_wander(&mut world, Tick(0));
-        // Cooldown should now be BASE_MOVE_TICKS / 1 = 20
+        // Cooldown should now be TICKS_PER_METER / 1 = 100
         let cd = world.move_cooldowns[&e].remaining;
-        assert_eq!(cd, BASE_MOVE_TICKS);
+        assert_eq!(cd, TICKS_PER_METER);
     }
 
     #[test]
@@ -289,8 +281,8 @@ mod tests {
     }
 
     #[test]
-    fn test_wander_respects_speed_steps() {
-        // Higher speed → more steps per move, lower cooldown
+    fn test_wander_respects_speed_cooldown() {
+        // Higher speed → lower cooldown, but still 1 tile per action
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
         world.positions.insert(e, Position { x: 10, y: 10 });
@@ -299,15 +291,16 @@ mod tests {
         let new_pos = world.positions[&e];
         let dx = (new_pos.x - 10).abs();
         let dy = (new_pos.y - 10).abs();
-        // 8-directional: Chebyshev distance bounded by number of steps
-        assert!(
-            dx <= 3 && dy <= 3,
-            "displacement ({},{}) exceeds speed 3",
+        // 1 tile per action: Chebyshev distance exactly 1
+        assert_eq!(
+            dx.max(dy),
+            1,
+            "displacement ({},{}) should be exactly 1",
             dx,
             dy
         );
-        // Cooldown = BASE_MOVE_TICKS / 3 = 6
-        assert_eq!(world.move_cooldowns[&e].remaining, BASE_MOVE_TICKS / 3);
+        // Cooldown = TICKS_PER_METER / 3 = 33
+        assert_eq!(world.move_cooldowns[&e].remaining, TICKS_PER_METER / 3);
     }
 
     #[test]
@@ -463,8 +456,8 @@ mod tests {
         world.positions.insert(food, Position { x: 7, y: 5 });
         world.nutritions.insert(food, Nutrition { value: 30.0 });
 
-        // Run enough ticks to cover distance 2 (with cooldowns)
-        for t in 0..50 {
+        // Run enough ticks to cover distance 2 (cooldown=100 per step at speed 1)
+        for t in 0..250 {
             world.intentions.insert(
                 creature,
                 Intention {

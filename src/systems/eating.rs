@@ -2,6 +2,7 @@ use crate::components::{ActionId, Entity, Tick};
 use crate::events::Event;
 use crate::world::World;
 
+/// Pickup range: same tile = within 1 meter.
 pub fn run_eating(world: &mut World, tick: Tick) {
     // Collect hungry entities and their positions, sorted for determinism
     let mut hungry: Vec<(Entity, i32, i32, f32)> = world

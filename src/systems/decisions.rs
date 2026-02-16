@@ -5,8 +5,8 @@ use serde::Deserialize;
 use crate::components::{ActionId, Entity, Intention, Tick};
 use crate::world::World;
 
-/// Chebyshev distance within which entities sense food/enemies.
-const SENSE_RANGE: i32 = 20;
+/// Chebyshev distance within which entities sense food/enemies (30 meters).
+const SENSE_RANGE: i32 = 30;
 
 // ---------------------------------------------------------------------------
 // Config types — scoring internals, not per-entity data
