@@ -75,7 +75,7 @@ pub fn load_creatures(world: &mut World, path: &str) {
             continue;
         }
 
-        // First argument is the creature name, e.g. creature "Human"
+        // First argument is the creature name, e.g. creature "Goblin"
         let name = match node.get(0).and_then(|v| v.as_string()) {
             Some(n) => n.to_string(),
             None => continue,
@@ -241,16 +241,16 @@ mod tests {
     fn test_load_creatures_from_file() {
         let mut world = World::new_with_seed(42);
         load_creatures(&mut world, "data/creatures.kdl");
-        // 1 creature in the file
-        assert_eq!(world.alive.len(), 1);
+        // 4 creatures in the file
+        assert_eq!(world.alive.len(), 4);
         // All should have positions, icons, hungers, healths, combat_stats, speeds, names
-        assert_eq!(world.positions.len(), 1);
-        assert_eq!(world.icons.len(), 1);
-        assert_eq!(world.hungers.len(), 1);
-        assert_eq!(world.healths.len(), 1);
-        assert_eq!(world.combat_stats.len(), 1);
-        assert_eq!(world.speeds.len(), 1);
-        assert_eq!(world.names.len(), 1);
+        assert_eq!(world.positions.len(), 4);
+        assert_eq!(world.icons.len(), 4);
+        assert_eq!(world.hungers.len(), 4);
+        assert_eq!(world.healths.len(), 4);
+        assert_eq!(world.combat_stats.len(), 4);
+        assert_eq!(world.speeds.len(), 4);
+        assert_eq!(world.names.len(), 4);
     }
 
     #[test]
@@ -293,26 +293,26 @@ mod tests {
         let mut world = World::new_with_seed(42);
         load_creatures(&mut world, "data/creatures.kdl");
 
-        // Find the human by name
-        let human = world
+        // Find the goblin by name
+        let goblin = world
             .names
             .iter()
-            .find(|(_, n)| n.value == "Human")
+            .find(|(_, n)| n.value == "Goblin")
             .map(|(&e, _)| e);
 
-        if let Some(e) = human {
+        if let Some(e) = goblin {
             if let Some(icon) = world.icons.get(&e) {
-                assert_eq!(icon.ch, '@');
+                assert_eq!(icon.ch, 'g');
             }
             if let Some(hunger) = world.hungers.get(&e) {
                 assert_eq!(hunger.max, 100.0);
                 assert_eq!(hunger.current, 0.0);
             }
             if let Some(cs) = world.combat_stats.get(&e) {
-                assert!((cs.aggression - 0.3).abs() < f32::EPSILON);
+                assert!((cs.aggression - 0.8).abs() < f32::EPSILON);
             }
             if let Some(speed) = world.speeds.get(&e) {
-                assert_eq!(speed.value, 1);
+                assert_eq!(speed.value, 2);
             }
         }
     }
