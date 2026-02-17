@@ -57,7 +57,7 @@ impl World {
             action_states: HashMap::new(),
             wander_targets: HashMap::new(),
 
-            tiles: TileMap::new(256, 256), // 256m × 256m
+            tiles: TileMap::new(64, 64), // 64m × 64m
             events: EventLog::default_capacity(),
             rng: create_rng(seed),
             tick: Tick(0),
@@ -329,7 +329,7 @@ mod tests {
         assert!(world.pending_deaths.is_empty());
         assert!(world.positions.is_empty());
         assert_eq!(world.tick, Tick(0));
-        assert_eq!(world.tiles.width(), 256);
-        assert_eq!(world.tiles.height(), 256);
+        assert_eq!(world.tiles.width(), 64);
+        assert_eq!(world.tiles.height(), 64);
     }
 }

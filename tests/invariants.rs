@@ -25,7 +25,7 @@ use wulfaz::systems::wander::run_wander;
 use wulfaz::tile_map::TileMap;
 use wulfaz::world::{World, validate_world};
 
-/// Create a test world with a small 64×64 tilemap (instead of the default 256×256)
+/// Create a test world with a 64×64 tilemap (matches default)
 /// to keep temperature iteration fast in tests.
 fn test_world(seed: u64) -> World {
     let mut world = World::new_with_seed(seed);
