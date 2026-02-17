@@ -4,13 +4,13 @@ use crate::tile_map::is_diagonal_step;
 use crate::world::World;
 use rand::RngExt;
 
-/// Ticks to cross one tile at speed 1. At 100 ticks/sec, speed 1 = 1 m/s.
+/// Ticks to cross one tile at speed 1. At 100 ticks/sec, speed 1 = 10 m/s visual.
 /// Cooldown = TICKS_PER_METER / speed.value.
-const TICKS_PER_METER: u32 = 100;
+const TICKS_PER_METER: u32 = 10;
 
 /// Ticks for diagonal movement at speed 1: √2 × TICKS_PER_METER, truncated.
 /// Diagonal cooldown = TICKS_PER_DIAGONAL / speed.value.
-const TICKS_PER_DIAGONAL: u32 = 141;
+const TICKS_PER_DIAGONAL: u32 = 14;
 
 /// How far (Chebyshev) a wandering entity picks random destinations (30 meters).
 const WANDER_RANGE: i32 = 30;
@@ -485,7 +485,7 @@ mod tests {
         world.positions.insert(food, Position { x: 7, y: 5 });
         world.nutritions.insert(food, Nutrition { value: 30.0 });
 
-        // Run enough ticks to cover distance 2 (cooldown=100 per step at speed 1)
+        // Run enough ticks to cover distance 2 (cooldown=10 per step at speed 1)
         for t in 0..250 {
             world.intentions.insert(
                 creature,

@@ -170,8 +170,8 @@ Vec arrays directly.
 
 - Every spatial constant MUST have a comment with real-world units.
 - Speed in `creatures.kdl` = meters per second.
-- `TICKS_PER_METER = 100` — at 100 ticks/sec, speed 1 = 1 tile per second = 1 m/s.
-- Default map: 256×256 (256m × 256m).
+- `TICKS_PER_METER = 10` — at 100 ticks/sec, speed 1 = 10 tiles per second (DF-like pacing).
+- Default map: 64×64 (64m × 64m).
 - Melee/eat range: same tile (1m) — correct for sword/claw reach.
 - Diagonal movement costs √2 (141/100 fixed-point). Cooldown scales accordingly.
 
