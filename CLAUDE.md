@@ -169,11 +169,33 @@ Vec arrays directly.
 **1 tile = 1 meter.** This is non-negotiable.
 
 - Every spatial constant MUST have a comment with real-world units.
-- Speed in `creatures.kdl` = meters per second.
-- `TICKS_PER_METER = 10` — at 100 ticks/sec, speed 1 = 10 tiles per second (DF-like pacing).
 - Default map: 64×64 (64m × 64m).
 - Melee/eat range: same tile (1m) — correct for sword/claw reach.
 - Diagonal movement costs √2 (141/100 fixed-point). Cooldown scales accordingly.
+- Movement uses DF-style gait tiers (see Gait System below).
+
+## Gait System
+
+Movement speed uses DF-style gait tiers. All creatures share the same slow
+gaits (Creep/Stroll/Walk); fast gaits differ by body plan (biped vs quadruped).
+
+Each entity has a `GaitProfile` (cooldown array) and a `current_gait` (Gait enum).
+Cooldown = ticks to wait between 1-tile moves. Lower = faster.
+
+| Gait    | Biped (ticks/tile) | Quadruped (ticks/tile) | Tiles/sec @100fps |
+|---------|-------------------|----------------------|------------------|
+| Creep   | 29                | 29                   | 3.4              |
+| Stroll  | 19                | 19                   | 5.3              |
+| Walk    | 9                 | 9                    | 11.1 (DF default)|
+| Hustle  | 7 (jog)           | 4 (trot)             | 14.3 / 25.0      |
+| Run     | 5 (run)           | 3 (canter)           | 20.0 / 33.3      |
+| Sprint  | 3 (sprint)        | 2 (gallop)           | 33.3 / 50.0      |
+
+Diagonal moves cost `base_cooldown × 141 / 100` (√2 fixed-point).
+
+All creatures default to Walk gait at spawn. Fast gaits are used situationally
+(fleeing, charging) — not as permanent speed. `gaits` field in KDL selects
+the profile: `"biped"` or `"quadruped"`.
 
 ## Data Files (KDL)
 
@@ -185,14 +207,14 @@ creature "Goblin" {
     icon "g"
     max_hunger 100
     aggression 0.8
-    speed 2
+    gaits "biped"
 }
 
-creature "Troll" {
-    icon "T"
-    max_hunger 200
-    aggression 0.6
-    speed 1
+creature "Wolf" {
+    icon "w"
+    max_hunger 80
+    aggression 0.7
+    gaits "quadruped"
 }
 ```
 

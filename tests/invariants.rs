@@ -60,7 +60,8 @@ fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
             aggression: 0.6,
         },
     );
-    world.speeds.insert(e, Speed { value: 1 });
+    world.gait_profiles.insert(e, GaitProfile::biped());
+    world.current_gaits.insert(e, Gait::Walk);
     world.icons.insert(e, Icon { ch: 'c' });
     world.names.insert(
         e,
@@ -287,8 +288,12 @@ fn dead_entities_removed_from_all_tables() {
             "entity should not be in combat_stats"
         );
         assert!(
-            !world.speeds.contains_key(&e),
-            "entity should not be in speeds"
+            !world.gait_profiles.contains_key(&e),
+            "entity should not be in gait_profiles"
+        );
+        assert!(
+            !world.current_gaits.contains_key(&e),
+            "entity should not be in current_gaits"
         );
         assert!(
             !world.icons.contains_key(&e),

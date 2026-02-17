@@ -48,10 +48,45 @@ pub struct CombatStats {
     pub aggression: f32,
 }
 
-/// Movement speed (steps per move action).
-#[derive(Debug, Clone, Copy)]
-pub struct Speed {
-    pub value: u32,
+/// Gait tier — determines movement speed. All creatures share the same
+/// slow gaits (Creep/Stroll/Walk); fast gaits differ by body plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum Gait {
+    Creep,  // 29 ticks/tile — 3.4 tiles/sec
+    Stroll, // 19 ticks/tile — 5.3 tiles/sec
+    Walk,   // 9 ticks/tile  — 11.1 tiles/sec (DF default)
+    Hustle, // Jog (biped 7) / Trot (quadruped 4)
+    Run,    // Run (biped 5) / Canter (quadruped 3)
+    Sprint, // Sprint (biped 3) / Gallop (quadruped 2)
+}
+
+/// Movement cooldowns (ticks per tile) for each gait tier.
+/// Index order matches Gait enum variants.
+#[derive(Debug, Clone)]
+pub struct GaitProfile {
+    pub cooldowns: [u32; 6],
+}
+
+impl GaitProfile {
+    /// Get the ticks-per-tile cooldown for a gait.
+    pub fn cooldown(&self, gait: Gait) -> u32 {
+        self.cooldowns[gait as usize]
+    }
+
+    /// Standard biped gaits matching DF dwarf.
+    pub fn biped() -> Self {
+        GaitProfile {
+            cooldowns: [29, 19, 9, 7, 5, 3],
+        }
+    }
+
+    /// Standard quadruped gaits matching DF wolf/deer.
+    pub fn quadruped() -> Self {
+        GaitProfile {
+            cooldowns: [29, 19, 9, 4, 3, 2],
+        }
+    }
 }
 
 /// Ticks remaining until this entity can move again.
@@ -202,9 +237,17 @@ mod tests {
     }
 
     #[test]
-    fn speed_field() {
-        let s = Speed { value: 3 };
-        assert_eq!(s.value, 3);
+    fn gait_profile_biped() {
+        let p = GaitProfile::biped();
+        assert_eq!(p.cooldown(Gait::Walk), 9);
+        assert_eq!(p.cooldown(Gait::Sprint), 3);
+    }
+
+    #[test]
+    fn gait_profile_quadruped() {
+        let p = GaitProfile::quadruped();
+        assert_eq!(p.cooldown(Gait::Walk), 9);
+        assert_eq!(p.cooldown(Gait::Sprint), 2);
     }
 
     #[test]

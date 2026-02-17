@@ -31,11 +31,6 @@ fn child_str<'a>(children: &'a kdl::KdlDocument, key: &str) -> Option<&'a str> {
     children.get_arg(key)?.as_string()
 }
 
-/// Helper to get an i128 value from a child node's first argument.
-fn child_i128(children: &kdl::KdlDocument, key: &str) -> Option<i128> {
-    children.get_arg(key)?.as_integer()
-}
-
 /// Helper to get an f64 value from a child node's first argument.
 /// Accepts both float and integer values.
 fn child_f64(children: &kdl::KdlDocument, key: &str) -> Option<f64> {
@@ -89,7 +84,7 @@ pub fn load_creatures(world: &mut World, path: &str) {
         let icon_ch = icon_str.chars().next().unwrap_or('?');
         let max_hunger = child_f64(children, "max_hunger").unwrap_or(100.0) as f32;
         let aggression = child_f64(children, "aggression").unwrap_or(0.0) as f32;
-        let speed = child_i128(children, "speed").unwrap_or(1) as u32;
+        let gaits_str = child_str(children, "gaits").unwrap_or("biped");
 
         let e = world.spawn();
 
@@ -130,7 +125,12 @@ pub fn load_creatures(world: &mut World, path: &str) {
                 aggression,
             },
         );
-        world.speeds.insert(e, Speed { value: speed });
+        let profile = match gaits_str {
+            "quadruped" => GaitProfile::quadruped(),
+            _ => GaitProfile::biped(),
+        };
+        world.gait_profiles.insert(e, profile);
+        world.current_gaits.insert(e, Gait::Walk);
         world.action_states.insert(
             e,
             ActionState {
@@ -243,13 +243,13 @@ mod tests {
         load_creatures(&mut world, "data/creatures.kdl");
         // 4 creatures in the file
         assert_eq!(world.alive.len(), 4);
-        // All should have positions, icons, hungers, healths, combat_stats, speeds, names
+        // All should have positions, icons, hungers, healths, combat_stats, gait_profiles, names
         assert_eq!(world.positions.len(), 4);
         assert_eq!(world.icons.len(), 4);
         assert_eq!(world.hungers.len(), 4);
         assert_eq!(world.healths.len(), 4);
         assert_eq!(world.combat_stats.len(), 4);
-        assert_eq!(world.speeds.len(), 4);
+        assert_eq!(world.gait_profiles.len(), 4);
         assert_eq!(world.names.len(), 4);
     }
 
@@ -311,9 +311,8 @@ mod tests {
             if let Some(cs) = world.combat_stats.get(&e) {
                 assert!((cs.aggression - 0.8).abs() < f32::EPSILON);
             }
-            if let Some(speed) = world.speeds.get(&e) {
-                assert_eq!(speed.value, 2);
-            }
+            assert!(world.gait_profiles.contains_key(&e));
+            assert_eq!(world.current_gaits.get(&e), Some(&Gait::Walk));
         }
     }
 }

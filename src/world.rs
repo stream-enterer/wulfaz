@@ -19,7 +19,8 @@ pub struct World {
     pub hungers: HashMap<Entity, Hunger>,
     pub healths: HashMap<Entity, Health>,
     pub combat_stats: HashMap<Entity, CombatStats>,
-    pub speeds: HashMap<Entity, Speed>,
+    pub gait_profiles: HashMap<Entity, GaitProfile>,
+    pub current_gaits: HashMap<Entity, Gait>,
     pub move_cooldowns: HashMap<Entity, MoveCooldown>,
     pub icons: HashMap<Entity, Icon>,
     pub names: HashMap<Entity, Name>,
@@ -48,7 +49,8 @@ impl World {
             hungers: HashMap::new(),
             healths: HashMap::new(),
             combat_stats: HashMap::new(),
-            speeds: HashMap::new(),
+            gait_profiles: HashMap::new(),
+            current_gaits: HashMap::new(),
             move_cooldowns: HashMap::new(),
             icons: HashMap::new(),
             names: HashMap::new(),
@@ -83,7 +85,8 @@ impl World {
         self.hungers.remove(&entity);
         self.healths.remove(&entity);
         self.combat_stats.remove(&entity);
-        self.speeds.remove(&entity);
+        self.gait_profiles.remove(&entity);
+        self.current_gaits.remove(&entity);
         self.move_cooldowns.remove(&entity);
         self.icons.remove(&entity);
         self.names.remove(&entity);
@@ -130,10 +133,18 @@ pub fn validate_world(world: &World) {
         );
     }
 
-    for entity in world.speeds.keys() {
+    for entity in world.gait_profiles.keys() {
         assert!(
             world.alive.contains(entity),
-            "zombie entity {:?} in speeds but not in alive",
+            "zombie entity {:?} in gait_profiles but not in alive",
+            entity
+        );
+    }
+
+    for entity in world.current_gaits.keys() {
+        assert!(
+            world.alive.contains(entity),
+            "zombie entity {:?} in current_gaits but not in alive",
             entity
         );
     }
@@ -239,7 +250,8 @@ mod tests {
                 aggression: 0.8,
             },
         );
-        world.speeds.insert(e, Speed { value: 2 });
+        world.gait_profiles.insert(e, GaitProfile::biped());
+        world.current_gaits.insert(e, Gait::Walk);
         world
             .move_cooldowns
             .insert(e, MoveCooldown { remaining: 5 });
@@ -281,7 +293,8 @@ mod tests {
         assert!(!world.hungers.contains_key(&e));
         assert!(!world.healths.contains_key(&e));
         assert!(!world.combat_stats.contains_key(&e));
-        assert!(!world.speeds.contains_key(&e));
+        assert!(!world.gait_profiles.contains_key(&e));
+        assert!(!world.current_gaits.contains_key(&e));
         assert!(!world.move_cooldowns.contains_key(&e));
         assert!(!world.icons.contains_key(&e));
         assert!(!world.names.contains_key(&e));
