@@ -415,7 +415,7 @@ mod tests {
 
         // Wall blocking direct path
         for y in 3..=7 {
-            world.tiles.set_terrain(5, y, Terrain::Stone);
+            world.tiles.set_terrain(5, y, Terrain::Wall);
         }
 
         let creature = world.spawn();

@@ -26,10 +26,9 @@ pub fn run_temperature(world: &mut World, _tick: Tick) {
             };
 
             let target = match terrain {
-                Terrain::Water => 10.0,
-                Terrain::Stone => 15.0,
-                Terrain::Grass | Terrain::Dirt => 20.0,
-                Terrain::Sand => 22.0,
+                Terrain::Floor => 20.0,    // life support maintains 20°C
+                Terrain::Wall => 15.0,     // hull insulation
+                Terrain::Vacuum => -270.0, // near absolute zero
             };
 
             let diff = target - current;
@@ -57,17 +56,17 @@ mod tests {
     use crate::world::World;
 
     #[test]
-    fn test_temperature_drifts_toward_target() {
+    fn test_vacuum_drifts_toward_target() {
         let mut world = World::new_with_seed(42);
         world.tiles = TileMap::new(1, 1);
-        // Water target is 10.0, default temperature is 20.0
-        world.tiles.set_terrain(0, 0, Terrain::Water);
+        // Vacuum target is -270.0, default temperature is 20.0
+        world.tiles.set_terrain(0, 0, Terrain::Vacuum);
         world.tiles.set_temperature(0, 0, 20.0);
 
         run_temperature(&mut world, Tick(0));
 
         let temp = world.tiles.get_temperature(0, 0).unwrap();
-        assert!(temp < 20.0, "water tile should cool: got {temp}");
+        assert!(temp < 20.0, "vacuum tile should cool: got {temp}");
         assert!(
             (temp - 19.9).abs() < f32::EPSILON,
             "should drift by 0.1: got {temp}"
@@ -75,11 +74,11 @@ mod tests {
     }
 
     #[test]
-    fn test_temperature_stable_at_target() {
+    fn test_floor_stable_at_target() {
         let mut world = World::new_with_seed(42);
         world.tiles = TileMap::new(1, 1);
-        // Grass target is 20.0, default temperature is 20.0
-        world.tiles.set_terrain(0, 0, Terrain::Grass);
+        // Floor target is 20.0, default temperature is 20.0
+        world.tiles.set_terrain(0, 0, Terrain::Floor);
         world.tiles.set_temperature(0, 0, 20.0);
 
         run_temperature(&mut world, Tick(0));
@@ -87,24 +86,24 @@ mod tests {
         let temp = world.tiles.get_temperature(0, 0).unwrap();
         assert!(
             (temp - 20.0).abs() < f32::EPSILON,
-            "grass at target should stay: got {temp}"
+            "floor at target should stay: got {temp}"
         );
     }
 
     #[test]
-    fn test_temperature_sand_warms() {
+    fn test_wall_cools_toward_target() {
         let mut world = World::new_with_seed(42);
         world.tiles = TileMap::new(1, 1);
-        // Sand target is 22.0, start below at 20.0
-        world.tiles.set_terrain(0, 0, Terrain::Sand);
+        // Wall target is 15.0, start above at 20.0
+        world.tiles.set_terrain(0, 0, Terrain::Wall);
         world.tiles.set_temperature(0, 0, 20.0);
 
         run_temperature(&mut world, Tick(0));
 
         let temp = world.tiles.get_temperature(0, 0).unwrap();
-        assert!(temp > 20.0, "sand tile should warm: got {temp}");
+        assert!(temp < 20.0, "wall tile should cool: got {temp}");
         assert!(
-            (temp - 20.1).abs() < f32::EPSILON,
+            (temp - 19.9).abs() < f32::EPSILON,
             "should drift by 0.1: got {temp}"
         );
     }
