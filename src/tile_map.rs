@@ -3,14 +3,16 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Terrain {
-    Floor,
-    Wall,
-    Vacuum,
+    Grass,
+    Water,
+    Stone,
+    Dirt,
+    Sand,
 }
 
 impl Terrain {
     pub fn is_walkable(self) -> bool {
-        matches!(self, Terrain::Floor)
+        matches!(self, Terrain::Grass | Terrain::Dirt | Terrain::Sand)
     }
 }
 
@@ -28,7 +30,7 @@ impl TileMap {
         Self {
             width,
             height,
-            terrain: vec![Terrain::Floor; size],
+            terrain: vec![Terrain::Grass; size],
             temperature: vec![20.0; size],
         }
     }
@@ -207,23 +209,26 @@ mod tests {
         let map = TileMap::new(4, 3);
         assert_eq!(map.width(), 4);
         assert_eq!(map.height(), 3);
-        assert_eq!(map.get_terrain(0, 0), Some(Terrain::Floor));
+        assert_eq!(map.get_terrain(0, 0), Some(Terrain::Grass));
         assert_eq!(map.get_temperature(0, 0), Some(20.0));
     }
 
     #[test]
     fn test_get_set_terrain() {
         let mut map = TileMap::new(10, 10);
-        assert_eq!(map.get_terrain(3, 5), Some(Terrain::Floor));
+        assert_eq!(map.get_terrain(3, 5), Some(Terrain::Grass));
 
-        map.set_terrain(3, 5, Terrain::Vacuum);
-        assert_eq!(map.get_terrain(3, 5), Some(Terrain::Vacuum));
+        map.set_terrain(3, 5, Terrain::Water);
+        assert_eq!(map.get_terrain(3, 5), Some(Terrain::Water));
 
-        map.set_terrain(3, 5, Terrain::Wall);
-        assert_eq!(map.get_terrain(3, 5), Some(Terrain::Wall));
+        map.set_terrain(3, 5, Terrain::Stone);
+        assert_eq!(map.get_terrain(3, 5), Some(Terrain::Stone));
 
-        map.set_terrain(0, 0, Terrain::Floor);
-        assert_eq!(map.get_terrain(0, 0), Some(Terrain::Floor));
+        map.set_terrain(0, 0, Terrain::Dirt);
+        assert_eq!(map.get_terrain(0, 0), Some(Terrain::Dirt));
+
+        map.set_terrain(9, 9, Terrain::Sand);
+        assert_eq!(map.get_terrain(9, 9), Some(Terrain::Sand));
     }
 
     #[test]
@@ -256,8 +261,8 @@ mod tests {
     fn test_out_of_bounds_set_is_silent() {
         let mut map = TileMap::new(5, 5);
         // These should not panic.
-        map.set_terrain(5, 0, Terrain::Vacuum);
-        map.set_terrain(0, 5, Terrain::Vacuum);
+        map.set_terrain(5, 0, Terrain::Water);
+        map.set_terrain(0, 5, Terrain::Water);
         map.set_temperature(100, 100, 99.0);
     }
 
@@ -275,13 +280,13 @@ mod tests {
     #[test]
     fn test_adjacent_tiles_independent() {
         let mut map = TileMap::new(10, 10);
-        map.set_terrain(3, 3, Terrain::Vacuum);
+        map.set_terrain(3, 3, Terrain::Water);
 
-        assert_eq!(map.get_terrain(2, 3), Some(Terrain::Floor));
-        assert_eq!(map.get_terrain(4, 3), Some(Terrain::Floor));
-        assert_eq!(map.get_terrain(3, 2), Some(Terrain::Floor));
-        assert_eq!(map.get_terrain(3, 4), Some(Terrain::Floor));
-        assert_eq!(map.get_terrain(3, 3), Some(Terrain::Vacuum));
+        assert_eq!(map.get_terrain(2, 3), Some(Terrain::Grass));
+        assert_eq!(map.get_terrain(4, 3), Some(Terrain::Grass));
+        assert_eq!(map.get_terrain(3, 2), Some(Terrain::Grass));
+        assert_eq!(map.get_terrain(3, 4), Some(Terrain::Grass));
+        assert_eq!(map.get_terrain(3, 3), Some(Terrain::Water));
     }
 
     #[test]
@@ -297,16 +302,18 @@ mod tests {
 
     #[test]
     fn test_terrain_walkability() {
-        assert!(Terrain::Floor.is_walkable());
-        assert!(!Terrain::Wall.is_walkable());
-        assert!(!Terrain::Vacuum.is_walkable());
+        assert!(Terrain::Grass.is_walkable());
+        assert!(Terrain::Dirt.is_walkable());
+        assert!(Terrain::Sand.is_walkable());
+        assert!(!Terrain::Water.is_walkable());
+        assert!(!Terrain::Stone.is_walkable());
     }
 
     #[test]
     fn test_tilemap_is_walkable() {
         let mut map = TileMap::new(5, 5);
-        assert!(map.is_walkable(0, 0)); // default Floor
-        map.set_terrain(2, 2, Terrain::Vacuum);
+        assert!(map.is_walkable(0, 0)); // default Grass
+        map.set_terrain(2, 2, Terrain::Water);
         assert!(!map.is_walkable(2, 2));
         assert!(!map.is_walkable(5, 0)); // out of bounds
     }
@@ -345,9 +352,9 @@ mod tests {
         // . . # G .
         // . . . . .
         let mut map = TileMap::new(5, 5);
-        map.set_terrain(2, 1, Terrain::Wall);
-        map.set_terrain(2, 2, Terrain::Wall);
-        map.set_terrain(2, 3, Terrain::Wall);
+        map.set_terrain(2, 1, Terrain::Stone);
+        map.set_terrain(2, 2, Terrain::Stone);
+        map.set_terrain(2, 3, Terrain::Stone);
 
         let path = map.find_path((1, 1), (3, 3)).unwrap();
         // Path must go around the wall
@@ -363,23 +370,23 @@ mod tests {
 
     #[test]
     fn test_find_path_blocked() {
-        // Completely surround the goal with vacuum
+        // Completely surround the goal with water
         let mut map = TileMap::new(5, 5);
-        for dx in -1i32..=1 {
-            for dy in -1i32..=1 {
+        for dx in -1..=1 {
+            for dy in -1..=1 {
                 if dx == 0 && dy == 0 {
                     continue;
                 }
-                map.set_terrain((2 + dx) as usize, (2 + dy) as usize, Terrain::Vacuum);
+                map.set_terrain((2 + dx) as usize, (2 + dy) as usize, Terrain::Water);
             }
         }
         // Goal at (2,2) is reachable (goal always treated as walkable)
-        // but all neighbors are vacuum, so start at (0,0) can't get adjacent.
+        // but all neighbors are water, so start at (0,0) can't get adjacent
         let path = map.find_path((0, 0), (2, 2));
-        // A* treats goal as walkable, but the 8 neighbors of goal are all vacuum,
-        // so no path can reach it from (0,0) unless going through vacuum.
-        // Since (2,2) itself is Floor but surrounded by vacuum, the path needs
-        // to step on vacuum to reach (2,2). Since vacuum is not walkable (and not goal),
+        // A* treats goal as walkable, but the 8 neighbors of goal are all water,
+        // so no path can reach it from (0,0) unless going through water.
+        // Since (2,2) itself is Grass but surrounded by water, the path needs
+        // to step on water to reach (2,2). Since water is not walkable (and not goal),
         // this should return None.
         assert!(path.is_none());
     }

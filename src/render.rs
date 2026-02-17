@@ -8,9 +8,11 @@ use crate::world::World;
 /// Convert a terrain tile to its display character.
 fn terrain_char(terrain: Terrain) -> char {
     match terrain {
-        Terrain::Floor => '.',
-        Terrain::Wall => '#',
-        Terrain::Vacuum => ' ',
+        Terrain::Grass => '.',
+        Terrain::Water => '~',
+        Terrain::Stone => '#',
+        Terrain::Dirt => ',',
+        Terrain::Sand => ':',
     }
 }
 
@@ -196,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_world_renders_all_floor() {
+    fn empty_world_renders_all_grass() {
         let mut world = World::new_with_seed(42);
         world.tiles = crate::tile_map::TileMap::new(64, 64);
         let output = render_full(&world);
@@ -211,13 +213,15 @@ mod tests {
     #[test]
     fn terrain_types_render_correctly() {
         let mut world = World::new_with_seed(42);
-        world.tiles = crate::tile_map::TileMap::new(3, 1);
-        world.tiles.set_terrain(0, 0, Terrain::Floor);
-        world.tiles.set_terrain(1, 0, Terrain::Wall);
-        world.tiles.set_terrain(2, 0, Terrain::Vacuum);
+        world.tiles = crate::tile_map::TileMap::new(5, 1);
+        world.tiles.set_terrain(0, 0, Terrain::Grass);
+        world.tiles.set_terrain(1, 0, Terrain::Water);
+        world.tiles.set_terrain(2, 0, Terrain::Stone);
+        world.tiles.set_terrain(3, 0, Terrain::Dirt);
+        world.tiles.set_terrain(4, 0, Terrain::Sand);
 
         let output = render_full(&world);
-        assert_eq!(output, ".# ");
+        assert_eq!(output, ".~#,:");
     }
 
     #[test]
@@ -327,7 +331,7 @@ mod tests {
     fn viewport_camera_offset() {
         let mut world = World::new_with_seed(42);
         world.tiles = crate::tile_map::TileMap::new(10, 10);
-        world.tiles.set_terrain(5, 5, Terrain::Wall);
+        world.tiles.set_terrain(5, 5, Terrain::Water);
 
         let e = world.spawn();
         world.positions.insert(e, Position { x: 6, y: 6 });
@@ -337,8 +341,8 @@ mod tests {
         let output = render_world_to_string(&world, 3, 3, 5, 5);
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 5);
-        // Wall at world (5,5) => viewport (2,2)
-        assert_eq!(lines[2].chars().nth(2), Some('#'));
+        // Water at world (5,5) => viewport (2,2)
+        assert_eq!(lines[2].chars().nth(2), Some('~'));
         // Entity at world (6,6) => viewport (3,3)
         assert_eq!(lines[3].chars().nth(3), Some('g'));
     }

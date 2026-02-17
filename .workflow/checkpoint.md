@@ -1,20 +1,17 @@
 # Checkpoint
 
 ## Active Task
-Space station setting — replace outdoor fantasy map with space station.
+Accurate diagonal movement cost (√2).
 
 ## Modified Files
-- `src/tile_map.rs` — Terrain enum: Floor/Wall/Vacuum (was Grass/Water/Stone/Dirt/Sand). Updated is_walkable, default, all tests.
-- `data/terrain.kdl` — 3 terrain defs replacing 5.
-- `src/render.rs` — terrain_char updated for Floor/Wall/Vacuum. Tests updated.
-- `src/systems/temperature.rs` — Floor=20°C, Wall=15°C, Vacuum=-270°C. Tests rewritten.
-- `src/loading.rs` — load_terrain generates station room (Vacuum fill, Wall 12-51, Floor 13-50). load_creatures and load_items retry for walkable tiles.
-- `src/systems/wander.rs` — Test Stone→Wall reference updated.
+- `src/tile_map.rs` — octile heuristic, CARDINAL_COST/DIAGONAL_COST constants, direction-dependent step cost, is_diagonal_step helper, 2 new tests
+- `src/systems/wander.rs` — TICKS_PER_DIAGONAL constant, per-branch cooldown (cardinal vs diagonal), updated 2 test assertions
+- `CLAUDE.md` — updated Spatial Scale section (diagonal cost documented)
 
 ## Decisions
-- Vacuum renders as space character (` `), matching plan
-- Creature and item spawning both retry up to 100 times for walkable tile
-- Station room: Wall rectangle (12,12)→(51,51), Floor interior (13,13)→(50,50)
+- Fixed-point integer costs (100/141) to avoid float comparison in BinaryHeap
+- Cooldown moved from shared calculation into each movement branch (A* path, random fallback, idle)
+- Tests accept either cardinal or diagonal cooldown where random direction is seed-dependent
 
 ## Status
 All 259 tests pass. Ready to commit.

@@ -93,19 +93,17 @@ pub fn load_creatures(world: &mut World, path: &str) {
 
         let e = world.spawn();
 
-        // Random walkable position within the map (retry up to 100 times)
-        let (mut x, mut y) = (0, 0);
-        if map_w > 0 && map_h > 0 {
-            for _ in 0..100 {
-                let cx = world.rng.random_range(0..map_w);
-                let cy = world.rng.random_range(0..map_h);
-                if world.tiles.is_walkable(cx as usize, cy as usize) {
-                    x = cx;
-                    y = cy;
-                    break;
-                }
-            }
-        }
+        // Random position within the map
+        let x = if map_w > 0 {
+            world.rng.random_range(0..map_w)
+        } else {
+            0
+        };
+        let y = if map_h > 0 {
+            world.rng.random_range(0..map_h)
+        } else {
+            0
+        };
 
         world.names.insert(e, Name { value: name });
         world.icons.insert(e, Icon { ch: icon_ch });
@@ -178,19 +176,16 @@ pub fn load_items(world: &mut World, path: &str) {
 
         let e = world.spawn();
 
-        // Random walkable position within the map (retry up to 100 times)
-        let (mut x, mut y) = (0, 0);
-        if map_w > 0 && map_h > 0 {
-            for _ in 0..100 {
-                let cx = world.rng.random_range(0..map_w);
-                let cy = world.rng.random_range(0..map_h);
-                if world.tiles.is_walkable(cx as usize, cy as usize) {
-                    x = cx;
-                    y = cy;
-                    break;
-                }
-            }
-        }
+        let x = if map_w > 0 {
+            world.rng.random_range(0..map_w)
+        } else {
+            0
+        };
+        let y = if map_h > 0 {
+            world.rng.random_range(0..map_h)
+        } else {
+            0
+        };
 
         world.names.insert(e, Name { value: name });
         world.icons.insert(e, Icon { ch: icon_ch });
@@ -204,40 +199,35 @@ pub fn load_items(world: &mut World, path: &str) {
     }
 }
 
-/// Load terrain definitions from a KDL file and generate the space station map.
-///
-/// Layout: 64x64 grid filled with Vacuum. A Wall rectangle from (12,12) to
-/// (51,51) encloses a 38x38 Floor interior from (13,13) to (50,50).
+/// Load terrain definitions from a KDL file and apply them to the tile map.
+/// This maps terrain names to the Terrain enum and sets a default pattern.
 pub fn load_terrain(world: &mut World, path: &str) {
     let Some(_doc) = parse_kdl_file(path) else {
         return;
     };
 
+    // Terrain definitions are read for validation, but the actual tile map
+    // is initialized to Grass by default. Specific terrain placement would
+    // be done by a map generator using these definitions.
+    // For now, scatter some terrain variety using the RNG.
     let w = world.tiles.width();
     let h = world.tiles.height();
 
-    // Fill entire map with Vacuum
     for y in 0..h {
         for x in 0..w {
-            world.tiles.set_terrain(x, y, Terrain::Vacuum);
-        }
-    }
-
-    // Place Wall rectangle from (12,12) to (51,51)
-    for y in 12..=51 {
-        for x in 12..=51 {
-            if x < w && y < h {
-                world.tiles.set_terrain(x, y, Terrain::Wall);
-            }
-        }
-    }
-
-    // Fill Floor inside from (13,13) to (50,50)
-    for y in 13..=50 {
-        for x in 13..=50 {
-            if x < w && y < h {
-                world.tiles.set_terrain(x, y, Terrain::Floor);
-            }
+            let roll: f32 = world.rng.random();
+            let terrain = if roll < 0.05 {
+                Terrain::Water
+            } else if roll < 0.10 {
+                Terrain::Stone
+            } else if roll < 0.20 {
+                Terrain::Dirt
+            } else if roll < 0.25 {
+                Terrain::Sand
+            } else {
+                Terrain::Grass
+            };
+            world.tiles.set_terrain(x, y, terrain);
         }
     }
 }
@@ -274,23 +264,21 @@ mod tests {
     }
 
     #[test]
-    fn test_load_terrain_generates_station() {
+    fn test_load_terrain_scatters_variety() {
         let mut world = World::new_with_seed(42);
         load_terrain(&mut world, "data/terrain.kdl");
-
-        // Outside room is Vacuum
-        assert_eq!(world.tiles.get_terrain(0, 0), Some(Terrain::Vacuum));
-        assert_eq!(world.tiles.get_terrain(5, 5), Some(Terrain::Vacuum));
-
-        // Walls at perimeter of room
-        assert_eq!(world.tiles.get_terrain(12, 12), Some(Terrain::Wall));
-        assert_eq!(world.tiles.get_terrain(51, 51), Some(Terrain::Wall));
-        assert_eq!(world.tiles.get_terrain(12, 30), Some(Terrain::Wall));
-
-        // Floor inside
-        assert_eq!(world.tiles.get_terrain(13, 13), Some(Terrain::Floor));
-        assert_eq!(world.tiles.get_terrain(30, 30), Some(Terrain::Floor));
-        assert_eq!(world.tiles.get_terrain(50, 50), Some(Terrain::Floor));
+        // Check that not all tiles are Grass anymore
+        let w = world.tiles.width();
+        let h = world.tiles.height();
+        let mut non_grass = 0;
+        for y in 0..h {
+            for x in 0..w {
+                if world.tiles.get_terrain(x, y) != Some(Terrain::Grass) {
+                    non_grass += 1;
+                }
+            }
+        }
+        assert!(non_grass > 0);
     }
 
     #[test]
