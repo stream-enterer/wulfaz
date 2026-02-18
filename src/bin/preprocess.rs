@@ -1,8 +1,8 @@
 //! One-time GIS preprocessing tool.
 //! Reads Paris shapefiles, extracts polygon data, rasterizes tiles, writes binary + RON outputs.
 //!
-//! Usage: cargo run --bin preprocess [PARIS_DATA_DIR] [OUTPUT_DIR]
-//! Defaults: PARIS_DATA from env or "../../paris/data", output dir "data/"
+//! Usage: cargo run --bin preprocess [SOURCE_DATA_DIR] [OUTPUT_DIR]
+//! Defaults: SOURCE_DATA from env or "source-data", output dir "data/"
 
 use std::time::Instant;
 
@@ -13,10 +13,10 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
 
-    let paris_data = if args.len() > 1 {
+    let source_dir = if args.len() > 1 {
         args[1].clone()
     } else {
-        std::env::var("PARIS_DATA").unwrap_or_else(|_| "../../paris/data".into())
+        std::env::var("SOURCE_DATA").unwrap_or_else(|_| "source-data".into())
     };
 
     let output_dir = if args.len() > 2 {
@@ -25,8 +25,8 @@ fn main() {
         "data".into()
     };
 
-    let buildings_shp = format!("{paris_data}/buildings/BATI.shp");
-    let blocks_shp = format!("{paris_data}/plots/Vasserot_Ilots.shp");
+    let buildings_shp = format!("{source_dir}/BATI.shp");
+    let blocks_shp = format!("{source_dir}/Vasserot_Ilots.shp");
 
     assert!(
         std::path::Path::new(&buildings_shp).exists(),
@@ -37,7 +37,7 @@ fn main() {
         "Blocks shapefile not found: {blocks_shp}"
     );
 
-    println!("Reading shapefiles from: {paris_data}");
+    println!("Reading shapefiles from: {source_dir}");
     let data = loading_gis::build_from_shapefiles(&buildings_shp, &blocks_shp);
 
     println!(
@@ -56,8 +56,8 @@ fn main() {
     println!("Rasterized in {:.1}s", raster_start.elapsed().as_secs_f64());
 
     // A07: Load addresses + occupants
-    let addresses_shp = format!("{paris_data}/addresses/Num_Voies_Vasserot.shp");
-    let gpkg_path = format!("{paris_data}/soduco/data/data_extraction_with_population.gpkg");
+    let addresses_shp = format!("{source_dir}/Num_Voies_Vasserot.shp");
+    let gpkg_path = format!("{source_dir}/data_extraction_with_population.gpkg");
 
     if std::path::Path::new(&addresses_shp).exists() {
         println!("Loading addresses from {addresses_shp}...");

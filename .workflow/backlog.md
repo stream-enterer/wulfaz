@@ -11,19 +11,16 @@ Goal: See Paris on screen. No entities.
 Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 30m padding).
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
-- **SCALE-A07** — Address + occupant loading (all years). Needs: A03. Blocks: B06, B03, C04, C05.
-  - Joins address and occupant data to buildings for all 16 SoDUCo snapshots. Two-stage preprocessor pipeline, same pattern as A03.
-  - **Preprocessor** (extend `preprocess.rs`):
-    - Step 1: Read `addresses/Num_Voies_Vasserot.shp` (29,164 points, encoding `latin-1`). **WARNING: Lambert projection, NOT WGS84.** Use `ID_PARC` field only (ignore point geometry). Strip "PA" prefix → match to `Identif` via `identif_index`. Attach street name (`NOM_ENTIER`) and house number (`NUM_VOIES`). Addresses are time-invariant — processed once.
-    - Step 2: Open `soduco/data/data_extraction_with_population.gpkg` (SQLite). Query **all 16 years** (1829, 1833, 1839, 1842, 1845, 1850, 1855, 1860, 1864, 1871, 1875, 1880, 1885, 1896, 1901, 1907). For each year, fuzzy-match street names to addresses from Step 1. Attach occupants (name, activity, NAICS) to buildings, keyed by year.
-    - Street name normalization: strip "Rue de la/du/des/", expand "Fg-" → "Faubourg", "St-" → "Saint-", case-insensitive compare.
-    - **Match logging**: after Step 2, log per-year summary: total GeoPackage entries, matched to building, unmatched (with top-10 unmatched street names and their counts). Helps tune normalization rules iteratively.
-    - Build `StreetRegistry` (see architecture.md) — each unique street name gets a `StreetId`, maps street name → list of buildings.
-    - Write results into `paris.meta.ron`: populate `addresses` and `occupants_by_year` fields on `BuildingData`, add `StreetRegistry` section.
-  - **Data structure**: `BuildingData.occupants_by_year: HashMap<u16, Vec<Occupant>>` — keyed by snapshot year. Each year's occupant list is independent. Buildings absent from a year's directory have no entry for that key.
-  - **Game load** (no new file reads): `load_paris_binary` deserializes `BuildingData` including addresses and all-year occupants. Active year selected at runtime via `world.active_year` (default 1845). Reconstruct `StreetRegistry` from loaded address data on `world.buildings`.
-  - The game never touches shapefiles or GeoPackage. All joins and fuzzy matching happen offline in the preprocessor.
-  - After this step: building registry knows occupants and NAICS categories for all 16 snapshots, street registry knows all street names and their buildings. Feeds B06 (furniture by NAICS at active year), B03 (entity spawning from active year), C04 (district aggregates), C05 (population seeding). Downstream consumers index into `occupants_by_year[world.active_year]`.
+- **SCALE-A07a** — Occupant normalization improvements. Needs: A07 (done). Blocks: B06, B03, C04, C05.
+  - A07 core pipeline is implemented (de078ba). Current match rates: addresses 65.6% (19,112/29,164), occupants 19.7% (194,892/990,108). Two issues to fix:
+  - **Year extraction broken**: all occupants land in Year 0. The `source.publication_date` column format isn't a "YYYY..." string. Inspect actual values in the GeoPackage, fix parsing to extract the 16 snapshot years.
+  - **Normalization gaps** (from top-10 unmatched streets):
+    - `St-Honoré` (5,608) — GeoPackage uses bare `St-` without "Rue " prefix; address file has full form. Need to normalize both sides identically.
+    - `Faub.-St-Denis` (3,485), `Faub.-St-Honoré` (2,080) — compound abbreviation `Faub.-St-` not expanded. Expand "faub.-" before "st-" or handle compound.
+    - `boul. Voltaire` (2,290) — "boul." abbreviation not handled. Add "boul." → "boulevard".
+    - `Faub.-Poissonnière` (1,825) — "Faub.-" with capital works, but check case handling.
+    - `Charenton` (2,152), `Charonne` (1,796), `Sèvres` (1,723), `Provence` (1,651), `Cherche-Midi` (1,945) — bare street names without type prefix. These may match if address file also lacks prefix, or may need the normalizer to strip prefixes from both sides.
+  - After fixes, re-run preprocessor and compare match rates. Target: >50% occupant match rate.
 
 - **SCALE-A08** — Seine + bridge placement. Needs: A03.
   - **Preprocessor** (extend `preprocess.rs`): runs after block/building rasterization, before writing binary tiles.

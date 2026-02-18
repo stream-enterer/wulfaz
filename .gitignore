@@ -1,6 +1,9 @@
 /target
 .cargo/
 
+# GIS source data (shapefiles, GeoPackage — too large for git)
+source-data/
+
 # Generated map data (from preprocess binary)
 data/paris.ron
 data/paris.tiles
