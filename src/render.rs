@@ -8,11 +8,14 @@ use crate::world::World;
 /// Convert a terrain tile to its display character.
 fn terrain_char(terrain: Terrain) -> char {
     match terrain {
-        Terrain::Grass => '.',
+        Terrain::Road => '.',
+        Terrain::Wall => '#',
+        Terrain::Floor => '_',
+        Terrain::Door => '+',
+        Terrain::Courtyard => ',',
+        Terrain::Garden => '"',
         Terrain::Water => '~',
-        Terrain::Stone => '#',
-        Terrain::Dirt => ',',
-        Terrain::Sand => ':',
+        Terrain::Bridge => '=',
     }
 }
 
@@ -212,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_world_renders_all_grass() {
+    fn empty_world_renders_all_road() {
         let mut world = World::new_with_seed(42);
         world.tiles = crate::tile_map::TileMap::new(64, 64);
         let output = render_full(&world);
@@ -227,15 +230,18 @@ mod tests {
     #[test]
     fn terrain_types_render_correctly() {
         let mut world = World::new_with_seed(42);
-        world.tiles = crate::tile_map::TileMap::new(5, 1);
-        world.tiles.set_terrain(0, 0, Terrain::Grass);
-        world.tiles.set_terrain(1, 0, Terrain::Water);
-        world.tiles.set_terrain(2, 0, Terrain::Stone);
-        world.tiles.set_terrain(3, 0, Terrain::Dirt);
-        world.tiles.set_terrain(4, 0, Terrain::Sand);
+        world.tiles = crate::tile_map::TileMap::new(8, 1);
+        world.tiles.set_terrain(0, 0, Terrain::Road);
+        world.tiles.set_terrain(1, 0, Terrain::Wall);
+        world.tiles.set_terrain(2, 0, Terrain::Floor);
+        world.tiles.set_terrain(3, 0, Terrain::Door);
+        world.tiles.set_terrain(4, 0, Terrain::Courtyard);
+        world.tiles.set_terrain(5, 0, Terrain::Garden);
+        world.tiles.set_terrain(6, 0, Terrain::Water);
+        world.tiles.set_terrain(7, 0, Terrain::Bridge);
 
         let output = render_full(&world);
-        assert_eq!(output, ".~#,:");
+        assert_eq!(output, ".#_+,\"~=");
     }
 
     #[test]
@@ -394,7 +400,7 @@ mod tests {
         let output = render_world_to_string(&world, 1, 1, 4, 4);
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 4);
-        // Row 0: world y=1, x=1..4 => two in-bounds grass, two spaces
+        // Row 0: world y=1, x=1..4 => two in-bounds road, two spaces
         assert_eq!(lines[0], "..  ");
         // Row 2: world y=3, all out of bounds
         assert_eq!(lines[2], "    ");

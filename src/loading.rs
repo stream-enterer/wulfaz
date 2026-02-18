@@ -217,16 +217,22 @@ pub fn load_terrain(world: &mut World, path: &str) {
     for y in 0..h {
         for x in 0..w {
             let roll: f32 = world.rng.random();
-            let terrain = if roll < 0.05 {
+            let terrain = if roll < 0.03 {
                 Terrain::Water
-            } else if roll < 0.10 {
-                Terrain::Stone
+            } else if roll < 0.06 {
+                Terrain::Wall
+            } else if roll < 0.12 {
+                Terrain::Floor
+            } else if roll < 0.14 {
+                Terrain::Door
             } else if roll < 0.20 {
-                Terrain::Dirt
+                Terrain::Courtyard
             } else if roll < 0.25 {
-                Terrain::Sand
+                Terrain::Garden
+            } else if roll < 0.27 {
+                Terrain::Bridge
             } else {
-                Terrain::Grass
+                Terrain::Road
             };
             world.tiles.set_terrain(x, y, terrain);
         }
@@ -268,18 +274,18 @@ mod tests {
     fn test_load_terrain_scatters_variety() {
         let mut world = World::new_with_seed(42);
         load_terrain(&mut world, "data/terrain.kdl");
-        // Check that not all tiles are Grass anymore
+        // Check that not all tiles are Road anymore
         let w = world.tiles.width();
         let h = world.tiles.height();
-        let mut non_grass = 0;
+        let mut non_road = 0;
         for y in 0..h {
             for x in 0..w {
-                if world.tiles.get_terrain(x, y) != Some(Terrain::Grass) {
-                    non_grass += 1;
+                if world.tiles.get_terrain(x, y) != Some(Terrain::Road) {
+                    non_road += 1;
                 }
             }
         }
-        assert!(non_grass > 0);
+        assert!(non_road > 0);
     }
 
     #[test]

@@ -3,16 +3,27 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Terrain {
-    Grass,
-    Water,
-    Stone,
-    Dirt,
-    Sand,
+    Road,      // streets, alleys, open ground — walkable
+    Wall,      // building perimeter — blocked
+    Floor,     // building interior — walkable
+    Door,      // building entrance — walkable
+    Courtyard, // enclosed open space within a city block — walkable
+    Garden,    // parks, green space — walkable
+    Water,     // river — blocked
+    Bridge,    // river crossing — walkable
 }
 
 impl Terrain {
     pub fn is_walkable(self) -> bool {
-        matches!(self, Terrain::Grass | Terrain::Dirt | Terrain::Sand)
+        matches!(
+            self,
+            Terrain::Road
+                | Terrain::Floor
+                | Terrain::Door
+                | Terrain::Courtyard
+                | Terrain::Garden
+                | Terrain::Bridge
+        )
     }
 }
 
@@ -30,8 +41,8 @@ impl TileMap {
         Self {
             width,
             height,
-            terrain: vec![Terrain::Grass; size],
-            temperature: vec![20.0; size],
+            terrain: vec![Terrain::Road; size],
+            temperature: vec![16.0; size], // Road target = 16°C
         }
     }
 
@@ -209,32 +220,32 @@ mod tests {
         let map = TileMap::new(4, 3);
         assert_eq!(map.width(), 4);
         assert_eq!(map.height(), 3);
-        assert_eq!(map.get_terrain(0, 0), Some(Terrain::Grass));
-        assert_eq!(map.get_temperature(0, 0), Some(20.0));
+        assert_eq!(map.get_terrain(0, 0), Some(Terrain::Road));
+        assert_eq!(map.get_temperature(0, 0), Some(16.0));
     }
 
     #[test]
     fn test_get_set_terrain() {
         let mut map = TileMap::new(10, 10);
-        assert_eq!(map.get_terrain(3, 5), Some(Terrain::Grass));
+        assert_eq!(map.get_terrain(3, 5), Some(Terrain::Road));
 
         map.set_terrain(3, 5, Terrain::Water);
         assert_eq!(map.get_terrain(3, 5), Some(Terrain::Water));
 
-        map.set_terrain(3, 5, Terrain::Stone);
-        assert_eq!(map.get_terrain(3, 5), Some(Terrain::Stone));
+        map.set_terrain(3, 5, Terrain::Wall);
+        assert_eq!(map.get_terrain(3, 5), Some(Terrain::Wall));
 
-        map.set_terrain(0, 0, Terrain::Dirt);
-        assert_eq!(map.get_terrain(0, 0), Some(Terrain::Dirt));
+        map.set_terrain(0, 0, Terrain::Floor);
+        assert_eq!(map.get_terrain(0, 0), Some(Terrain::Floor));
 
-        map.set_terrain(9, 9, Terrain::Sand);
-        assert_eq!(map.get_terrain(9, 9), Some(Terrain::Sand));
+        map.set_terrain(9, 9, Terrain::Bridge);
+        assert_eq!(map.get_terrain(9, 9), Some(Terrain::Bridge));
     }
 
     #[test]
     fn test_get_set_temperature() {
         let mut map = TileMap::new(8, 6);
-        assert_eq!(map.get_temperature(2, 3), Some(20.0));
+        assert_eq!(map.get_temperature(2, 3), Some(16.0));
 
         map.set_temperature(2, 3, 35.5);
         assert_eq!(map.get_temperature(2, 3), Some(35.5));
@@ -282,10 +293,10 @@ mod tests {
         let mut map = TileMap::new(10, 10);
         map.set_terrain(3, 3, Terrain::Water);
 
-        assert_eq!(map.get_terrain(2, 3), Some(Terrain::Grass));
-        assert_eq!(map.get_terrain(4, 3), Some(Terrain::Grass));
-        assert_eq!(map.get_terrain(3, 2), Some(Terrain::Grass));
-        assert_eq!(map.get_terrain(3, 4), Some(Terrain::Grass));
+        assert_eq!(map.get_terrain(2, 3), Some(Terrain::Road));
+        assert_eq!(map.get_terrain(4, 3), Some(Terrain::Road));
+        assert_eq!(map.get_terrain(3, 2), Some(Terrain::Road));
+        assert_eq!(map.get_terrain(3, 4), Some(Terrain::Road));
         assert_eq!(map.get_terrain(3, 3), Some(Terrain::Water));
     }
 
@@ -302,19 +313,24 @@ mod tests {
 
     #[test]
     fn test_terrain_walkability() {
-        assert!(Terrain::Grass.is_walkable());
-        assert!(Terrain::Dirt.is_walkable());
-        assert!(Terrain::Sand.is_walkable());
+        assert!(Terrain::Road.is_walkable());
+        assert!(Terrain::Floor.is_walkable());
+        assert!(Terrain::Door.is_walkable());
+        assert!(Terrain::Courtyard.is_walkable());
+        assert!(Terrain::Garden.is_walkable());
+        assert!(Terrain::Bridge.is_walkable());
+        assert!(!Terrain::Wall.is_walkable());
         assert!(!Terrain::Water.is_walkable());
-        assert!(!Terrain::Stone.is_walkable());
     }
 
     #[test]
     fn test_tilemap_is_walkable() {
         let mut map = TileMap::new(5, 5);
-        assert!(map.is_walkable(0, 0)); // default Grass
+        assert!(map.is_walkable(0, 0)); // default Road
         map.set_terrain(2, 2, Terrain::Water);
         assert!(!map.is_walkable(2, 2));
+        map.set_terrain(3, 3, Terrain::Wall);
+        assert!(!map.is_walkable(3, 3));
         assert!(!map.is_walkable(5, 0)); // out of bounds
     }
 
@@ -352,9 +368,9 @@ mod tests {
         // . . # G .
         // . . . . .
         let mut map = TileMap::new(5, 5);
-        map.set_terrain(2, 1, Terrain::Stone);
-        map.set_terrain(2, 2, Terrain::Stone);
-        map.set_terrain(2, 3, Terrain::Stone);
+        map.set_terrain(2, 1, Terrain::Wall);
+        map.set_terrain(2, 2, Terrain::Wall);
+        map.set_terrain(2, 3, Terrain::Wall);
 
         let path = map.find_path((1, 1), (3, 3)).unwrap();
         // Path must go around the wall
@@ -385,7 +401,7 @@ mod tests {
         let path = map.find_path((0, 0), (2, 2));
         // A* treats goal as walkable, but the 8 neighbors of goal are all water,
         // so no path can reach it from (0,0) unless going through water.
-        // Since (2,2) itself is Grass but surrounded by water, the path needs
+        // Since (2,2) itself is Road but surrounded by water, the path needs
         // to step on water to reach (2,2). Since water is not walkable (and not goal),
         // this should return None.
         assert!(path.is_none());
