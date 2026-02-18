@@ -41,10 +41,11 @@ Tile accessors keep same signatures, route through flat Vec indexing internally 
 ## Building Registry
 
 ```rust
-struct BuildingId(u32);  // matches Identif from BATI.shp
+struct BuildingId(u32);  // 1-based sequential index into Vec (0 = no building in tile arrays)
 
 struct BuildingData {
     id: BuildingId,
+    identif: u32,            // original Identif from BATI.shp (NOT unique per record)
     quartier: String,        // neighborhood name (36 values)
     superficie: f32,         // footprint area in m²
     bati: u8,                // 1=main, 2=annex, 3=market stall
@@ -68,9 +69,12 @@ struct Occupant {
 }
 
 struct BuildingRegistry {
-    buildings: HashMap<BuildingId, BuildingData>,
+    buildings: Vec<BuildingData>,            // indexed by BuildingId.0 - 1
+    identif_index: HashMap<u32, Vec<BuildingId>>, // cadastral parcel → buildings
 }
 ```
+
+Note: BATI.shp has 40,350 records but only 17,155 unique Identif values. Multiple records per Identif represent separate structures on the same parcel (main + annex + stall). Vec storage ensures no data loss.
 
 ## Block Registry
 
@@ -105,7 +109,7 @@ struct Chunk {
 ```
 
 All per-tile ID layers populated during GIS loading (SCALE-A03) and are write-once (static city). Lookup chains:
-- Tile → `BuildingId` → `BuildingData` → quartier, occupants, NAICS, floor count, addresses.
+- Tile → `BuildingId` → `buildings[id-1]` → quartier, occupants, NAICS, floor count, addresses. O(1) Vec index.
 - Tile → `BlockId` → `BlockData` → block ID string, area, member buildings.
 - Tile → `quartier_id` → district name. Covers all tiles, not just buildings (road tiles get quartier from nearest block polygon or Voronoi fill).
 

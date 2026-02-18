@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 use shapefile::dbase::FieldValue;
 
 use crate::registry::{
-    BlockData, BlockId, BlockRegistry, BuildingData, BuildingId, BuildingRegistry,
-    estimate_floor_count,
+    BlockData, BlockId, BlockRegistry, BuildingData, BuildingRegistry, estimate_floor_count,
 };
 use crate::tile_map::{Terrain, TileMap};
 use crate::world::World;
@@ -450,7 +449,7 @@ pub fn rasterize_paris(
             continue;
         }
 
-        let building_id = BuildingId(bldg_ron.identif);
+        let building_id = buildings.next_id();
         let floor_count = estimate_floor_count(bldg_ron.superficie);
 
         // Determine which block this building sits in.
@@ -480,6 +479,7 @@ pub fn rasterize_paris(
 
         buildings.insert(BuildingData {
             id: building_id,
+            identif: bldg_ron.identif,
             quartier: bldg_ron.quartier.clone(),
             superficie: bldg_ron.superficie,
             bati: bldg_ron.bati,
@@ -492,8 +492,9 @@ pub fn rasterize_paris(
         });
     }
     log::info!(
-        "  {} buildings, {} building tiles in {:.1}s",
-        buildings.buildings.len(),
+        "  {} buildings (from {} unique identifs), {} building tiles in {:.1}s",
+        buildings.len(),
+        buildings.identif_index.len(),
         total_building_tiles,
         bldg_start.elapsed().as_secs_f64(),
     );
@@ -561,17 +562,16 @@ pub fn save_paris_binary(
 
     // Write metadata RON (strip tile lists from BuildingData)
     let meta_start = Instant::now();
-    let mut meta_buildings: Vec<BuildingData> = buildings
+    let meta_buildings: Vec<BuildingData> = buildings
         .buildings
-        .values()
+        .iter()
         .map(|b| {
             let mut b = b.clone();
             b.tiles = Vec::new(); // strip — reconstructed from binary on load
             b
         })
         .collect();
-    // Sort by id for deterministic output
-    meta_buildings.sort_by_key(|b| b.id.0);
+    // Vec is already in insertion order (sequential by BuildingId)
 
     let mut meta_blocks: Vec<BlockData> = blocks.blocks.values().cloned().collect();
     meta_blocks.sort_by_key(|b| b.id.0);
@@ -630,32 +630,32 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
 
     world.quartier_names = metadata.quartier_names;
 
-    // Reconstruct building tile lists by scanning the tile array
+    // Reconstruct building tile lists by scanning the tile array.
+    // BuildingId is 1-based; allocate per-building tile vecs indexed by id-1.
     let scan_start = Instant::now();
-    let mut building_tiles: HashMap<BuildingId, Vec<(i32, i32)>> = HashMap::new();
+    let num_buildings = metadata.buildings.len();
+    let mut building_tiles: Vec<Vec<(i32, i32)>> = vec![Vec::new(); num_buildings];
     let w = world.tiles.width();
     let h = world.tiles.height();
     for y in 0..h {
         for x in 0..w {
             if let Some(bid) = world.tiles.get_building_id(x, y) {
-                building_tiles
-                    .entry(bid)
-                    .or_default()
-                    .push((x as i32, y as i32));
+                let idx = bid.0 as usize - 1;
+                if idx < num_buildings {
+                    building_tiles[idx].push((x as i32, y as i32));
+                }
             }
         }
     }
     log::info!(
-        "  Tile scan in {:.1}s: {} buildings with tiles",
+        "  Tile scan in {:.1}s: {} buildings",
         scan_start.elapsed().as_secs_f64(),
-        building_tiles.len()
+        num_buildings
     );
 
-    // Populate registries
-    for mut bdata in metadata.buildings {
-        if let Some(tiles) = building_tiles.remove(&bdata.id) {
-            bdata.tiles = tiles;
-        }
+    // Populate registry (Vec-backed, preserves insertion order)
+    for (i, mut bdata) in metadata.buildings.into_iter().enumerate() {
+        bdata.tiles = std::mem::take(&mut building_tiles[i]);
         world.buildings.insert(bdata);
     }
     for bdata in metadata.blocks {
@@ -677,7 +677,7 @@ fn classify_walls_floors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     let mut wall_count = 0usize;
     let mut floor_count = 0usize;
 
-    for bdata in buildings.buildings.values() {
+    for bdata in &buildings.buildings {
         let tile_set: HashSet<(i32, i32)> = bdata.tiles.iter().copied().collect();
 
         for &(cx, cy) in &bdata.tiles {
@@ -828,7 +828,7 @@ mod tests {
         let mut tiles = TileMap::new(10, 10);
         let mut buildings = BuildingRegistry::new();
 
-        let bid = BuildingId(1);
+        let bid = buildings.next_id(); // BuildingId(1)
         let mut tile_list = Vec::new();
         for y in 2..7 {
             for x in 2..7 {
@@ -840,6 +840,7 @@ mod tests {
 
         buildings.insert(BuildingData {
             id: bid,
+            identif: 42,
             quartier: "Test".into(),
             superficie: 100.0,
             bati: 1,

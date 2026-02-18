@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Unique building identifier — matches `Identif` field from BATI.shp.
+/// Sequential building identifier, 1-based index into BuildingRegistry.buildings.
+/// 0 is reserved as the "no building" sentinel in tile arrays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BuildingId(pub u32);
 
@@ -30,6 +31,8 @@ pub struct Occupant {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct BuildingData {
     pub id: BuildingId,
+    /// Original `Identif` from BATI.shp (cadastral parcel ID, not unique per record).
+    pub identif: u32,
     pub quartier: String,
     /// Footprint area in m².
     pub superficie: f32,
@@ -59,25 +62,68 @@ pub struct BlockData {
     pub buildings: Vec<BuildingId>,
 }
 
+/// Vec-backed building registry. BuildingId is a 1-based index into the Vec.
 #[derive(Default)]
 pub struct BuildingRegistry {
-    pub buildings: HashMap<BuildingId, BuildingData>,
+    pub buildings: Vec<BuildingData>,
+    /// Reverse lookup: cadastral Identif → all BuildingIds sharing that parcel.
+    pub identif_index: HashMap<u32, Vec<BuildingId>>,
 }
 
 impl BuildingRegistry {
     pub fn new() -> Self {
         Self {
-            buildings: HashMap::new(),
+            buildings: Vec::new(),
+            identif_index: HashMap::new(),
         }
     }
 
+    /// Push a new building. Its `data.id` must already be set to the correct
+    /// 1-based sequential BuildingId (next_id = buildings.len() + 1).
     pub fn insert(&mut self, data: BuildingData) {
-        self.buildings.insert(data.id, data);
+        let id = data.id;
+        let identif = data.identif;
+        self.buildings.push(data);
+        self.identif_index.entry(identif).or_default().push(id);
+    }
+
+    /// Allocate the next BuildingId (1-based).
+    pub fn next_id(&self) -> BuildingId {
+        BuildingId(self.buildings.len() as u32 + 1)
     }
 
     #[allow(dead_code)]
     pub fn get(&self, id: BuildingId) -> Option<&BuildingData> {
-        self.buildings.get(&id)
+        if id.0 == 0 {
+            return None;
+        }
+        self.buildings.get(id.0 as usize - 1)
+    }
+
+    #[allow(dead_code)]
+    pub fn get_mut(&mut self, id: BuildingId) -> Option<&mut BuildingData> {
+        if id.0 == 0 {
+            return None;
+        }
+        self.buildings.get_mut(id.0 as usize - 1)
+    }
+
+    /// Find all buildings sharing a cadastral parcel Identif.
+    #[allow(dead_code)]
+    pub fn get_by_identif(&self, identif: u32) -> &[BuildingId] {
+        self.identif_index
+            .get(&identif)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn len(&self) -> usize {
+        self.buildings.len()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.buildings.is_empty()
     }
 }
 
@@ -124,8 +170,11 @@ mod tests {
     #[test]
     fn test_building_registry_insert_lookup() {
         let mut reg = BuildingRegistry::new();
+        let id = reg.next_id();
+        assert_eq!(id.0, 1);
         reg.insert(BuildingData {
-            id: BuildingId(42),
+            id,
+            identif: 42,
             quartier: "Arcis".into(),
             superficie: 120.0,
             bati: 1,
@@ -137,9 +186,60 @@ mod tests {
             occupants: Vec::new(),
         });
 
-        assert!(reg.get(BuildingId(42)).is_some());
-        assert_eq!(reg.get(BuildingId(42)).unwrap().quartier, "Arcis");
+        assert!(reg.get(BuildingId(1)).is_some());
+        assert_eq!(reg.get(BuildingId(1)).unwrap().quartier, "Arcis");
+        assert_eq!(reg.get(BuildingId(1)).unwrap().identif, 42);
+        assert!(reg.get(BuildingId(0)).is_none());
         assert!(reg.get(BuildingId(999)).is_none());
+    }
+
+    #[test]
+    fn test_building_registry_duplicate_identif() {
+        let mut reg = BuildingRegistry::new();
+
+        // Two buildings sharing the same cadastral parcel Identif
+        let id1 = reg.next_id();
+        reg.insert(BuildingData {
+            id: id1,
+            identif: 100,
+            quartier: "Arcis".into(),
+            superficie: 80.0,
+            bati: 1, // main
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            floor_count: 3,
+            tiles: vec![(1, 1), (2, 1)],
+            addresses: Vec::new(),
+            occupants: Vec::new(),
+        });
+
+        let id2 = reg.next_id();
+        reg.insert(BuildingData {
+            id: id2,
+            identif: 100,
+            quartier: "Arcis".into(),
+            superficie: 30.0,
+            bati: 2, // annex
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            floor_count: 2,
+            tiles: vec![(5, 5), (6, 5)],
+            addresses: Vec::new(),
+            occupants: Vec::new(),
+        });
+
+        // Both buildings are preserved
+        assert_eq!(reg.len(), 2);
+        assert!(reg.get(id1).is_some());
+        assert!(reg.get(id2).is_some());
+        assert_eq!(reg.get(id1).unwrap().bati, 1);
+        assert_eq!(reg.get(id2).unwrap().bati, 2);
+
+        // Reverse lookup finds both
+        let by_identif = reg.get_by_identif(100);
+        assert_eq!(by_identif.len(), 2);
+        assert!(by_identif.contains(&id1));
+        assert!(by_identif.contains(&id2));
     }
 
     #[test]
