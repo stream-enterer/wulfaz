@@ -36,6 +36,20 @@ impl Terrain {
         )
     }
 
+    /// Target equilibrium temperature for this terrain type (°C).
+    pub fn target_temperature(self) -> f32 {
+        match self {
+            Terrain::Water => 10.0,     // river
+            Terrain::Bridge => 12.0,    // over water
+            Terrain::Garden => 15.0,    // green space
+            Terrain::Wall => 15.0,      // building perimeter
+            Terrain::Road => 16.0,      // streets
+            Terrain::Courtyard => 16.0, // enclosed open space
+            Terrain::Door => 17.0,      // building entrance
+            Terrain::Floor => 18.0,     // building interior
+        }
+    }
+
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -56,6 +70,7 @@ impl Terrain {
 }
 
 /// Chunk coordinate — identifies a 64×64 chunk in the world grid.
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkCoord {
     pub cx: i32,
@@ -83,6 +98,9 @@ pub struct Chunk {
     pub dirty: bool,
     /// Last simulation tick that touched this chunk.
     pub last_tick: Tick,
+    /// True when all tiles are at their terrain's target temperature.
+    /// Set by initialize_temperatures / run_temperature. Cleared by set_terrain.
+    pub at_equilibrium: bool,
 }
 
 impl fmt::Debug for Chunk {
@@ -105,6 +123,7 @@ impl Chunk {
             quartier_id: [0; CHUNK_AREA],
             dirty: false,
             last_tick: Tick(0),
+            at_equilibrium: false,
         }
     }
 
@@ -120,6 +139,7 @@ impl Chunk {
     pub fn set_terrain(&mut self, lx: usize, ly: usize, t: Terrain) {
         self.terrain[Self::local_index(lx, ly)] = t;
         self.dirty = true;
+        self.at_equilibrium = false;
     }
 
     pub fn get_temperature(&self, lx: usize, ly: usize) -> f32 {
@@ -225,6 +245,22 @@ const BINARY_MAGIC: &[u8; 4] = b"WULF";
 /// Binary file format version.
 const BINARY_VERSION: u32 = 1;
 
+/// Range of chunk coordinates (exclusive upper bounds).
+#[allow(dead_code)]
+pub struct ChunkRange {
+    pub min_cx: usize,
+    pub min_cy: usize,
+    pub max_cx: usize, // exclusive
+    pub max_cy: usize, // exclusive
+}
+
+#[allow(dead_code)]
+impl ChunkRange {
+    pub fn is_empty(&self) -> bool {
+        self.min_cx >= self.max_cx || self.min_cy >= self.max_cy
+    }
+}
+
 pub struct TileMap {
     chunks: Vec<Chunk>,
     chunks_x: usize,
@@ -277,7 +313,7 @@ impl TileMap {
         Some((idx, lx, ly))
     }
 
-    /// Convert tile coordinates to a ChunkCoord (public, for A04/A05).
+    /// Convert tile coordinates to a ChunkCoord.
     #[allow(dead_code)]
     pub fn tile_to_chunk(x: usize, y: usize) -> ChunkCoord {
         ChunkCoord {
@@ -297,11 +333,13 @@ impl TileMap {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_temperature(&self, x: usize, y: usize) -> Option<f32> {
         let (idx, lx, ly) = self.chunk_and_local(x, y)?;
         Some(self.chunks[idx].get_temperature(lx, ly))
     }
 
+    #[allow(dead_code)]
     pub fn set_temperature(&mut self, x: usize, y: usize, temp: f32) {
         if let Some((idx, lx, ly)) = self.chunk_and_local(x, y) {
             self.chunks[idx].set_temperature(lx, ly, temp);
@@ -346,7 +384,7 @@ impl TileMap {
         self.get_terrain(x, y).is_some_and(|t| t.is_walkable())
     }
 
-    /// Get an immutable reference to a chunk by coordinate (for A04/A05).
+    /// Get an immutable reference to a chunk by coordinate.
     #[allow(dead_code)]
     pub fn get_chunk(&self, coord: ChunkCoord) -> Option<&Chunk> {
         if coord.cx < 0 || coord.cy < 0 {
@@ -358,7 +396,7 @@ impl TileMap {
         self.chunks.get(idx)
     }
 
-    /// Get a mutable reference to a chunk by coordinate (for A04/A05).
+    /// Get a mutable reference to a chunk by coordinate.
     #[allow(dead_code)]
     pub fn get_chunk_mut(&mut self, coord: ChunkCoord) -> Option<&mut Chunk> {
         if coord.cx < 0 || coord.cy < 0 {
@@ -370,7 +408,7 @@ impl TileMap {
         self.chunks.get_mut(idx)
     }
 
-    /// Iterate over all chunks (for A04/A05).
+    /// Iterate over all chunks.
     #[allow(dead_code)]
     pub fn chunks(&self) -> impl Iterator<Item = (ChunkCoord, &Chunk)> {
         let chunks_x = self.chunks_x;
@@ -381,7 +419,7 @@ impl TileMap {
         })
     }
 
-    /// Iterate over all chunks mutably (for A04/A05).
+    /// Iterate over all chunks mutably.
     #[allow(dead_code)]
     pub fn chunks_mut(&mut self) -> impl Iterator<Item = (ChunkCoord, &mut Chunk)> {
         let chunks_x = self.chunks_x;
@@ -390,6 +428,103 @@ impl TileMap {
             let cy = (i / chunks_x) as i32;
             (ChunkCoord { cx, cy }, chunk)
         })
+    }
+
+    /// Number of chunks along the X axis.
+    pub fn chunks_x(&self) -> usize {
+        self.chunks_x
+    }
+
+    /// Number of chunks along the Y axis.
+    pub fn chunks_y(&self) -> usize {
+        self.height.div_ceil(CHUNK_SIZE)
+    }
+
+    /// O(1) chunk access by grid position. Panics if out of bounds.
+    pub fn chunk_at(&self, cx: usize, cy: usize) -> &Chunk {
+        &self.chunks[cy * self.chunks_x + cx]
+    }
+
+    /// O(1) mutable chunk access by grid position. Panics if out of bounds.
+    pub fn chunk_at_mut(&mut self, cx: usize, cy: usize) -> &mut Chunk {
+        &mut self.chunks[cy * self.chunks_x + cx]
+    }
+
+    /// Compute the chunk coordinate range overlapping a camera viewport.
+    /// Returns exclusive upper bounds, clamped to valid chunk indices.
+    #[allow(dead_code)]
+    pub fn visible_chunk_range(
+        &self,
+        cam_x: i32,
+        cam_y: i32,
+        vp_w: usize,
+        vp_h: usize,
+    ) -> ChunkRange {
+        let w = self.width as i32;
+        let h = self.height as i32;
+
+        // Tile range visible in the viewport, clamped to map bounds [0, dim)
+        let min_tx = cam_x.max(0) as usize;
+        let max_tx = (cam_x + vp_w as i32).clamp(0, w) as usize; // exclusive
+        let min_ty = cam_y.max(0) as usize;
+        let max_ty = (cam_y + vp_h as i32).clamp(0, h) as usize; // exclusive
+
+        if min_tx >= max_tx || min_ty >= max_ty {
+            return ChunkRange {
+                min_cx: 0,
+                min_cy: 0,
+                max_cx: 0,
+                max_cy: 0,
+            };
+        }
+
+        let cx_count = self.chunks_x;
+        let cy_count = self.height.div_ceil(CHUNK_SIZE);
+
+        let min_cx = min_tx / CHUNK_SIZE;
+        let max_cx = ((max_tx - 1) / CHUNK_SIZE + 1).min(cx_count);
+        let min_cy = min_ty / CHUNK_SIZE;
+        let max_cy = ((max_ty - 1) / CHUNK_SIZE + 1).min(cy_count);
+
+        ChunkRange {
+            min_cx,
+            min_cy,
+            max_cx,
+            max_cy,
+        }
+    }
+
+    /// Initialize all tile temperatures to their terrain's target value
+    /// and mark every chunk as at_equilibrium. Call once after map load.
+    pub fn initialize_temperatures(&mut self) {
+        let cx_count = self.chunks_x;
+        let cy_count = self.height.div_ceil(CHUNK_SIZE);
+
+        for cy in 0..cy_count {
+            let local_h = if (cy + 1) * CHUNK_SIZE <= self.height {
+                CHUNK_SIZE
+            } else {
+                self.height % CHUNK_SIZE
+            };
+
+            for cx in 0..cx_count {
+                let local_w = if (cx + 1) * CHUNK_SIZE <= self.width {
+                    CHUNK_SIZE
+                } else {
+                    self.width % CHUNK_SIZE
+                };
+
+                let chunk = &mut self.chunks[cy * cx_count + cx];
+                for ly in 0..local_h {
+                    for lx in 0..local_w {
+                        let terrain = chunk.get_terrain(lx, ly);
+                        let idx = Chunk::local_index(lx, ly);
+                        chunk.temperature[idx] = terrain.target_temperature();
+                    }
+                }
+                chunk.at_equilibrium = true;
+            }
+        }
     }
 
     /// Write the full tile map to a binary file.
@@ -1020,5 +1155,130 @@ mod tests {
         assert!(is_diagonal_step((3, 3), (2, 4)));
         assert!(is_diagonal_step((5, 5), (4, 4)));
         assert!(is_diagonal_step((0, 0), (1, -1)));
+    }
+
+    // --- target_temperature ---
+
+    #[test]
+    fn test_terrain_target_temperature() {
+        assert_eq!(Terrain::Water.target_temperature(), 10.0);
+        assert_eq!(Terrain::Bridge.target_temperature(), 12.0);
+        assert_eq!(Terrain::Garden.target_temperature(), 15.0);
+        assert_eq!(Terrain::Wall.target_temperature(), 15.0);
+        assert_eq!(Terrain::Road.target_temperature(), 16.0);
+        assert_eq!(Terrain::Courtyard.target_temperature(), 16.0);
+        assert_eq!(Terrain::Door.target_temperature(), 17.0);
+        assert_eq!(Terrain::Floor.target_temperature(), 18.0);
+    }
+
+    // --- visible_chunk_range ---
+
+    #[test]
+    fn test_visible_chunk_range_basic() {
+        // 200x150 map = 4x3 chunks
+        let map = TileMap::new(200, 150);
+        let r = map.visible_chunk_range(0, 0, 100, 80);
+        assert_eq!(r.min_cx, 0);
+        assert_eq!(r.min_cy, 0);
+        // 100 tiles → chunks 0..1 (tiles 0-63 in chunk 0, 64-99 in chunk 1)
+        assert_eq!(r.max_cx, 2);
+        // 80 tiles → chunks 0..1
+        assert_eq!(r.max_cy, 2);
+        assert!(!r.is_empty());
+    }
+
+    #[test]
+    fn test_visible_chunk_range_negative_camera() {
+        let map = TileMap::new(200, 150);
+        let r = map.visible_chunk_range(-10, -10, 50, 50);
+        // cam (-10,-10) + viewport 50x50 → tiles -10..40, clamped to 0..40
+        assert_eq!(r.min_cx, 0);
+        assert_eq!(r.min_cy, 0);
+        assert!(!r.is_empty());
+    }
+
+    #[test]
+    fn test_visible_chunk_range_beyond_map() {
+        let map = TileMap::new(200, 150);
+        let r = map.visible_chunk_range(180, 130, 100, 100);
+        // tiles 180..280 clamped to 180..200, chunks 2..3 → max_cx=4 (ceil)
+        assert_eq!(r.min_cx, 2); // 180/64 = 2
+        assert_eq!(r.max_cx, 4); // ceil(200/64) = 4, clamped to 4
+        assert_eq!(r.min_cy, 2); // 130/64 = 2
+        assert_eq!(r.max_cy, 3); // ceil(150/64) = 3, clamped to 3
+        assert!(!r.is_empty());
+    }
+
+    #[test]
+    fn test_visible_chunk_range_empty() {
+        let map = TileMap::new(200, 150);
+        // Camera completely past the map
+        let r = map.visible_chunk_range(200, 150, 50, 50);
+        assert!(r.is_empty());
+
+        // Camera completely negative
+        let r = map.visible_chunk_range(-100, -100, 50, 50);
+        assert!(r.is_empty());
+    }
+
+    // --- chunk_at ---
+
+    #[test]
+    fn test_chunk_at_basic() {
+        let mut map = TileMap::new(200, 150);
+        // Modify tile in chunk (1,1) → tile (70,70)
+        map.set_terrain(70, 70, Terrain::Water);
+
+        let chunk = map.chunk_at(1, 1);
+        assert_eq!(chunk.get_terrain(70 % 64, 70 % 64), Terrain::Water);
+
+        // chunk (0,0) should be unmodified (except dirty from no set_terrain)
+        let chunk00 = map.chunk_at(0, 0);
+        assert_eq!(chunk00.get_terrain(0, 0), Terrain::Road);
+    }
+
+    // --- initialize_temperatures ---
+
+    #[test]
+    fn test_initialize_temperatures() {
+        let mut map = TileMap::new(130, 70); // 3x2 chunks, edge chunks partial
+        map.set_terrain(0, 0, Terrain::Water);
+        map.set_terrain(10, 10, Terrain::Floor);
+        map.set_terrain(129, 69, Terrain::Garden);
+
+        map.initialize_temperatures();
+
+        assert_eq!(map.get_temperature(0, 0), Some(10.0)); // Water
+        assert_eq!(map.get_temperature(10, 10), Some(18.0)); // Floor
+        assert_eq!(map.get_temperature(129, 69), Some(15.0)); // Garden
+        assert_eq!(map.get_temperature(50, 50), Some(16.0)); // Road (default)
+
+        // All chunks should be at_equilibrium
+        let cx_count = map.chunks_x();
+        let cy_count = map.chunks_y();
+        for cy in 0..cy_count {
+            for cx in 0..cx_count {
+                assert!(
+                    map.chunk_at(cx, cy).at_equilibrium,
+                    "chunk ({cx},{cy}) should be at_equilibrium"
+                );
+            }
+        }
+    }
+
+    // --- set_terrain resets equilibrium ---
+
+    #[test]
+    fn test_set_terrain_resets_equilibrium() {
+        let mut map = TileMap::new(130, 70);
+        map.initialize_temperatures();
+        assert!(map.chunk_at(0, 0).at_equilibrium);
+
+        // Changing terrain should clear equilibrium for that chunk
+        map.set_terrain(5, 5, Terrain::Water);
+        assert!(!map.chunk_at(0, 0).at_equilibrium);
+
+        // Other chunks should still be at equilibrium
+        assert!(map.chunk_at(1, 0).at_equilibrium);
     }
 }

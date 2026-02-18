@@ -543,6 +543,8 @@ fn main() {
         loading::load_terrain(&mut world, "data/terrain.kdl");
     }
 
+    world.tiles.initialize_temperatures();
+
     loading::load_utility_config(&mut world, "data/utility.ron");
 
     let start_camera = Camera {

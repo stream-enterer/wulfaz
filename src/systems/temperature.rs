@@ -1,55 +1,80 @@
 use crate::components::Tick;
-use crate::tile_map::Terrain;
+use crate::tile_map::CHUNK_SIZE;
 use crate::world::World;
 
 /// Phase 1 (Environment): Temperature equilibrium system.
 ///
 /// Each tile drifts toward a target temperature determined by its terrain type
 /// at a rate of 0.1 degrees per tick. Pure arithmetic — no RNG needed.
+///
+/// Iterates by chunk and skips chunks already at equilibrium (O(1) steady state).
 /// Uses collect-then-apply mutation pattern.
 pub fn run_temperature(world: &mut World, _tick: Tick) {
-    let width = world.tiles.width();
-    let height = world.tiles.height();
+    let cx_count = world.tiles.chunks_x();
+    let cy_count = world.tiles.chunks_y();
+    let map_w = world.tiles.width();
+    let map_h = world.tiles.height();
 
-    // Collect temperature changes
-    let mut changes: Vec<(usize, usize, f32)> = Vec::new();
+    // (cx, cy, lx, ly, new_temp)
+    let mut changes: Vec<(usize, usize, usize, usize, f32)> = Vec::new();
+    let mut equilibrium_chunks: Vec<(usize, usize)> = Vec::new();
 
-    for y in 0..height {
-        for x in 0..width {
-            let terrain = match world.tiles.get_terrain(x, y) {
-                Some(t) => t,
-                None => continue,
-            };
-            let current = match world.tiles.get_temperature(x, y) {
-                Some(t) => t,
-                None => continue,
-            };
+    for cy in 0..cy_count {
+        let local_h = if (cy + 1) * CHUNK_SIZE <= map_h {
+            CHUNK_SIZE
+        } else {
+            map_h % CHUNK_SIZE
+        };
 
-            let target = match terrain {
-                Terrain::Water => 10.0,     // °C — river
-                Terrain::Bridge => 12.0,    // °C — over water
-                Terrain::Garden => 15.0,    // °C — green space
-                Terrain::Wall => 15.0,      // °C — building perimeter
-                Terrain::Road => 16.0,      // °C — streets
-                Terrain::Courtyard => 16.0, // °C — enclosed open space
-                Terrain::Door => 17.0,      // °C — building entrance
-                Terrain::Floor => 18.0,     // °C — building interior
-            };
-
-            let diff = target - current;
-            if diff.abs() < f32::EPSILON {
+        for cx in 0..cx_count {
+            let chunk = world.tiles.chunk_at(cx, cy);
+            if chunk.at_equilibrium {
                 continue;
             }
 
-            // 0.1°C/tick = 10°C/sec drift rate (gameplay abstraction)
-            let delta = diff.signum() * diff.abs().min(0.1);
-            changes.push((x, y, current + delta));
+            let local_w = if (cx + 1) * CHUNK_SIZE <= map_w {
+                CHUNK_SIZE
+            } else {
+                map_w % CHUNK_SIZE
+            };
+
+            let mut chunk_has_changes = false;
+
+            for ly in 0..local_h {
+                for lx in 0..local_w {
+                    let terrain = chunk.get_terrain(lx, ly);
+                    let current = chunk.get_temperature(lx, ly);
+                    let target = terrain.target_temperature();
+
+                    let diff = target - current;
+                    if diff.abs() < f32::EPSILON {
+                        continue;
+                    }
+
+                    // 0.1°C/tick = 10°C/sec drift rate (gameplay abstraction)
+                    let delta = diff.signum() * diff.abs().min(0.1);
+                    changes.push((cx, cy, lx, ly, current + delta));
+                    chunk_has_changes = true;
+                }
+            }
+
+            if !chunk_has_changes {
+                equilibrium_chunks.push((cx, cy));
+            }
         }
     }
 
-    // Apply changes
-    for (x, y, new_temp) in changes {
-        world.tiles.set_temperature(x, y, new_temp);
+    // Apply temperature changes
+    for (cx, cy, lx, ly, new_temp) in changes {
+        world
+            .tiles
+            .chunk_at_mut(cx, cy)
+            .set_temperature(lx, ly, new_temp);
+    }
+
+    // Mark chunks that had no changes as at equilibrium
+    for (cx, cy) in equilibrium_chunks {
+        world.tiles.chunk_at_mut(cx, cy).at_equilibrium = true;
     }
 }
 
@@ -57,7 +82,7 @@ pub fn run_temperature(world: &mut World, _tick: Tick) {
 mod tests {
     use super::*;
     use crate::components::Tick;
-    use crate::tile_map::TileMap;
+    use crate::tile_map::{Terrain, TileMap};
     use crate::world::World;
 
     #[test]
@@ -111,5 +136,44 @@ mod tests {
             (temp - 16.1).abs() < f32::EPSILON,
             "should drift by 0.1: got {temp}"
         );
+    }
+
+    #[test]
+    fn test_temperature_skips_equilibrium_chunks() {
+        let mut world = World::new_with_seed(42);
+        world.tiles = TileMap::new(130, 70);
+        // Set some varied terrain
+        world.tiles.set_terrain(0, 0, Terrain::Water);
+        world.tiles.set_terrain(65, 0, Terrain::Floor);
+
+        // Initialize to target → all at equilibrium
+        world.tiles.initialize_temperatures();
+
+        // Record temperatures
+        let t_water = world.tiles.get_temperature(0, 0).unwrap();
+        let t_floor = world.tiles.get_temperature(65, 0).unwrap();
+
+        // run_temperature should be a no-op
+        run_temperature(&mut world, Tick(0));
+
+        assert_eq!(world.tiles.get_temperature(0, 0).unwrap(), t_water);
+        assert_eq!(world.tiles.get_temperature(65, 0).unwrap(), t_floor);
+    }
+
+    #[test]
+    fn test_temperature_marks_equilibrium_after_convergence() {
+        let mut world = World::new_with_seed(42);
+        world.tiles = TileMap::new(1, 1);
+        // Road at target = already at equilibrium after one run
+        world.tiles.set_terrain(0, 0, Terrain::Road);
+        world.tiles.set_temperature(0, 0, 16.0);
+
+        // Chunk starts non-equilibrium (set_terrain clears it)
+        assert!(!world.tiles.chunk_at(0, 0).at_equilibrium);
+
+        run_temperature(&mut world, Tick(0));
+
+        // No changes needed → chunk should be marked equilibrium
+        assert!(world.tiles.chunk_at(0, 0).at_equilibrium);
     }
 }
