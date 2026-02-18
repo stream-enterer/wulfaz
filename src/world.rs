@@ -4,6 +4,7 @@ use rand::rngs::StdRng;
 
 use crate::components::*;
 use crate::events::EventLog;
+use crate::registry::{BlockRegistry, BuildingRegistry};
 use crate::rng::create_rng;
 use crate::systems::decisions::UtilityConfig;
 use crate::tile_map::TileMap;
@@ -38,6 +39,12 @@ pub struct World {
     pub utility_config: UtilityConfig,
     /// Player-controlled entity. None = realtime mode, Some = roguelike mode.
     pub player: Option<Entity>,
+
+    // GIS registries (populated by loading_gis)
+    pub buildings: BuildingRegistry,
+    pub blocks: BlockRegistry,
+    /// Maps quartier_id (1-based index) to quartier name string.
+    pub quartier_names: Vec<String>,
 }
 
 impl World {
@@ -69,6 +76,10 @@ impl World {
             tick: Tick(0),
             utility_config: UtilityConfig::default(),
             player: None,
+
+            buildings: BuildingRegistry::new(),
+            blocks: BlockRegistry::new(),
+            quartier_names: Vec::new(),
         }
     }
 

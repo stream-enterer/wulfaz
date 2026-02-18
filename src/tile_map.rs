@@ -3,6 +3,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fmt;
 
 use crate::components::Tick;
+use crate::registry::{BlockId, BuildingId};
 
 /// Side length of each chunk in tiles. 1 chunk = 64×64 = 4096 tiles.
 pub const CHUNK_SIZE: usize = 64;
@@ -51,6 +52,12 @@ impl fmt::Debug for ChunkCoord {
 pub struct Chunk {
     terrain: [Terrain; CHUNK_AREA],
     temperature: [f32; CHUNK_AREA],
+    /// 0 = no building, else Identif value from BATI.shp.
+    building_id: [u32; CHUNK_AREA],
+    /// 0 = no block, else sequential BlockId.
+    block_id: [u16; CHUNK_AREA],
+    /// 0 = unassigned, 1-36 = quartier index.
+    quartier_id: [u8; CHUNK_AREA],
     /// Set to true when any tile in this chunk is modified.
     pub dirty: bool,
     /// Last simulation tick that touched this chunk.
@@ -72,6 +79,9 @@ impl Chunk {
         Self {
             terrain: [Terrain::Road; CHUNK_AREA],
             temperature: [16.0; CHUNK_AREA],
+            building_id: [0; CHUNK_AREA],
+            block_id: [0; CHUNK_AREA],
+            quartier_id: [0; CHUNK_AREA],
             dirty: false,
             last_tick: Tick(0),
         }
@@ -98,6 +108,36 @@ impl Chunk {
     pub fn set_temperature(&mut self, lx: usize, ly: usize, temp: f32) {
         self.temperature[Self::local_index(lx, ly)] = temp;
         self.dirty = true;
+    }
+
+    pub fn get_building_id(&self, lx: usize, ly: usize) -> Option<BuildingId> {
+        let raw = self.building_id[Self::local_index(lx, ly)];
+        if raw == 0 {
+            None
+        } else {
+            Some(BuildingId(raw))
+        }
+    }
+
+    pub fn set_building_id(&mut self, lx: usize, ly: usize, id: BuildingId) {
+        self.building_id[Self::local_index(lx, ly)] = id.0;
+    }
+
+    pub fn get_block_id(&self, lx: usize, ly: usize) -> Option<BlockId> {
+        let raw = self.block_id[Self::local_index(lx, ly)];
+        if raw == 0 { None } else { Some(BlockId(raw)) }
+    }
+
+    pub fn set_block_id(&mut self, lx: usize, ly: usize, id: BlockId) {
+        self.block_id[Self::local_index(lx, ly)] = id.0;
+    }
+
+    pub fn get_quartier_id(&self, lx: usize, ly: usize) -> u8 {
+        self.quartier_id[Self::local_index(lx, ly)]
+    }
+
+    pub fn set_quartier_id(&mut self, lx: usize, ly: usize, id: u8) {
+        self.quartier_id[Self::local_index(lx, ly)] = id;
     }
 }
 
@@ -212,6 +252,69 @@ impl TileMap {
             .entry(coord)
             .or_insert_with(Chunk::new)
             .set_temperature(lx, ly, temp);
+    }
+
+    pub fn get_building_id(&self, x: usize, y: usize) -> Option<BuildingId> {
+        let (coord, lx, ly) = self.chunk_and_local(x, y)?;
+        self.chunks.get(&coord)?.get_building_id(lx, ly)
+    }
+
+    pub fn set_building_id(&mut self, x: usize, y: usize, id: BuildingId) {
+        if x >= self.width || y >= self.height {
+            return;
+        }
+        let coord = ChunkCoord {
+            cx: (x / CHUNK_SIZE) as i32,
+            cy: (y / CHUNK_SIZE) as i32,
+        };
+        let lx = x % CHUNK_SIZE;
+        let ly = y % CHUNK_SIZE;
+        self.chunks
+            .entry(coord)
+            .or_insert_with(Chunk::new)
+            .set_building_id(lx, ly, id);
+    }
+
+    pub fn get_block_id(&self, x: usize, y: usize) -> Option<BlockId> {
+        let (coord, lx, ly) = self.chunk_and_local(x, y)?;
+        self.chunks.get(&coord)?.get_block_id(lx, ly)
+    }
+
+    pub fn set_block_id(&mut self, x: usize, y: usize, id: BlockId) {
+        if x >= self.width || y >= self.height {
+            return;
+        }
+        let coord = ChunkCoord {
+            cx: (x / CHUNK_SIZE) as i32,
+            cy: (y / CHUNK_SIZE) as i32,
+        };
+        let lx = x % CHUNK_SIZE;
+        let ly = y % CHUNK_SIZE;
+        self.chunks
+            .entry(coord)
+            .or_insert_with(Chunk::new)
+            .set_block_id(lx, ly, id);
+    }
+
+    pub fn get_quartier_id(&self, x: usize, y: usize) -> Option<u8> {
+        let (coord, lx, ly) = self.chunk_and_local(x, y)?;
+        self.chunks.get(&coord).map(|c| c.get_quartier_id(lx, ly))
+    }
+
+    pub fn set_quartier_id(&mut self, x: usize, y: usize, id: u8) {
+        if x >= self.width || y >= self.height {
+            return;
+        }
+        let coord = ChunkCoord {
+            cx: (x / CHUNK_SIZE) as i32,
+            cy: (y / CHUNK_SIZE) as i32,
+        };
+        let lx = x % CHUNK_SIZE;
+        let ly = y % CHUNK_SIZE;
+        self.chunks
+            .entry(coord)
+            .or_insert_with(Chunk::new)
+            .set_quartier_id(lx, ly, id);
     }
 
     /// Check if a tile is walkable (in-bounds and terrain allows passage).

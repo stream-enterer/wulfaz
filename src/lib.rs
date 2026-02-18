@@ -1,6 +1,8 @@
 pub mod components;
 pub mod events;
 pub mod loading;
+pub mod loading_gis;
+pub mod registry;
 pub mod render;
 pub mod rng;
 pub mod systems;

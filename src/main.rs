@@ -11,6 +11,8 @@ mod components;
 mod events;
 mod font;
 mod loading;
+mod loading_gis;
+mod registry;
 mod render;
 mod rng;
 mod systems;
@@ -524,8 +526,21 @@ fn main() {
 
     let mut world = World::new_with_seed(42);
 
+    // If GIS data exists, load Paris map; otherwise use random terrain.
+    let paris_data = std::env::var("PARIS_DATA").unwrap_or_else(|_| "../../paris/data".into());
+    let buildings_path = std::path::Path::new(&paris_data).join("buildings/BATI.shp");
+    if buildings_path.exists() {
+        let blocks_path = std::path::Path::new(&paris_data).join("plots/Vasserot_Ilots.shp");
+        loading_gis::load_gis(
+            &mut world,
+            buildings_path.to_str().unwrap(),
+            blocks_path.to_str().unwrap(),
+        );
+    } else {
+        loading::load_terrain(&mut world, "data/terrain.kdl");
+    }
+
     // Load data from KDL files
-    loading::load_terrain(&mut world, "data/terrain.kdl");
     loading::load_creatures(&mut world, "data/creatures.kdl");
     loading::load_items(&mut world, "data/items.kdl");
     loading::load_utility_config(&mut world, "data/utility.ron");
