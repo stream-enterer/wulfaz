@@ -11,21 +11,6 @@ Goal: See Paris on screen. No entities.
 Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 30m padding).
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
-- **SCALE-A03** — GIS terrain loader + building registry. Blocks: A07, A08, B05. Needs: A01, A02.
-  - Input files (all in `~/Development/paris/data/`):
-    - `buildings/BATI.shp` — 40,356 building footprint polygons. Encoding: `latin-1`. CRS: EPSG:4326 (WGS84 lon/lat).
-    - `plots/Vasserot_Ilots.shp` — 1,215 city block polygons. Same encoding/CRS.
-  - Coordinate conversion: at lat 48.857, 1° lon = 73,490m, 1° lat = 111,320m.
-  - Viewport origin: lon 2.2981468, lat 48.8837517 (top-left = max lat).
-  - Algorithm: scanline rasterization per polygon (see `~/Development/paris/render_city.py` for working Python reference). For each polygon, find x-intersections per row, fill between pairs.
-  - Classification order: (1) rasterize all block polygons → mark Courtyard + write `block_id` per tile, (2) rasterize all building polygons → mark building tiles + write `building_id` per tile, overwriting courtyard terrain but preserving `block_id`, (3) classify building tiles into Wall vs Floor by neighbor check, (4) everything still unmarked = Road, (5) assign `quartier_id` to every tile (building/courtyard tiles inherit from their block's QUARTIER; road tiles filled by nearest-block Voronoi or flood-fill from adjacent block tiles).
-  - Door placement, passage carving, garden conversion, and interior furnishing are all deferred to Phase B (B05, B06). A03 only produces raw geometry + registries.
-  - Key building fields: `Identif` (int, unique building ID, used to join to addresses), `QUARTIER` (neighborhood name), `SUPERFICIE` (area m²), `BATI` (1=main, 2=annex, 3=market stall), `Nom_Bati` (name if notable), `NUM_ILOT` (block number), `DATE_COYEC` (survey date).
-  - **Block registry**: during block rasterization, create a `BlockRegistry` (see architecture.md). Each block's `ID_ILOTS`, `QUARTIER`, `AIRE`, and building membership are stored.
-  - **Building registry**: during building rasterization, create a `BuildingRegistry` (see architecture.md). Each building's `Identif`, `QUARTIER`, `SUPERFICIE`, `BATI`, `Nom_Bati`, `NUM_ILOT`, tile list, and estimated `floor_count` are stored. Floor count derived from SUPERFICIE: <50m²=2, 50-150m²=3-4, 150-400m²=4-5, >400m²=5-6. This persists all shapefile metadata for later use by address joins, entity spawning, interior generation, and district aggregation.
-  - **Per-tile layers**: each chunk stores `building_id`, `block_id`, and `quartier_id` arrays alongside terrain (see architecture.md). All write-once during loading. Any tile can answer: which building, which block, and which quartier it belongs to.
-  - Rust crate: `shapefile` (reads .shp/.dbf/.shx directly).
-
 - **SCALE-A07** — Address + occupant loading. Needs: A03. Blocks: B06, B03, C04, C05.
   - Loads address data and joins it to buildings in the registry. This is a data-loading step, not entity spawning.
   - Step 1: Read `addresses/Num_Voies_Vasserot.shp` (29,164 points, encoding `latin-1`). **WARNING: Lambert projection, NOT WGS84.** Use `ID_PARC` field only (ignore point geometry). Strip "PA" prefix → match to `BuildingId`. Attach street name (`NOM_ENTIER`) and house number (`NUM_VOIES`) to each building in the registry.
@@ -43,9 +28,12 @@ That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
   - Bridges (hardcoded, 1830s-era): Pont Royal, Pont du Carrousel, Pont des Arts, Pont Neuf, Pont au Change, Pont Notre-Dame, Pont de l'Arcole, Pont Saint-Louis, Pont Marie, Pont de la Tournelle. Each bridge is a short rectangle of Bridge tiles (~5-8 tiles wide, spanning the water gap). Define each as two endpoints (tile coordinates) and fill the rectangle between them.
   - Set `quartier_id` on water tiles to 0 (unassigned). Bridge tiles get quartier from the nearest bank.
 
-- **SCALE-A04** — Chunk-aware renderer. Only load/render chunks overlapping camera viewport. Needs: A02, A08.
+- **SCALE-A04** — Chunk-aware renderer. Only render chunks overlapping camera viewport. Needs: A02.
+  - With Vec<Chunk> storage, chunk access is O(1) by index. Compute visible chunk range from camera position + viewport size, skip all others during render.
 
-- **SCALE-A05** — Lazy tile updates. `run_temperature` only ticks dirty/active chunks. Cold chunks fast-forward on reload. Needs: A02.
+- **SCALE-A05** — Lazy tile updates. `run_temperature` only ticks dirty/active chunks. Needs: A02.
+  - Binary tiles load with temperature = 16.0 (not serialized), which is already at equilibrium for Road/Courtyard. Only non-default terrain (Water=10°, Floor=18°, etc.) needs drift — skip chunks where all tiles are at target.
+  - Cold chunk fast-forward on reload: `elapsed × drift_rate`, clamp to equilibrium.
 
 ## Phase B — Entities in One Neighborhood
 

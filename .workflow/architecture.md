@@ -29,13 +29,14 @@ Zone derived from entity position vs camera position. Recomputed each tick or on
 struct ChunkCoord { cx: i32, cy: i32 }  // cx = x / 64, cy = y / 64
 
 struct TileMap {
-    chunks: HashMap<ChunkCoord, Chunk>,
-    width_chunks: i32,
-    height_chunks: i32,
+    chunks: Vec<Chunk>,      // flat Vec, indexed by cy * chunks_x + cx
+    chunks_x: usize,         // number of chunks in X direction
+    width: usize,            // total tiles
+    height: usize,           // total tiles
 }
 ```
 
-Tile accessors keep same signatures, route through chunk lookup internally. Cold chunks fast-forward on reload: `elapsed × drift_rate`, clamp to equilibrium. See "Chunk (full definition)" section for per-tile ID layers.
+Tile accessors keep same signatures, route through flat Vec indexing internally (no hashing). Binary serialization: WULF header (32 bytes) + chunks in row-major order. Temperature not serialized (defaults to 16.0 on load). Cold chunks fast-forward on reload: `elapsed × drift_rate`, clamp to equilibrium. See "Chunk (full definition)" section for per-tile ID layers.
 
 ## Building Registry
 
@@ -92,14 +93,15 @@ struct BlockRegistry {
 
 ```rust
 struct Chunk {
-    terrain: [Terrain; 4096],
-    temperature: [f32; 4096],
-    building_id: [Option<BuildingId>; 4096],  // tile → building reverse lookup
-    block_id: [Option<BlockId>; 4096],        // tile → city block (courtyards + buildings)
-    quartier_id: [u8; 4096],                  // tile → quartier (0 = unassigned, 1-36 = index)
+    terrain: [Terrain; 4096],     // #[repr(u8)], serialized
+    temperature: [f32; 4096],     // runtime-only, NOT serialized (defaults to 16.0)
+    building_id: [u32; 4096],     // 0 = no building, else BuildingId value. Serialized as LE u32.
+    block_id: [u16; 4096],        // 0 = no block, else BlockId value. Serialized as LE u16.
+    quartier_id: [u8; 4096],      // 0 = unassigned, 1-36 = quartier index. Serialized.
     dirty: bool,
     last_tick: Tick,
 }
+// Binary size per chunk: 4096 + 4096×4 + 4096×2 + 4096 = 32 KB
 ```
 
 All per-tile ID layers populated during GIS loading (SCALE-A03) and are write-once (static city). Lookup chains:

@@ -548,12 +548,17 @@ fn main() {
     loading::load_items(&mut world, "data/items.kdl");
     loading::load_utility_config(&mut world, "data/utility.ron");
 
+    let start_camera = Camera {
+        x: world.tiles.width() as i32 / 2,
+        y: world.tiles.height() as i32 / 2,
+    };
+
     let event_loop = EventLoop::new().unwrap();
     let mut app = App {
         gpu: None,
         font: None,
         world,
-        camera: Camera { x: 0, y: 0 },
+        camera: start_camera,
         last_frame_time: Instant::now(),
         tick_accumulator: 0.0,
         cursor_pos: winit::dpi::PhysicalPosition::new(0.0, 0.0),
