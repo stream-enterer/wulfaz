@@ -816,6 +816,14 @@ pub fn normalize_street_name(name: &str) -> String {
     // ste- before st- to avoid partial match
     s = s.replace("ste-", "sainte ");
     s = s.replace("st-", "saint ");
+    // boulevard abbreviations (space-terminated to avoid false positives)
+    s = s.replace("boul. ", "boulevard ");
+    s = s.replace("boul ", "boulevard ");
+    s = s.replace("bd. ", "boulevard ");
+    s = s.replace("bd ", "boulevard ");
+    // avenue abbreviations
+    s = s.replace("av. ", "avenue ");
+    s = s.replace("av ", "avenue ");
 
     // 4. Remove non-alphanumeric except spaces
     s = s
@@ -844,12 +852,23 @@ pub fn normalize_street_name(name: &str) -> String {
         "place du ",
         "place ",
         "boulevard ",
+        "avenue de la ",
+        "avenue du ",
+        "avenue de ",
+        "avenue des ",
+        "avenue ",
+        "allee de la ",
+        "allee du ",
+        "allee des ",
+        "allee ",
         "passage ",
         "quai de la ",
         "quai du ",
         "quai des ",
         "quai ",
+        "faubourg ",
         "impasse ",
+        "cite ",
         "cour ",
     ];
     for prefix in &prefixes {
@@ -969,7 +988,7 @@ pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
             let activities: String = row.get::<_, String>(1).unwrap_or_default();
             let addr_name: String = row.get::<_, String>(2).unwrap_or_default();
             let addr_number: String = row.get::<_, String>(3).unwrap_or_default();
-            let pub_date: String = row.get::<_, String>(4).unwrap_or_default();
+            let pub_date: f64 = row.get::<_, f64>(4).unwrap_or(0.0);
             let naics: String = row.get::<_, String>(5).unwrap_or_default();
             Ok((persons, activities, addr_name, addr_number, pub_date, naics))
         })
@@ -981,8 +1000,8 @@ pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
     for (persons, activities, addr_name, addr_number, pub_date, naics) in &all_rows {
         total += 1;
 
-        // Extract year from publication date (first 4 chars)
-        let year: u16 = pub_date.get(..4).and_then(|s| s.parse().ok()).unwrap_or(0);
+        // Extract year from publication date (f64 → u16)
+        let year: u16 = pub_date.round() as u16;
         let year_stats = per_year.entry(year).or_insert((0, 0));
         year_stats.0 += 1;
 
@@ -1831,14 +1850,8 @@ mod tests {
 
     #[test]
     fn test_normalize_abbreviations() {
-        assert_eq!(
-            normalize_street_name("Fg-Saint-Denis"),
-            "faubourg saint denis"
-        );
-        assert_eq!(
-            normalize_street_name("Faub.-Montmartre"),
-            "faubourg montmartre"
-        );
+        assert_eq!(normalize_street_name("Fg-Saint-Denis"), "saint denis");
+        assert_eq!(normalize_street_name("Faub.-Montmartre"), "montmartre");
         assert_eq!(normalize_street_name("St-Honoré"), "saint honore");
         assert_eq!(normalize_street_name("Ste-Anne"), "sainte anne");
     }
@@ -1870,6 +1883,34 @@ mod tests {
     fn test_normalize_empty_and_simple() {
         assert_eq!(normalize_street_name(""), "");
         assert_eq!(normalize_street_name("Montmartre"), "montmartre");
+    }
+
+    #[test]
+    fn test_normalize_boulevard_abbreviations() {
+        assert_eq!(normalize_street_name("boul. Voltaire"), "voltaire");
+        assert_eq!(normalize_street_name("Bd. Haussmann"), "haussmann");
+        assert_eq!(normalize_street_name("Bd Saint-Michel"), "saint michel");
+    }
+
+    #[test]
+    fn test_normalize_avenue_prefix() {
+        assert_eq!(
+            normalize_street_name("Avenue de la République"),
+            "republique"
+        );
+        assert_eq!(normalize_street_name("Av. des Champs"), "champs");
+    }
+
+    #[test]
+    fn test_normalize_compound_faub_st() {
+        assert_eq!(normalize_street_name("Faub.-St-Denis"), "saint denis");
+    }
+
+    #[test]
+    fn test_normalize_allee_cite_faubourg_prefixes() {
+        assert_eq!(normalize_street_name("Allée des Tilleuls"), "tilleuls");
+        assert_eq!(normalize_street_name("Cité Bergère"), "bergere");
+        assert_eq!(normalize_street_name("Faubourg Montmartre"), "montmartre");
     }
 
     // --- BuildingData RON roundtrip with occupants_by_year ---
