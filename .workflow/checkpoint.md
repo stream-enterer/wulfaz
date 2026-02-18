@@ -1,14 +1,22 @@
 # Checkpoint
 
 ## Active Task
-Backlog planning updates (no code changes).
+A07 — Address + Occupant Loading (All Years) — COMPLETE
 
 ## Completed
-- S01–S12 rasterization simplifications all fixed (commits 90dc3e9–24f4099)
-- Updated A07 spec: extract all 16 SoDUCo years, `occupants_by_year: HashMap<u16, Vec<Occupant>>`, runtime year selection via `world.active_year`
-- Added match logging to A07 (per-year summary with top-10 unmatched street names)
-- Added design review blockers to B05, B06, B03, C04, C05 (all procedural generation items)
-- Updated architecture.md structs to match new A07 multi-year design
+- Added `rusqlite = { version = "0.33", features = ["bundled"] }` to Cargo.toml
+- `Occupant` now has `naics: String` field
+- `BuildingData.occupants` → `occupants_by_year: HashMap<u16, Vec<Occupant>>`
+- Added `StreetId`, `StreetData`, `StreetRegistry` types with `build_from_buildings()`
+- Added `streets: StreetRegistry` and `active_year: u16` to World
+- Updated all `occupants: Vec::new()` → `occupants_by_year: HashMap::new()` in loading_gis.rs + registry.rs
+- Implemented `normalize_street_name()` with accent folding, abbreviation expansion, prefix stripping
+- Implemented `load_addresses()` — reads Vasserot address shapefile, matches via Identif
+- Implemented `load_occupants()` — reads SoDUCo GeoPackage via rusqlite, fuzzy street name + house number matching
+- Updated `preprocess.rs` to call load_addresses + load_occupants (skips gracefully if files missing)
+- Updated `load_paris_binary()` to reconstruct StreetRegistry and set active_year=1845
+- 8 new tests: normalize patterns, StreetRegistry build, BuildingData RON roundtrip
+- All 189 tests pass (178 lib + 5 determinism + 6 invariants)
 
 ## Next Action
-Regenerate binary data from preprocessor, visually verify Halle au Ble courtyard. Then begin A07 implementation.
+Run `cargo run --bin preprocess` with actual Paris data to verify match rates.

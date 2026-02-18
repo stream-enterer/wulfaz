@@ -4,7 +4,7 @@ use rand::rngs::StdRng;
 
 use crate::components::*;
 use crate::events::EventLog;
-use crate::registry::{BlockRegistry, BuildingRegistry};
+use crate::registry::{BlockRegistry, BuildingRegistry, StreetRegistry};
 use crate::rng::create_rng;
 use crate::systems::decisions::UtilityConfig;
 use crate::tile_map::TileMap;
@@ -46,6 +46,12 @@ pub struct World {
     pub blocks: BlockRegistry,
     /// Maps quartier_id (1-based index) to quartier name string.
     pub quartier_names: Vec<String>,
+    /// Street registry, reconstructed from building address data.
+    #[allow(dead_code)]
+    pub streets: StreetRegistry,
+    /// Active SoDUCo snapshot year for occupant display.
+    #[allow(dead_code)]
+    pub active_year: u16,
 }
 
 impl World {
@@ -81,6 +87,8 @@ impl World {
             buildings: BuildingRegistry::new(),
             blocks: BlockRegistry::new(),
             quartier_names: Vec::new(),
+            streets: StreetRegistry::new(),
+            active_year: 1845,
         }
     }
 

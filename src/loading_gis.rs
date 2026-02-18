@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use shapefile::dbase::FieldValue;
 
 use crate::registry::{
-    BlockData, BlockId, BlockRegistry, BuildingData, BuildingRegistry, estimate_floor_count,
+    Address, BlockData, BlockId, BlockRegistry, BuildingData, BuildingId, BuildingRegistry,
+    Occupant, StreetRegistry, estimate_floor_count,
 };
 use crate::tile_map::{Terrain, TileMap};
 use crate::world::World;
@@ -642,7 +643,7 @@ pub fn rasterize_paris(
             floor_count,
             tiles: tile_list,
             addresses: Vec::new(),
-            occupants: Vec::new(),
+            occupants_by_year: HashMap::new(),
         });
     }
     log::info!(
@@ -776,6 +777,316 @@ pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
     world.quartier_names = quartier_names;
 }
 
+// --- Address + Occupant loading (A07) ---
+
+/// Normalize a French street name for fuzzy matching.
+/// 1. Lowercase
+/// 2. ASCII-fold French accents
+/// 3. Expand abbreviations (fg-/faub.- → faubourg, st- → saint, ste- → sainte)
+/// 4. Strip type prefixes (rue de la, place du, boulevard, etc.)
+/// 5. Remove non-alphanumeric except spaces
+/// 6. Collapse whitespace, trim
+pub fn normalize_street_name(name: &str) -> String {
+    // 1. Lowercase
+    let mut s = name.to_lowercase();
+
+    // 2. ASCII-fold French accents
+    let folds: &[(&str, &str)] = &[
+        ("é", "e"),
+        ("è", "e"),
+        ("ê", "e"),
+        ("ë", "e"),
+        ("à", "a"),
+        ("â", "a"),
+        ("ô", "o"),
+        ("ù", "u"),
+        ("û", "u"),
+        ("ç", "c"),
+        ("î", "i"),
+        ("ï", "i"),
+    ];
+    for &(from, to) in folds {
+        s = s.replace(from, to);
+    }
+
+    // 3. Expand abbreviations
+    s = s.replace("fg-", "faubourg ");
+    s = s.replace("faub.-", "faubourg ");
+    s = s.replace("faub-", "faubourg ");
+    // ste- before st- to avoid partial match
+    s = s.replace("ste-", "sainte ");
+    s = s.replace("st-", "saint ");
+
+    // 4. Remove non-alphanumeric except spaces
+    s = s
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+
+    // 5. Collapse whitespace, trim (before prefix stripping so prefixes match cleanly)
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    s = parts.join(" ");
+
+    // 6. Strip type prefixes (longest first to avoid partial matches)
+    let prefixes = [
+        "rue de la ",
+        "rue du ",
+        "rue de ",
+        "rue des ",
+        "rue ",
+        "place de la ",
+        "place du ",
+        "place ",
+        "boulevard ",
+        "passage ",
+        "quai de la ",
+        "quai du ",
+        "quai des ",
+        "quai ",
+        "impasse ",
+        "cour ",
+    ];
+    for prefix in &prefixes {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            s = rest.to_string();
+            break;
+        }
+    }
+
+    s
+}
+
+/// Load address data from the Vasserot address shapefile.
+/// Matches addresses to buildings via `Identif` (cadastral parcel ID).
+#[allow(dead_code)]
+pub fn load_addresses(addresses_shp: &str, buildings: &mut BuildingRegistry) {
+    let mut reader = shapefile::Reader::from_path(addresses_shp)
+        .unwrap_or_else(|e| panic!("Failed to open {addresses_shp}: {e}"));
+
+    let mut total = 0usize;
+    let mut matched = 0usize;
+    let mut unmatched = 0usize;
+    let mut no_street = 0usize;
+
+    for result in reader.iter_shapes_and_records() {
+        let (_shape, record) =
+            result.unwrap_or_else(|e| panic!("Error reading address record: {e}"));
+        total += 1;
+
+        let id_parc = get_string_field(&record, "ID_PARC");
+        let street_name = get_string_field(&record, "NOM_ENTIER");
+        let house_number = get_string_field(&record, "NUM_VOIES");
+
+        if street_name.is_empty() {
+            no_street += 1;
+        }
+
+        // Strip "PA" prefix from ID_PARC, parse remainder as u32
+        let identif_str = id_parc.strip_prefix("PA").unwrap_or(&id_parc);
+        let identif: u32 = match identif_str.parse() {
+            Ok(v) => v,
+            Err(_) => {
+                unmatched += 1;
+                continue;
+            }
+        };
+
+        let building_ids: Vec<BuildingId> = buildings.get_by_identif(identif).to_vec();
+        if building_ids.is_empty() {
+            unmatched += 1;
+            continue;
+        }
+
+        matched += 1;
+        for bid in building_ids {
+            if let Some(bdata) = buildings.get_mut(bid) {
+                bdata.addresses.push(Address {
+                    street_name: street_name.clone(),
+                    house_number: house_number.clone(),
+                });
+            }
+        }
+    }
+
+    log::info!(
+        "Addresses: {} total, {} matched, {} unmatched, {} no-street-name",
+        total,
+        matched,
+        unmatched,
+        no_street,
+    );
+}
+
+/// Load occupant data from SoDUCo GeoPackage (SQLite).
+/// Fuzzy-matches street names and house numbers to buildings.
+#[allow(dead_code)]
+pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
+    // Build address index: normalized street name → list of (building_id, house_number)
+    let mut addr_index: HashMap<String, Vec<(BuildingId, String)>> = HashMap::new();
+    for bdata in &buildings.buildings {
+        for addr in &bdata.addresses {
+            let norm = normalize_street_name(&addr.street_name);
+            if norm.is_empty() {
+                continue;
+            }
+            addr_index
+                .entry(norm)
+                .or_default()
+                .push((bdata.id, addr.house_number.clone()));
+        }
+    }
+
+    let conn = rusqlite::Connection::open_with_flags(
+        gpkg_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap_or_else(|e| panic!("Failed to open GeoPackage {gpkg_path}: {e}"));
+
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT persons, activities, "address.name", "address.number",
+                      "source.publication_date", NAICS
+               FROM data_extraction_with_population
+               ORDER BY "source.publication_date""#,
+        )
+        .unwrap_or_else(|e| panic!("Failed to prepare GeoPackage query: {e}"));
+
+    let mut total = 0usize;
+    let mut matched = 0usize;
+    let mut unmatched = 0usize;
+    let mut unmatched_streets: HashMap<String, usize> = HashMap::new();
+    let mut per_year: HashMap<u16, (usize, usize)> = HashMap::new(); // year → (total, matched)
+
+    let rows = stmt
+        .query_map([], |row| {
+            let persons: String = row.get::<_, String>(0).unwrap_or_default();
+            let activities: String = row.get::<_, String>(1).unwrap_or_default();
+            let addr_name: String = row.get::<_, String>(2).unwrap_or_default();
+            let addr_number: String = row.get::<_, String>(3).unwrap_or_default();
+            let pub_date: String = row.get::<_, String>(4).unwrap_or_default();
+            let naics: String = row.get::<_, String>(5).unwrap_or_default();
+            Ok((persons, activities, addr_name, addr_number, pub_date, naics))
+        })
+        .unwrap_or_else(|e| panic!("Failed to query GeoPackage: {e}"));
+
+    // Collect all rows first to avoid borrow issues
+    let all_rows: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+
+    for (persons, activities, addr_name, addr_number, pub_date, naics) in &all_rows {
+        total += 1;
+
+        // Extract year from publication date (first 4 chars)
+        let year: u16 = pub_date.get(..4).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let year_stats = per_year.entry(year).or_insert((0, 0));
+        year_stats.0 += 1;
+
+        let norm_street = normalize_street_name(addr_name);
+        if norm_street.is_empty() {
+            unmatched += 1;
+            continue;
+        }
+
+        let candidates = match addr_index.get(&norm_street) {
+            Some(c) => c,
+            None => {
+                unmatched += 1;
+                *unmatched_streets.entry(addr_name.clone()).or_insert(0) += 1;
+                continue;
+            }
+        };
+
+        // Normalize house number for matching
+        let norm_number = addr_number.trim().trim_end_matches('.').trim().to_string();
+
+        // Try exact house number match first
+        let exact_matches: Vec<BuildingId> = candidates
+            .iter()
+            .filter(|(_, hn)| {
+                let cand_norm = hn.trim().trim_end_matches('.').trim();
+                !norm_number.is_empty() && cand_norm == norm_number
+            })
+            .map(|(bid, _)| *bid)
+            .collect();
+
+        let target_ids = if !exact_matches.is_empty() {
+            exact_matches
+        } else {
+            // Broad match: attach to all buildings on that street
+            candidates.iter().map(|(bid, _)| *bid).collect()
+        };
+
+        if target_ids.is_empty() {
+            unmatched += 1;
+            *unmatched_streets.entry(addr_name.clone()).or_insert(0) += 1;
+            continue;
+        }
+
+        matched += 1;
+        year_stats.1 += 1;
+
+        let occupant = Occupant {
+            name: persons.clone(),
+            activity: activities.clone(),
+            naics: naics.clone(),
+        };
+
+        for bid in &target_ids {
+            if let Some(bdata) = buildings.get_mut(*bid) {
+                bdata
+                    .occupants_by_year
+                    .entry(year)
+                    .or_default()
+                    .push(occupant.clone());
+            }
+        }
+    }
+
+    // Log per-year summary
+    let mut years: Vec<u16> = per_year.keys().copied().collect();
+    years.sort();
+    log::info!(
+        "Occupants: {} total, {} matched ({:.1}%), {} unmatched",
+        total,
+        matched,
+        if total > 0 {
+            matched as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        },
+        unmatched,
+    );
+    for year in &years {
+        let (yt, ym) = per_year[year];
+        log::info!(
+            "  Year {}: {} entries, {} matched ({:.1}%)",
+            year,
+            yt,
+            ym,
+            if yt > 0 {
+                ym as f64 / yt as f64 * 100.0
+            } else {
+                0.0
+            },
+        );
+    }
+
+    // Top-10 unmatched streets
+    let mut unmatched_sorted: Vec<(String, usize)> = unmatched_streets.into_iter().collect();
+    unmatched_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    if !unmatched_sorted.is_empty() {
+        log::info!("Top unmatched streets:");
+        for (street, count) in unmatched_sorted.iter().take(10) {
+            log::info!("  {} ({})", street, count);
+        }
+    }
+}
+
 // --- Binary save/load ---
 
 /// Save rasterized tile data + metadata for fast game loading.
@@ -903,6 +1214,11 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
     for bdata in metadata.blocks {
         world.blocks.insert(bdata);
     }
+
+    // Reconstruct street registry from building address data
+    world.streets = StreetRegistry::build_from_buildings(&world.buildings);
+    world.active_year = 1845;
+    log::info!("  {} streets reconstructed", world.streets.streets.len());
 
     log::info!(
         "Paris binary loaded in {:.1}s",
@@ -1095,7 +1411,7 @@ mod tests {
             floor_count: 3,
             tiles: tile_list,
             addresses: Vec::new(),
-            occupants: Vec::new(),
+            occupants_by_year: HashMap::new(),
         });
 
         classify_walls_floors(&mut tiles, &buildings);
@@ -1502,5 +1818,122 @@ mod tests {
         // Only BATI=1 entries in registry
         assert_eq!(buildings.len(), 1, "only BATI=1 should be in registry");
         assert_eq!(buildings.buildings[0].bati, 1);
+    }
+
+    // --- normalize_street_name tests ---
+
+    #[test]
+    fn test_normalize_accent_folding() {
+        assert_eq!(normalize_street_name("Élysée"), "elysee");
+        assert_eq!(normalize_street_name("François"), "francois");
+        assert_eq!(normalize_street_name("Château"), "chateau");
+    }
+
+    #[test]
+    fn test_normalize_abbreviations() {
+        assert_eq!(
+            normalize_street_name("Fg-Saint-Denis"),
+            "faubourg saint denis"
+        );
+        assert_eq!(
+            normalize_street_name("Faub.-Montmartre"),
+            "faubourg montmartre"
+        );
+        assert_eq!(normalize_street_name("St-Honoré"), "saint honore");
+        assert_eq!(normalize_street_name("Ste-Anne"), "sainte anne");
+    }
+
+    #[test]
+    fn test_normalize_prefix_stripping() {
+        assert_eq!(normalize_street_name("Rue de la Paix"), "paix");
+        assert_eq!(normalize_street_name("Rue du Temple"), "temple");
+        assert_eq!(normalize_street_name("Rue des Lombards"), "lombards");
+        assert_eq!(normalize_street_name("Rue de Rivoli"), "rivoli");
+        assert_eq!(normalize_street_name("Place de la Concorde"), "concorde");
+        assert_eq!(
+            normalize_street_name("Boulevard Saint-Germain"),
+            "saint germain"
+        );
+        assert_eq!(normalize_street_name("Passage du Caire"), "du caire");
+        assert_eq!(normalize_street_name("Quai de la Mégisserie"), "megisserie");
+        assert_eq!(normalize_street_name("Impasse du Boeuf"), "du boeuf");
+        assert_eq!(normalize_street_name("Cour des Miracles"), "des miracles");
+    }
+
+    #[test]
+    fn test_normalize_whitespace_and_punctuation() {
+        assert_eq!(normalize_street_name("  Rue   du   Temple  "), "temple");
+        assert_eq!(normalize_street_name("Rue de l'Arbre-Sec"), "l arbre sec");
+    }
+
+    #[test]
+    fn test_normalize_empty_and_simple() {
+        assert_eq!(normalize_street_name(""), "");
+        assert_eq!(normalize_street_name("Montmartre"), "montmartre");
+    }
+
+    // --- BuildingData RON roundtrip with occupants_by_year ---
+
+    #[test]
+    fn test_building_data_ron_roundtrip_occupants_by_year() {
+        use crate::registry::{Address, BuildingData, BuildingId, Occupant};
+
+        let mut occupants_by_year = HashMap::new();
+        occupants_by_year.insert(
+            1845,
+            vec![Occupant {
+                name: "Dupont".into(),
+                activity: "Boulanger".into(),
+                naics: "311811".into(),
+            }],
+        );
+        occupants_by_year.insert(
+            1860,
+            vec![
+                Occupant {
+                    name: "Martin".into(),
+                    activity: "Cordonnier".into(),
+                    naics: "316210".into(),
+                },
+                Occupant {
+                    name: "Bernard".into(),
+                    activity: "Tailleur".into(),
+                    naics: "315220".into(),
+                },
+            ],
+        );
+
+        let bdata = BuildingData {
+            id: BuildingId(1),
+            identif: 42,
+            quartier: "Arcis".into(),
+            superficie: 120.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 44.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 3,
+            tiles: vec![(10, 20)],
+            addresses: vec![Address {
+                street_name: "Rue du Temple".into(),
+                house_number: "12".into(),
+            }],
+            occupants_by_year,
+        };
+
+        let ron_str =
+            ron::ser::to_string_pretty(&bdata, ron::ser::PrettyConfig::default()).expect("ser");
+        let back: BuildingData = ron::from_str(&ron_str).expect("deser");
+
+        assert_eq!(back.occupants_by_year.len(), 2);
+        assert_eq!(back.occupants_by_year[&1845].len(), 1);
+        assert_eq!(back.occupants_by_year[&1845][0].name, "Dupont");
+        assert_eq!(back.occupants_by_year[&1845][0].naics, "311811");
+        assert_eq!(back.occupants_by_year[&1860].len(), 2);
+        assert_eq!(back.addresses.len(), 1);
+        assert_eq!(back.addresses[0].street_name, "Rue du Temple");
     }
 }

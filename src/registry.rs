@@ -19,12 +19,13 @@ pub struct Address {
     pub house_number: String,
 }
 
-/// Placeholder for occupant data, populated by A07.
+/// Occupant data from SoDUCo directories, populated by A07.
 #[allow(dead_code)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Occupant {
     pub name: String,
     pub activity: String,
+    pub naics: String,
 }
 
 #[allow(dead_code)]
@@ -58,8 +59,8 @@ pub struct BuildingData {
     pub tiles: Vec<(i32, i32)>,
     /// Populated later by A07.
     pub addresses: Vec<Address>,
-    /// Populated later by A07.
-    pub occupants: Vec<Occupant>,
+    /// Occupants by year (SoDUCo snapshot year → occupant list), populated by A07.
+    pub occupants_by_year: HashMap<u16, Vec<Occupant>>,
 }
 
 #[allow(dead_code)]
@@ -164,6 +165,71 @@ impl BlockRegistry {
     }
 }
 
+/// Sequential street identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StreetId(pub u16);
+
+#[allow(dead_code)]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct StreetData {
+    pub name: String,
+    pub buildings: Vec<BuildingId>,
+}
+
+/// Street registry, reconstructed from building address data at load time.
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct StreetRegistry {
+    pub streets: HashMap<StreetId, StreetData>,
+    pub name_to_id: HashMap<String, StreetId>,
+}
+
+impl StreetRegistry {
+    pub fn new() -> Self {
+        Self {
+            streets: HashMap::new(),
+            name_to_id: HashMap::new(),
+        }
+    }
+
+    /// Reconstruct street registry from building address data.
+    /// Scans all buildings for unique street names and maps buildings to streets.
+    pub fn build_from_buildings(buildings: &BuildingRegistry) -> Self {
+        let mut registry = Self::new();
+        let mut next_id: u16 = 1;
+
+        for bdata in &buildings.buildings {
+            for addr in &bdata.addresses {
+                if addr.street_name.is_empty() {
+                    continue;
+                }
+                let street_id = if let Some(&sid) = registry.name_to_id.get(&addr.street_name) {
+                    sid
+                } else {
+                    let sid = StreetId(next_id);
+                    next_id += 1;
+                    registry.name_to_id.insert(addr.street_name.clone(), sid);
+                    registry.streets.insert(
+                        sid,
+                        StreetData {
+                            name: addr.street_name.clone(),
+                            buildings: Vec::new(),
+                        },
+                    );
+                    sid
+                };
+                if let Some(sd) = registry.streets.get_mut(&street_id)
+                    && !sd.buildings.contains(&bdata.id)
+                {
+                    sd.buildings.push(bdata.id);
+                }
+            }
+        }
+
+        registry
+    }
+}
+
 /// Estimate floor count from building footprint area (m²).
 /// <50m² → 2, 50-150m² → 3, 150-400m² → 4, >400m² → 5.
 pub fn estimate_floor_count(superficie: f32) -> u8 {
@@ -202,7 +268,7 @@ mod tests {
             floor_count: 3,
             tiles: vec![(10, 20), (11, 20)],
             addresses: Vec::new(),
-            occupants: Vec::new(),
+            occupants_by_year: HashMap::new(),
         });
 
         assert!(reg.get(BuildingId(1)).is_some());
@@ -234,7 +300,7 @@ mod tests {
             floor_count: 3,
             tiles: vec![(1, 1), (2, 1)],
             addresses: Vec::new(),
-            occupants: Vec::new(),
+            occupants_by_year: HashMap::new(),
         });
 
         let id2 = reg.next_id();
@@ -253,7 +319,7 @@ mod tests {
             floor_count: 2,
             tiles: vec![(5, 5), (6, 5)],
             addresses: Vec::new(),
-            occupants: Vec::new(),
+            occupants_by_year: HashMap::new(),
         });
 
         // Both buildings are preserved
@@ -285,6 +351,80 @@ mod tests {
         assert!(reg.get(BlockId(1)).is_some());
         assert_eq!(reg.get(BlockId(1)).unwrap().buildings.len(), 2);
         assert!(reg.get(BlockId(999)).is_none());
+    }
+
+    #[test]
+    fn test_street_registry_build_from_buildings() {
+        let mut reg = BuildingRegistry::new();
+
+        let id1 = reg.next_id();
+        reg.insert(BuildingData {
+            id: id1,
+            identif: 1,
+            quartier: "Arcis".into(),
+            superficie: 100.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 3,
+            tiles: vec![(1, 1)],
+            addresses: vec![
+                Address {
+                    street_name: "Rue du Temple".into(),
+                    house_number: "12".into(),
+                },
+                Address {
+                    street_name: "Rue de Rivoli".into(),
+                    house_number: "1".into(),
+                },
+            ],
+            occupants_by_year: HashMap::new(),
+        });
+
+        let id2 = reg.next_id();
+        reg.insert(BuildingData {
+            id: id2,
+            identif: 2,
+            quartier: "Arcis".into(),
+            superficie: 80.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 2,
+            tiles: vec![(2, 2)],
+            addresses: vec![Address {
+                street_name: "Rue du Temple".into(),
+                house_number: "14".into(),
+            }],
+            occupants_by_year: HashMap::new(),
+        });
+
+        let streets = StreetRegistry::build_from_buildings(&reg);
+
+        // Two unique streets
+        assert_eq!(streets.streets.len(), 2);
+        assert_eq!(streets.name_to_id.len(), 2);
+
+        // "Rue du Temple" has 2 buildings
+        let temple_id = streets.name_to_id["Rue du Temple"];
+        let temple = &streets.streets[&temple_id];
+        assert_eq!(temple.buildings.len(), 2);
+        assert!(temple.buildings.contains(&id1));
+        assert!(temple.buildings.contains(&id2));
+
+        // "Rue de Rivoli" has 1 building
+        let rivoli_id = streets.name_to_id["Rue de Rivoli"];
+        let rivoli = &streets.streets[&rivoli_id];
+        assert_eq!(rivoli.buildings.len(), 1);
+        assert!(rivoli.buildings.contains(&id1));
     }
 
     #[test]
