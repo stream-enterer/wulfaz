@@ -4,7 +4,7 @@ Reference for 19th-century Paris simulation. Read this before implementing any S
 
 ## Target Numbers
 
-- Map: ~17M tiles. Chunk: 64×64 (4,096 tiles). ~4,150 chunks total.
+- Map: 6,309 x 4,753 tiles (~30M tiles). Chunk: 64×64 (4,096 tiles). ~99 x 75 = ~7,400 chunks total.
 - Population: ~1M modeled. ~4K active (full sim), ~50K nearby (simplified), ~950K statistical (aggregate).
 - Tick budget: 10ms (100 ticks/sec).
 
@@ -18,7 +18,7 @@ All current systems run as-is. Full AI, A* pathfinding, combat, events.
 **Nearby** (~500 tile radius, ~800K tiles, ~50K entities)
 Real Entity values but simplified processing. Needs tick (hunger/fatigue), direct vector movement (no pathfinding), no combat. Skip `run_decisions`, `run_combat`.
 
-**Statistical** (rest of city, ~16M tiles, ~950K modeled)
+**Statistical** (rest of city, ~29M tiles, ~950K modeled)
 No individual entities. District-level aggregates ticked with equations. Population count, avg needs, death/birth rates, resource flows.
 
 Zone derived from entity position vs camera position. Recomputed each tick or on camera move.
@@ -28,13 +28,6 @@ Zone derived from entity position vs camera position. Recomputed each tick or on
 ```rust
 struct ChunkCoord { cx: i32, cy: i32 }  // cx = x / 64, cy = y / 64
 
-struct Chunk {
-    terrain: [Terrain; 4096],
-    temperature: [f32; 4096],
-    dirty: bool,
-    last_tick: Tick,
-}
-
 struct TileMap {
     chunks: HashMap<ChunkCoord, Chunk>,
     width_chunks: i32,
@@ -42,23 +35,112 @@ struct TileMap {
 }
 ```
 
-Tile accessors keep same signatures, route through chunk lookup internally. Cold chunks fast-forward on reload: `elapsed × drift_rate`, clamp to equilibrium.
+Tile accessors keep same signatures, route through chunk lookup internally. Cold chunks fast-forward on reload: `elapsed × drift_rate`, clamp to equilibrium. See "Chunk (full definition)" section for per-tile ID layers.
+
+## Building Registry
+
+```rust
+struct BuildingId(u32);  // matches Identif from BATI.shp
+
+struct BuildingData {
+    id: BuildingId,
+    quartier: String,        // neighborhood name (36 values)
+    superficie: f32,         // footprint area in m²
+    bati: u8,                // 1=main, 2=annex, 3=market stall
+    nom_bati: Option<String>,// name if notable (146 buildings)
+    num_ilot: String,        // block number
+    floor_count: u8,         // estimated: <50m²=2, 50-150=3-4, 150-400=4-5, >400=5-6
+    tiles: Vec<(i32, i32)>,  // all tiles belonging to this building
+    addresses: Vec<Address>, // joined from address shapefile
+}
+
+struct Address {
+    street: String,       // NOM_ENTIER from address shapefile
+    number: String,       // NUM_VOIES
+    occupants: Vec<Occupant>, // joined from SoDUCo for chosen year
+}
+
+struct Occupant {
+    name: String,         // persons field
+    activity: String,     // activities field (French occupation)
+    naics: String,        // NAICS industry category
+}
+
+struct BuildingRegistry {
+    buildings: HashMap<BuildingId, BuildingData>,
+}
+```
+
+## Block Registry
+
+```rust
+struct BlockId(u16);   // sequential index assigned during loading
+
+struct BlockData {
+    id_ilots: String,         // original ID from Vasserot_Ilots.shp, e.g. "860IL74"
+    quartier: String,         // neighborhood name
+    aire: f32,                // block area in m²
+    buildings: Vec<BuildingId>, // buildings within this block
+}
+
+struct BlockRegistry {
+    blocks: HashMap<BlockId, BlockData>,
+}
+```
+
+## Chunk (full definition)
+
+```rust
+struct Chunk {
+    terrain: [Terrain; 4096],
+    temperature: [f32; 4096],
+    building_id: [Option<BuildingId>; 4096],  // tile → building reverse lookup
+    block_id: [Option<BlockId>; 4096],        // tile → city block (courtyards + buildings)
+    quartier_id: [u8; 4096],                  // tile → quartier (0 = unassigned, 1-36 = index)
+    dirty: bool,
+    last_tick: Tick,
+}
+```
+
+All per-tile ID layers populated during GIS loading (SCALE-A03) and are write-once (static city). Lookup chains:
+- Tile → `BuildingId` → `BuildingData` → quartier, occupants, NAICS, floor count, addresses.
+- Tile → `BlockId` → `BlockData` → block ID string, area, member buildings.
+- Tile → `quartier_id` → district name. Covers all tiles, not just buildings (road tiles get quartier from nearest block polygon or Voronoi fill).
+
+## Street Registry
+
+```rust
+struct StreetId(u16);
+
+struct StreetData {
+    name: String,                    // NOM_ENTIER from address shapefile
+    buildings: Vec<BuildingId>,      // buildings addressed on this street
+}
+
+struct StreetRegistry {
+    streets: HashMap<StreetId, StreetData>,
+    name_to_id: HashMap<String, StreetId>,
+}
+```
+
+Built during address loading (SCALE-A07). Streets are not tile-mapped (no explicit street geometry in data — streets are negative space between blocks). The registry provides name lookups: given a building, find its street name(s); given a street name, find all buildings on it.
 
 ## Terrain Types
 
 ```rust
 enum Terrain {
-    Road,       // walkable — streets, alleys
-    Building,   // walkable interior — entities spawn/live here
-    Courtyard,  // walkable — enclosed open space within blocks
-    Garden,     // walkable — parks, green space
-    Water,      // blocked — Seine
-    Bridge,     // walkable — over water
-    Wall,       // blocked — fortifications
+    Road,       // walkable — streets, alleys, open ground outside block polygons
+    Wall,       // blocked — building perimeter (building tile with a non-building cardinal neighbor)
+    Floor,      // walkable — building interior (building tile surrounded by building tiles)
+    Door,       // walkable — building entrance (wall tile adjacent to both floor and road)
+    Courtyard,  // walkable — enclosed open space within blocks (inside block polygon, outside buildings)
+    Garden,     // walkable — parks, green space (24 buildings named "parc ou jardin")
+    Water,      // blocked — Seine (hardcoded band, not in GIS data)
+    Bridge,     // walkable — over water (hardcoded at known historical locations)
 }
 ```
 
-Temperature targets: Water 10°, Bridge 12°, Garden 15°, Wall 15°, Road 16°, Courtyard 16°, Building 18°.
+Temperature targets: Water 10°, Bridge 12°, Garden 15°, Wall 15°, Road 16°, Courtyard 16°, Door 17°, Floor 18°.
 
 ## Spatial Index
 
@@ -68,17 +150,25 @@ struct SpatialGrid {
 }
 ```
 
-Rebuilt from `world.positions` at tick start (before Phase 3). O(1) same-tile lookup. Area queries iterate cell range. Used by combat, eating, decision target selection.
+Rebuilt from `world.positions` at tick start. O(1) same-tile lookup. Area queries iterate cell range. Used by combat, eating, decision target selection.
 
 ## Hierarchical Pathfinding (HPA*)
 
 Chunk borders → entry/exit nodes. Precompute intra-chunk shortest paths between border nodes. Long-range: A* on chunk graph (~100 nodes cross-city). Short-range: regular A* within current + adjacent chunks (8K limit fine). Rebuild only on terrain change (never for static city).
+
+## Registry Ownership
+
+All registries live on `World` alongside `tiles`:
+- `world.buildings: BuildingRegistry` — populated by A03
+- `world.blocks: BlockRegistry` — populated by A03
+- `world.streets: StreetRegistry` — populated by A07
 
 ## District Aggregates
 
 ```rust
 struct District {
     id: u32,
+    quartier: String,       // neighborhood name, matches QUARTIER field
     bounds: Rect,
     population: u32,
     population_by_type: HashMap<String, u32>,
@@ -89,7 +179,7 @@ struct District {
 }
 ```
 
-`run_district_stats` (Phase 5): ticks all statistical districts with equations. Population flows between adjacent districts based on resource gradients.
+`run_district_stats` (SCALE-C04): ticks all statistical districts with equations. Population flows between adjacent districts based on resource gradients.
 
 ## Hydration / Dehydration
 

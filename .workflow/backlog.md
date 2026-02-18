@@ -12,36 +12,67 @@ Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 3
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
 - **SCALE-A01** — Expand Terrain enum for city tiles. Update walkability, temperature targets, pathfinding costs. Blocks: A03.
-  - `Wall` — building perimeter. Blocked. Derived: any building tile with a non-building cardinal neighbor.
-  - `Floor` — building interior. Walkable. Derived: building tile surrounded on all 4 sides by building tiles.
-  - `Door` — building entrance. Walkable. Derived: wall tile adjacent to both a floor tile and a road tile.
-  - `Road` — streets and open ground. Walkable. Derived: tile outside all block polygons.
-  - `Courtyard` — enclosed yard. Walkable. Derived: tile inside a block polygon but outside all building polygons.
-  - `Water` — the Seine. Blocked. NOT in GIS data. Must be hardcoded as a band at lat ~48.856-48.860, excluding Ile de la Cite and Ile Saint-Louis. Roughly rows 2600-3050 of the grid, with island gaps.
-  - `Bridge` — walkable water crossing. Hardcode at known historical locations (Pont Neuf, Pont au Change, Pont Notre-Dame, Pont Marie, Pont de la Tournelle, Pont Royal, etc.).
-  - `Garden` — parks/green space. Walkable. 24 buildings in the data are named "parc ou jardin" (Nom_Bati field). Convert their interior tiles to Garden instead of Floor.
-  - Note: no elevation data exists. Map is flat.
+  - `Road` — streets and open ground. Walkable.
+  - `Wall` — building perimeter. Blocked.
+  - `Floor` — building interior. Walkable.
+  - `Door` — building entrance. Walkable.
+  - `Courtyard` — enclosed yard within a city block. Walkable.
+  - `Garden` — parks/green space. Walkable.
+  - `Water` — river. Blocked.
+  - `Bridge` — river crossing. Walkable.
+  - Derivation rules for each type are in the tasks that place them: A03 (Wall, Floor, Courtyard, Road), A08 (Water, Bridge), B05 (Door, Garden).
+  - No elevation data exists. Map is flat.
 
 - **SCALE-A02** — Chunked TileMap. `HashMap<ChunkCoord, Chunk>`, 64×64 per chunk. ~7,400 chunks for full city. All tile accessors route through chunk lookup. Existing tests pass on single-chunk map. Blocks: A03, A04, A05.
 
-- **SCALE-A03** — GIS terrain loader. Blocks: A06. Needs: A01, A02.
+- **SCALE-A03** — GIS terrain loader + building registry. Blocks: A07, A08, B05. Needs: A01, A02.
   - Input files (all in `~/Development/paris/data/`):
     - `buildings/BATI.shp` — 40,356 building footprint polygons. Encoding: `latin-1`. CRS: EPSG:4326 (WGS84 lon/lat).
     - `plots/Vasserot_Ilots.shp` — 1,215 city block polygons. Same encoding/CRS.
   - Coordinate conversion: at lat 48.857, 1° lon = 73,490m, 1° lat = 111,320m.
   - Viewport origin: lon 2.2981468, lat 48.8837517 (top-left = max lat).
   - Algorithm: scanline rasterization per polygon (see `~/Development/paris/render_city.py` for working Python reference). For each polygon, find x-intersections per row, fill between pairs.
-  - Classification order: (1) rasterize all block polygons → mark Courtyard, (2) rasterize all building polygons → mark building tiles, overwriting courtyard, (3) classify building tiles into Wall vs Floor by neighbor check, (4) place Doors, (5) everything still unmarked = Road.
-  - Key building fields: `Identif` (int, unique building ID, used to join to addresses), `QUARTIER` (neighborhood name), `SUPERFICIE` (area m²), `BATI` (1=main, 2=annex, 3=market stall), `Nom_Bati` (name if notable).
+  - Classification order: (1) rasterize all block polygons → mark Courtyard + write `block_id` per tile, (2) rasterize all building polygons → mark building tiles + write `building_id` per tile, overwriting courtyard terrain but preserving `block_id`, (3) classify building tiles into Wall vs Floor by neighbor check, (4) everything still unmarked = Road, (5) assign `quartier_id` to every tile (building/courtyard tiles inherit from their block's QUARTIER; road tiles filled by nearest-block Voronoi or flood-fill from adjacent block tiles).
+  - Door placement, passage carving, garden conversion, and interior furnishing are all deferred to Phase B (B05, B06). A03 only produces raw geometry + registries.
+  - Key building fields: `Identif` (int, unique building ID, used to join to addresses), `QUARTIER` (neighborhood name), `SUPERFICIE` (area m²), `BATI` (1=main, 2=annex, 3=market stall), `Nom_Bati` (name if notable), `NUM_ILOT` (block number), `DATE_COYEC` (survey date).
+  - **Block registry**: during block rasterization, create a `BlockRegistry` (see architecture.md). Each block's `ID_ILOTS`, `QUARTIER`, `AIRE`, and building membership are stored.
+  - **Building registry**: during building rasterization, create a `BuildingRegistry` (see architecture.md). Each building's `Identif`, `QUARTIER`, `SUPERFICIE`, `BATI`, `Nom_Bati`, `NUM_ILOT`, tile list, and estimated `floor_count` are stored. Floor count derived from SUPERFICIE: <50m²=2, 50-150m²=3-4, 150-400m²=4-5, >400m²=5-6. This persists all shapefile metadata for later use by address joins, entity spawning, interior generation, and district aggregation.
+  - **Per-tile layers**: each chunk stores `building_id`, `block_id`, and `quartier_id` arrays alongside terrain (see architecture.md). All write-once during loading. Any tile can answer: which building, which block, and which quartier it belongs to.
   - Rust crate: `shapefile` (reads .shp/.dbf/.shx directly).
 
-- **SCALE-A04** — Chunk-aware renderer. Only load/render chunks overlapping camera viewport. Needs: A02.
+- **SCALE-A07** — Address + occupant loading. Needs: A03. Blocks: B06, B03, C04, C05.
+  - Loads address data and joins it to buildings in the registry. This is a data-loading step, not entity spawning.
+  - Step 1: Read `addresses/Num_Voies_Vasserot.shp` (29,164 points, encoding `latin-1`). **WARNING: Lambert projection, NOT WGS84.** Use `ID_PARC` field only (ignore point geometry). Strip "PA" prefix → match to `BuildingId`. Attach street name (`NOM_ENTIER`) and house number (`NUM_VOIES`) to each building in the registry.
+  - Step 2: Open `soduco/data/data_extraction_with_population.gpkg` (SQLite). For the chosen year, query all entries. Fuzzy-match street names to the address data attached in Step 1. Attach matching occupants (name, activity, NAICS) to each building's address records.
+  - Street name normalization: strip "Rue de la/du/des/", expand "Fg-" → "Faubourg", "St-" → "Saint-", case-insensitive compare.
+  - **Street registry**: as addresses are loaded, build a `StreetRegistry` (see architecture.md). Each unique street name gets a `StreetId`. The registry maps street name → list of buildings on that street. Streets have no tile geometry (they're negative space), but the registry enables name lookups in both directions.
+  - After this step, the building registry knows: which buildings have known occupants, what their occupations are, and what NAICS category each building falls under. The street registry knows all street names and which buildings front each street. This feeds B06 (furniture by NAICS), B03 (entity spawning), C04 (district aggregates), and C05 (population seeding).
+
+- **SCALE-A08** — Seine + bridge placement. Needs: A03. Blocks: A04.
+  - The Seine is NOT in any GIS dataset. Must be hardcoded.
+  - River band: approximately lat 48.856-48.860, which maps to roughly tile rows 2600-3050 (y-axis, from top). The band is not uniform width — it narrows and widens.
+  - Island exclusions: Ile de la Cite (quartier "Cite") and Ile Saint-Louis (quartier "Ile Saint-Louis"). Their building/block polygons are already rasterized by A03. Any tile inside these block polygons is NOT water — it's already Courtyard or building. Only overwrite tiles that are currently Road.
+  - Method: define the river as a polygon (list of lat/lon vertices tracing both banks), rasterize with the same scanline fill used for blocks, then mark all resulting tiles as Water UNLESS they already have a building_id or block_id (island tiles).
+  - River polygon source: trace from a historical map or define as a simple band with manually adjusted vertices at the bends. ~20-30 vertices should suffice.
+  - Bridges (hardcoded, 1830s-era): Pont Royal, Pont du Carrousel, Pont des Arts, Pont Neuf, Pont au Change, Pont Notre-Dame, Pont de l'Arcole, Pont Saint-Louis, Pont Marie, Pont de la Tournelle. Each bridge is a short rectangle of Bridge tiles (~5-8 tiles wide, spanning the water gap). Define each as two endpoints (tile coordinates) and fill the rectangle between them.
+  - Set `quartier_id` on water tiles to 0 (unassigned). Bridge tiles get quartier from the nearest bank.
+
+- **SCALE-A04** — Chunk-aware renderer. Only load/render chunks overlapping camera viewport. Needs: A02, A08.
 
 - **SCALE-A05** — Lazy tile updates. `run_temperature` only ticks dirty/active chunks. Cold chunks fast-forward on reload. Needs: A02.
 
-- **SCALE-A06** — Building interior generation. Needs: A03.
-  - After wall/floor/door classification, furnish building interiors based on occupant type.
-  - Each building's address is known via the address join (see B03). Look up NAICS category for the address. Place furniture tiles accordingly:
+## Phase B — Entities in One Neighborhood
+
+Goal: ~200 entities with full AI on the real map.
+
+- **SCALE-B05** — Door placement + passage carving. Needs: A03. Blocks: B06, B03.
+  - Place Door tiles: for each building, find a wall tile adjacent to both a floor tile and a Road or Courtyard tile. That tile becomes a Door.
+  - Landlocked buildings (no wall tile adjacent to Road or Courtyard): carve a 1-tile passage through intervening buildings to the nearest Road or Courtyard. This models the narrow covered passages (allées) that provided access to interior buildings in dense Parisian blocks.
+  - Garden buildings (24 "parc ou jardin"): convert their interior Floor tiles to Garden instead of Floor.
+
+- **SCALE-B06** — Building interior generation. Needs: B05, A07.
+  - After door placement, furnish building interiors based on occupant type.
+  - Each building's NAICS category is known from the building registry (populated by A07). Look up NAICS category for the building's occupants. Place furniture tiles accordingly:
     - Food stores → counters, barrels, shelves
     - Restaurants → tables, chairs, hearth
     - Clothing → looms, counters, fabric
@@ -50,24 +81,16 @@ That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
   - Buildings with no known occupant get default residential furnishing.
   - Small buildings (<15 floor tiles) get minimal furnishing (bed, table).
 
-## Phase B — Entities in One Neighborhood
-
-Goal: ~200 entities with full AI on the real map.
-
 - **SCALE-B01** — Spatial index. `HashMap<(i32,i32), SmallVec<[Entity; 4]>>` on World, rebuilt from positions each tick. Blocks: B02.
 
 - **SCALE-B02** — Convert spatial queries. `run_combat`, `run_eating`, `run_decisions` target selection use spatial index, not full position scan. Needs: B01.
 
-- **SCALE-B03** — GIS-aware entity spawning. Needs: A03.
-  - Data pipeline (address → building → people):
-    1. `addresses/Num_Voies_Vasserot.shp` — 29,164 address points. **WARNING: this file is in Lambert projection, NOT WGS84.** The `GEOX`/`GEOY` fields contain Lambert coordinates but the `ID_PARC` field is what matters for joining. CRS conversion needed if using point geometry directly; alternatively join on ID only.
-    2. Join: `Address.ID_PARC` (e.g. "PA17936") → strip "PA" prefix → match `Building.Identif` (e.g. 17936). 92% of buildings match.
-    3. Address gives `NOM_ENTIER` (street name) + `NUM_VOIES` (house number).
-    4. `soduco/data/data_extraction_with_population.gpkg` — SQLite database, table `data_extraction_with_population`. 990,108 rows. Query: `SELECT persons, activities, NAICS FROM data_extraction_with_population WHERE "address.name" LIKE '%street%' AND "address.number" = '12' AND "source.publication_date" = 1845.0`.
-    5. Street name matching requires fuzzy normalization: SoDUCo uses abbreviations ("Fg-St-Antoine" = "Rue du Faubourg Saint-Antoine", "St-Honoré" = "Rue Saint-Honoré"). Strip "Rue de la/du/des/", expand "Fg-" → "Faubourg", "St-" → "Saint-".
-  - For known occupants (3.7% of population): spawn entity with real name, real occupation, at their building's floor tiles.
+- **SCALE-B03** — GIS-aware entity spawning. Needs: A07, B05.
+  - The building registry (populated by A03 + A07) already knows each building's occupants, addresses, and NAICS categories. This task spawns actual entities from that data.
+  - For known occupants (3.7% of population): spawn entity with real name, real occupation, at their building's floor tiles. Position from building's tile list in the registry.
   - For generated occupants (96.3%): see C05 for the procedural generation rules.
   - Single neighborhood first: filter to one QUARTIER (recommend "Arcis" — 825 buildings, dense, central, ~150m×300m).
+  - The full data pipeline reference (address → building → people) is documented in SCALE-A07 and `~/Development/paris/PROJECT.md`.
 
 - **SCALE-B04** — Increase A* node limit to 32K. Stopgap for larger-map pathing. Replaced by SCALE-D03.
 
@@ -82,15 +105,15 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
   - Sub-district: blocks (`NUM_ILOT` field on buildings, `ID_ILOTS` on plot polygons) group ~30-100 buildings each. Use as LOD sub-units if quartier granularity is too coarse.
   - Per-district density derivable from: building count, total building area (SUPERFICIE sum), and SoDUCo entry count for the target year.
 
-- **SCALE-C02** — LOD zone framework. Active/Nearby/Statistical derived from camera + district bounds. Blocks: C03, C05.
+- **SCALE-C02** — LOD zone framework. Active/Nearby/Statistical derived from camera + district bounds. Needs: C01. Blocks: C03, C05.
 
 - **SCALE-C03** — Zone-aware system filtering. Combat: Active only. Hunger: Active+Nearby. Statistical: no entity iteration. Needs: C02.
 
-- **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01.
+- **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01, A07.
   - Seed `population_by_type` from NAICS distribution per quartier per year. The SoDUCo database has 22 industry categories. Query: `SELECT NAICS, COUNT(*) FROM data_extraction_with_population WHERE "source.publication_date" = 1845.0 GROUP BY NAICS`.
   - City-wide distribution (1845): Manufacturing 18%, Food stores 13.5%, Clothing 11.7%, Furniture 8.2%, Legal 5.9%, Health 5.5%, Rentiers 4.5%, Arts 3.9%, Construction 3.6%. Use these as priors, adjust per quartier from actual data.
 
-- **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02, C04.
+- **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02, C04, A07.
   - Procedural population generation rules (for the 96% not in directories):
     - **Concierge**: every building with >4 floor tiles gets one. Ground floor.
     - **Shopkeeper household**: for each directory-listed person, generate spouse + 1-4 children + 0-1 apprentice. Place on ground floor and first upper floor.
@@ -114,7 +137,7 @@ Goal: Camera movement smoothly activates/deactivates zones.
 
 Developable on test map or integrated after Phase B.
 
-- **SIM-001** — Plant growth (Phase 1). Food regeneration. Garden tiles only (24 in dataset).
+- **SIM-001** — Plant growth (Phase 1). Food regeneration. Garden tiles only (24 in dataset). Needs: B05 (garden placement).
 - **SIM-002** — Thirst (Phase 2). Requires Water tiles (Seine) and fountains (3 named "Fontaine" buildings + "Pompe de la Samaritaine" in data).
 - **SIM-003** — Decay (Phase 1). Corpse decomposition.
 - **SIM-004** — Tiredness/sleep (Phase 2). Rest cycles. Entities return to their home building.
@@ -125,7 +148,7 @@ Developable on test map or integrated after Phase B.
 - **SIM-009** — Reputation (Phase 5). Observed behavior.
 - **SIM-010** — Building (Phase 4). Requires inventory.
 - **SIM-011** — Crafting (Phase 4). Requires recipes.
-- **SIM-012** — Fluid flow (Phase 1). Cellular automaton. Seine placement prerequisite.
+- **SIM-012** — Fluid flow (Phase 1). Cellular automaton. Needs: A08 (Seine placement).
 
 ## Pending (threshold not yet met)
 
