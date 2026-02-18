@@ -529,6 +529,7 @@ pub fn rasterize_paris(
     let block_start = Instant::now();
     let mut next_block_id: u16 = 1;
     let mut total_block_tiles = 0usize;
+    let mut block_overlap_tiles = 0usize;
 
     for block_ron in &data.blocks {
         let ir = inner_refs(&block_ron.inner_rings);
@@ -544,6 +545,12 @@ pub fn rasterize_paris(
         for &(cx, cy) in &cells {
             let ux = cx as usize;
             let uy = cy as usize;
+            // Detect block overlap (S11): tile already owned by another block.
+            if let Some(prev_bid) = tiles.get_block_id(ux, uy)
+                && prev_bid.0 != 0
+            {
+                block_overlap_tiles += 1;
+            }
             tiles.set_terrain(ux, uy, Terrain::Courtyard);
             tiles.set_block_id(ux, uy, block_id);
             tiles.set_quartier_id(ux, uy, quartier_id);
@@ -560,15 +567,17 @@ pub fn rasterize_paris(
         });
     }
     log::info!(
-        "  {} blocks, {} block tiles in {:.1}s",
+        "  {} blocks, {} block tiles ({} overlap) in {:.1}s",
         blocks.blocks.len(),
         total_block_tiles,
+        block_overlap_tiles,
         block_start.elapsed().as_secs_f64(),
     );
 
     // --- Pass 1: BATI=1 buildings → Wall + building_id + registry ---
     let bldg_start = Instant::now();
     let mut total_building_tiles = 0usize;
+    let mut building_overlap_tiles = 0usize;
 
     for bldg_ron in &data.buildings {
         if bldg_ron.bati != 1 {
@@ -584,19 +593,28 @@ pub fn rasterize_paris(
         let building_id = buildings.next_id();
         let floor_count = estimate_floor_count(bldg_ron.superficie);
 
-        // Determine which block this building sits in.
-        let mut block_for_building: Option<BlockId> = None;
+        // Determine which block this building sits in (majority vote).
+        let mut block_votes: HashMap<BlockId, usize> = HashMap::new();
         for &(cx, cy) in &cells {
             if let Some(bid) = tiles.get_block_id(cx as usize, cy as usize) {
-                block_for_building = Some(bid);
-                break;
+                *block_votes.entry(bid).or_insert(0) += 1;
             }
         }
+        let block_for_building = block_votes
+            .into_iter()
+            .max_by_key(|&(_, count)| count)
+            .map(|(bid, _)| bid);
 
         let mut tile_list = Vec::with_capacity(cells.len());
         for &(cx, cy) in &cells {
             let ux = cx as usize;
             let uy = cy as usize;
+            // Detect BATI=1 overlap (S10): tile already owned by another building.
+            if let Some(prev_bid) = tiles.get_building_id(ux, uy)
+                && prev_bid.0 != 0
+            {
+                building_overlap_tiles += 1;
+            }
             tiles.set_terrain(ux, uy, Terrain::Wall);
             tiles.set_building_id(ux, uy, building_id);
             tile_list.push((cx, cy));
@@ -628,10 +646,11 @@ pub fn rasterize_paris(
         });
     }
     log::info!(
-        "  {} buildings (from {} unique identifs), {} building tiles in {:.1}s",
+        "  {} buildings (from {} unique identifs), {} building tiles ({} overlap) in {:.1}s",
         buildings.len(),
         buildings.identif_index.len(),
         total_building_tiles,
+        building_overlap_tiles,
         bldg_start.elapsed().as_secs_f64(),
     );
 
