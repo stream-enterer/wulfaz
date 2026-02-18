@@ -1,5 +1,8 @@
 /target
 
+# Generated map data (from preprocess binary)
+data/paris.bin
+
 # IDE
 .idea
 .vscode

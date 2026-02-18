@@ -526,16 +526,11 @@ fn main() {
 
     let mut world = World::new_with_seed(42);
 
-    // If GIS data exists, load Paris map; otherwise use random terrain.
-    let paris_data = std::env::var("PARIS_DATA").unwrap_or_else(|_| "../../paris/data".into());
-    let buildings_path = std::path::Path::new(&paris_data).join("buildings/BATI.shp");
-    if buildings_path.exists() {
-        let blocks_path = std::path::Path::new(&paris_data).join("plots/Vasserot_Ilots.shp");
-        loading_gis::load_gis(
-            &mut world,
-            buildings_path.to_str().unwrap(),
-            blocks_path.to_str().unwrap(),
-        );
+    // Load pre-built Paris map if available, otherwise random terrain.
+    let paris_bin = std::path::Path::new("data/paris.bin");
+    if paris_bin.exists() {
+        let data = loading_gis::load_map_data(paris_bin.to_str().unwrap());
+        loading_gis::apply_map_data(&mut world, data);
     } else {
         loading::load_terrain(&mut world, "data/terrain.kdl");
     }

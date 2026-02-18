@@ -1,11 +1,62 @@
+#![allow(dead_code)] // Used by preprocess binary via wulfaz::loading_gis.
+
 use std::collections::{HashMap, VecDeque};
+use std::fs::File;
+use std::io::{BufReader, BufWriter};
 use std::time::Instant;
 
+use serde::{Deserialize, Serialize};
 use shapefile::dbase::FieldValue;
 
-use crate::registry::{BlockData, BlockId, BuildingData, BuildingId, estimate_floor_count};
+use crate::registry::{
+    BlockData, BlockId, BlockRegistry, BuildingData, BuildingId, BuildingRegistry,
+    estimate_floor_count,
+};
 use crate::tile_map::{Terrain, TileMap};
 use crate::world::World;
+
+/// Version stamp — increment when the binary format changes.
+const MAP_DATA_VERSION: u32 = 1;
+
+/// Serializable bundle of all GIS-derived map data.
+#[derive(Serialize, Deserialize)]
+pub struct ParisMapData {
+    pub version: u32,
+    pub tiles: TileMap,
+    pub buildings: BuildingRegistry,
+    pub blocks: BlockRegistry,
+    pub quartier_names: Vec<String>,
+}
+
+/// Serialize map data to a binary file.
+pub fn save_map_data(data: &ParisMapData, path: &str) {
+    let file = File::create(path).unwrap_or_else(|e| panic!("Failed to create {path}: {e}"));
+    let writer = BufWriter::new(file);
+    bincode::serialize_into(writer, data)
+        .unwrap_or_else(|e| panic!("Failed to serialize map data: {e}"));
+}
+
+/// Deserialize map data from a binary file.
+pub fn load_map_data(path: &str) -> ParisMapData {
+    let file = File::open(path).unwrap_or_else(|e| panic!("Failed to open {path}: {e}"));
+    let reader = BufReader::new(file);
+    let data: ParisMapData = bincode::deserialize_from(reader)
+        .unwrap_or_else(|e| panic!("Failed to deserialize map data: {e}"));
+    assert_eq!(
+        data.version, MAP_DATA_VERSION,
+        "Map data version mismatch: file has {}, expected {}",
+        data.version, MAP_DATA_VERSION
+    );
+    data
+}
+
+/// Load pre-built map data into World.
+pub fn apply_map_data(world: &mut World, data: ParisMapData) {
+    world.tiles = data.tiles;
+    world.buildings = data.buildings;
+    world.blocks = data.blocks;
+    world.quartier_names = data.quartier_names;
+}
 
 // --- Coordinate conversion constants ---
 // At lat 48.857°, 1° longitude ≈ 73,490 m, 1° latitude ≈ 111,320 m.
@@ -158,11 +209,10 @@ fn get_integer_field(record: &shapefile::dbase::Record, name: &str) -> i32 {
     }
 }
 
-/// Main entry point: load GIS shapefiles and populate world terrain + registries.
-pub fn load_gis(world: &mut World, buildings_shp: &str, blocks_shp: &str) {
+/// Build ParisMapData from shapefiles. Used by the preprocess binary.
+pub fn build_from_shapefiles(buildings_shp: &str, blocks_shp: &str) -> ParisMapData {
     let total_start = Instant::now();
 
-    // Compute grid dimensions and create TileMap.
     let (grid_w, grid_h) = compute_grid_size();
     log::info!(
         "GIS grid: {}×{} tiles ({} chunks)",
@@ -170,35 +220,34 @@ pub fn load_gis(world: &mut World, buildings_shp: &str, blocks_shp: &str) {
         grid_h,
         (grid_w.div_ceil(64)) * (grid_h.div_ceil(64))
     );
+
+    // Use a temporary World to run the loading pipeline.
+    let mut world = World::new_with_seed(0);
     world.tiles = TileMap::new(grid_w, grid_h);
 
-    // --- Phase 1: Load blocks ---
     let block_start = Instant::now();
-    load_blocks(world, blocks_shp, grid_w, grid_h);
+    load_blocks(&mut world, blocks_shp, grid_w, grid_h);
     log::info!(
         "Blocks loaded in {:.1}s",
         block_start.elapsed().as_secs_f64()
     );
 
-    // --- Phase 2: Load buildings ---
     let bldg_start = Instant::now();
-    load_buildings(world, buildings_shp, grid_w, grid_h);
+    load_buildings(&mut world, buildings_shp, grid_w, grid_h);
     log::info!(
         "Buildings loaded in {:.1}s",
         bldg_start.elapsed().as_secs_f64()
     );
 
-    // --- Phase 3: Classify wall/floor ---
     let class_start = Instant::now();
-    classify_walls_floors(world);
+    classify_walls_floors(&mut world);
     log::info!(
         "Wall/floor classification in {:.1}s",
         class_start.elapsed().as_secs_f64()
     );
 
-    // --- Phase 4: Quartier BFS for road tiles ---
     let bfs_start = Instant::now();
-    fill_quartier_roads(world, grid_w, grid_h);
+    fill_quartier_roads(&mut world, grid_w, grid_h);
     log::info!("Quartier BFS in {:.1}s", bfs_start.elapsed().as_secs_f64());
 
     log::info!(
@@ -208,6 +257,14 @@ pub fn load_gis(world: &mut World, buildings_shp: &str, blocks_shp: &str) {
         world.buildings.buildings.len(),
         world.quartier_names.len(),
     );
+
+    ParisMapData {
+        version: MAP_DATA_VERSION,
+        tiles: world.tiles,
+        buildings: world.buildings,
+        blocks: world.blocks,
+        quartier_names: world.quartier_names,
+    }
 }
 
 /// Load block polygons from Vasserot_Ilots.shp.
