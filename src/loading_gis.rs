@@ -5,7 +5,10 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use shapefile::dbase::FieldValue;
 
-use crate::registry::{BlockData, BlockId, BuildingData, BuildingId, estimate_floor_count};
+use crate::registry::{
+    BlockData, BlockId, BlockRegistry, BuildingData, BuildingId, BuildingRegistry,
+    estimate_floor_count,
+};
 use crate::tile_map::{Terrain, TileMap};
 use crate::world::World;
 
@@ -37,6 +40,16 @@ pub struct ParisMapRon {
     pub buildings: Vec<ParisBuildingRon>,
     pub blocks: Vec<ParisBlockRon>,
     pub quartier_names: Vec<String>,
+}
+
+/// Metadata saved alongside the binary tile file.
+/// Contains registry data that doesn't belong in the flat tile arrays.
+#[derive(Serialize, Deserialize)]
+pub struct ParisMetadataRon {
+    pub quartier_names: Vec<String>,
+    /// BuildingData with tiles field left empty (reconstructed from binary on load).
+    pub buildings: Vec<BuildingData>,
+    pub blocks: Vec<BlockData>,
 }
 
 // --- RON serialization ---
@@ -366,22 +379,27 @@ pub fn build_from_shapefiles(buildings_shp: &str, blocks_shp: &str) -> ParisMapR
     }
 }
 
-// --- Game-side loader: reconstruct TileMap from RON polygons ---
+// --- Rasterization: RON polygons → TileMap + registries ---
 
-/// Reconstruct the full TileMap, registries, and quartier data from RON polygons.
-pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
+/// Rasterize all polygons and run classification/BFS, returning standalone products.
+/// Used by both the preprocess binary (save to binary) and the game (fallback path).
+#[allow(dead_code)]
+pub fn rasterize_paris(
+    data: &ParisMapRon,
+) -> (TileMap, BuildingRegistry, BlockRegistry, Vec<String>) {
     let total_start = Instant::now();
 
     let grid_w = data.grid_width;
     let grid_h = data.grid_height;
-    world.tiles = TileMap::new(grid_w, grid_h);
+    let mut tiles = TileMap::new(grid_w, grid_h);
+    let mut buildings = BuildingRegistry::new();
+    let mut blocks = BlockRegistry::new();
 
     // Build quartier name→id map (1-based).
     let mut quartier_map: HashMap<String, u8> = HashMap::new();
     for (i, name) in data.quartier_names.iter().enumerate() {
         quartier_map.insert(name.clone(), (i + 1) as u8);
     }
-    world.quartier_names = data.quartier_names;
 
     // --- Blocks ---
     let block_start = Instant::now();
@@ -401,13 +419,13 @@ pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
         for &(cx, cy) in &cells {
             let ux = cx as usize;
             let uy = cy as usize;
-            world.tiles.set_terrain(ux, uy, Terrain::Courtyard);
-            world.tiles.set_block_id(ux, uy, block_id);
-            world.tiles.set_quartier_id(ux, uy, quartier_id);
+            tiles.set_terrain(ux, uy, Terrain::Courtyard);
+            tiles.set_block_id(ux, uy, block_id);
+            tiles.set_quartier_id(ux, uy, quartier_id);
         }
         total_block_tiles += cells.len();
 
-        world.blocks.insert(BlockData {
+        blocks.insert(BlockData {
             id: block_id,
             id_ilots: block_ron.id_ilots.clone(),
             quartier: block_ron.quartier.clone(),
@@ -417,7 +435,7 @@ pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
     }
     log::info!(
         "  {} blocks, {} block tiles in {:.1}s",
-        world.blocks.blocks.len(),
+        blocks.blocks.len(),
         total_block_tiles,
         block_start.elapsed().as_secs_f64(),
     );
@@ -438,7 +456,7 @@ pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
         // Determine which block this building sits in.
         let mut block_for_building: Option<BlockId> = None;
         for &(cx, cy) in &cells {
-            if let Some(bid) = world.tiles.get_block_id(cx as usize, cy as usize) {
+            if let Some(bid) = tiles.get_block_id(cx as usize, cy as usize) {
                 block_for_building = Some(bid);
                 break;
             }
@@ -448,19 +466,19 @@ pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
         for &(cx, cy) in &cells {
             let ux = cx as usize;
             let uy = cy as usize;
-            world.tiles.set_terrain(ux, uy, Terrain::Wall);
-            world.tiles.set_building_id(ux, uy, building_id);
+            tiles.set_terrain(ux, uy, Terrain::Wall);
+            tiles.set_building_id(ux, uy, building_id);
             tile_list.push((cx, cy));
         }
         total_building_tiles += cells.len();
 
         if let Some(bid) = block_for_building
-            && let Some(block) = world.blocks.blocks.get_mut(&bid)
+            && let Some(block) = blocks.blocks.get_mut(&bid)
         {
             block.buildings.push(building_id);
         }
 
-        world.buildings.insert(BuildingData {
+        buildings.insert(BuildingData {
             id: building_id,
             quartier: bldg_ron.quartier.clone(),
             superficie: bldg_ron.superficie,
@@ -475,14 +493,14 @@ pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
     }
     log::info!(
         "  {} buildings, {} building tiles in {:.1}s",
-        world.buildings.buildings.len(),
+        buildings.buildings.len(),
         total_building_tiles,
         bldg_start.elapsed().as_secs_f64(),
     );
 
     // --- Wall/floor classification ---
     let class_start = Instant::now();
-    classify_walls_floors(world);
+    classify_walls_floors(&mut tiles, &buildings);
     log::info!(
         "  Wall/floor classification in {:.1}s",
         class_start.elapsed().as_secs_f64()
@@ -490,30 +508,177 @@ pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
 
     // --- Quartier BFS ---
     let bfs_start = Instant::now();
-    fill_quartier_roads(world, grid_w, grid_h);
+    fill_quartier_roads(&mut tiles, grid_w, grid_h);
     log::info!(
         "  Quartier BFS in {:.1}s",
         bfs_start.elapsed().as_secs_f64()
     );
 
     log::info!(
-        "Paris map loaded in {:.1}s",
+        "Rasterization complete in {:.1}s",
         total_start.elapsed().as_secs_f64(),
+    );
+
+    (tiles, buildings, blocks, data.quartier_names.clone())
+}
+
+// --- Game-side loader: reconstruct TileMap from RON polygons ---
+
+/// Reconstruct the full TileMap, registries, and quartier data from RON polygons.
+pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
+    let (tiles, buildings, blocks, quartier_names) = rasterize_paris(&data);
+    world.tiles = tiles;
+    world.buildings = buildings;
+    world.blocks = blocks;
+    world.quartier_names = quartier_names;
+}
+
+// --- Binary save/load ---
+
+/// Save rasterized tile data + metadata for fast game loading.
+/// Tile arrays go to `tiles_path` (binary), registry data to `meta_path` (RON).
+/// BuildingData.tiles is stripped from metadata (reconstructed from binary on load).
+#[allow(dead_code)]
+pub fn save_paris_binary(
+    tiles: &TileMap,
+    buildings: &BuildingRegistry,
+    blocks: &BlockRegistry,
+    quartier_names: &[String],
+    tiles_path: &str,
+    meta_path: &str,
+) {
+    // Write binary tiles
+    let tile_start = Instant::now();
+    tiles
+        .write_binary(tiles_path)
+        .unwrap_or_else(|e| panic!("Failed to write {tiles_path}: {e}"));
+    let tile_size = std::fs::metadata(tiles_path).map(|m| m.len()).unwrap_or(0);
+    log::info!(
+        "  Binary tiles: {:.1}MB in {:.1}s",
+        tile_size as f64 / (1024.0 * 1024.0),
+        tile_start.elapsed().as_secs_f64()
+    );
+
+    // Write metadata RON (strip tile lists from BuildingData)
+    let meta_start = Instant::now();
+    let mut meta_buildings: Vec<BuildingData> = buildings
+        .buildings
+        .values()
+        .map(|b| {
+            let mut b = b.clone();
+            b.tiles = Vec::new(); // strip — reconstructed from binary on load
+            b
+        })
+        .collect();
+    // Sort by id for deterministic output
+    meta_buildings.sort_by_key(|b| b.id.0);
+
+    let mut meta_blocks: Vec<BlockData> = blocks.blocks.values().cloned().collect();
+    meta_blocks.sort_by_key(|b| b.id.0);
+
+    let metadata = ParisMetadataRon {
+        quartier_names: quartier_names.to_vec(),
+        buildings: meta_buildings,
+        blocks: meta_blocks,
+    };
+
+    let pretty = ron::ser::PrettyConfig::default();
+    let ron_str = ron::ser::to_string_pretty(&metadata, pretty)
+        .unwrap_or_else(|e| panic!("Failed to serialize metadata RON: {e}"));
+    let mut file = std::fs::File::create(meta_path)
+        .unwrap_or_else(|e| panic!("Failed to create {meta_path}: {e}"));
+    file.write_all(ron_str.as_bytes())
+        .unwrap_or_else(|e| panic!("Failed to write {meta_path}: {e}"));
+
+    let meta_size = std::fs::metadata(meta_path).map(|m| m.len()).unwrap_or(0);
+    log::info!(
+        "  Metadata RON: {:.1}MB in {:.1}s",
+        meta_size as f64 / (1024.0 * 1024.0),
+        meta_start.elapsed().as_secs_f64()
+    );
+}
+
+/// Load pre-rasterized binary tiles + metadata into World.
+/// Reconstructs BuildingData.tiles by scanning the tile array.
+pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
+    let total_start = Instant::now();
+
+    // Load binary tiles
+    let tile_start = Instant::now();
+    world.tiles = TileMap::read_binary(tiles_path)
+        .unwrap_or_else(|e| panic!("Failed to read {tiles_path}: {e}"));
+    log::info!(
+        "  Binary tiles loaded in {:.1}s ({}×{})",
+        tile_start.elapsed().as_secs_f64(),
+        world.tiles.width(),
+        world.tiles.height()
+    );
+
+    // Load metadata RON
+    let meta_start = Instant::now();
+    let ron_str = std::fs::read_to_string(meta_path)
+        .unwrap_or_else(|e| panic!("Failed to read {meta_path}: {e}"));
+    let metadata: ParisMetadataRon =
+        ron::from_str(&ron_str).unwrap_or_else(|e| panic!("Failed to parse {meta_path}: {e}"));
+    log::info!(
+        "  Metadata loaded in {:.1}s: {} buildings, {} blocks, {} quartiers",
+        meta_start.elapsed().as_secs_f64(),
+        metadata.buildings.len(),
+        metadata.blocks.len(),
+        metadata.quartier_names.len()
+    );
+
+    world.quartier_names = metadata.quartier_names;
+
+    // Reconstruct building tile lists by scanning the tile array
+    let scan_start = Instant::now();
+    let mut building_tiles: HashMap<BuildingId, Vec<(i32, i32)>> = HashMap::new();
+    let w = world.tiles.width();
+    let h = world.tiles.height();
+    for y in 0..h {
+        for x in 0..w {
+            if let Some(bid) = world.tiles.get_building_id(x, y) {
+                building_tiles
+                    .entry(bid)
+                    .or_default()
+                    .push((x as i32, y as i32));
+            }
+        }
+    }
+    log::info!(
+        "  Tile scan in {:.1}s: {} buildings with tiles",
+        scan_start.elapsed().as_secs_f64(),
+        building_tiles.len()
+    );
+
+    // Populate registries
+    for mut bdata in metadata.buildings {
+        if let Some(tiles) = building_tiles.remove(&bdata.id) {
+            bdata.tiles = tiles;
+        }
+        world.buildings.insert(bdata);
+    }
+    for bdata in metadata.blocks {
+        world.blocks.insert(bdata);
+    }
+
+    log::info!(
+        "Paris binary loaded in {:.1}s",
+        total_start.elapsed().as_secs_f64()
     );
 }
 
 /// Classify building tiles into Wall vs Floor.
 /// A tile is Wall if any cardinal neighbor is not in the same building.
 /// Otherwise it's Floor.
-fn classify_walls_floors(world: &mut World) {
+fn classify_walls_floors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     let mut wall_count = 0usize;
     let mut floor_count = 0usize;
-    let grid_w = world.tiles.width() as i32;
-    let grid_h = world.tiles.height() as i32;
+    let grid_w = tiles.width() as i32;
+    let grid_h = tiles.height() as i32;
 
     // Collect all (tile, building_id) pairs, then classify.
-    let all_tiles: Vec<(i32, i32, BuildingId)> = world
-        .buildings
+    let all_tiles: Vec<(i32, i32, BuildingId)> = buildings
         .buildings
         .values()
         .flat_map(|b| b.tiles.iter().map(move |&(x, y)| (x, y, b.id)))
@@ -528,7 +693,7 @@ fn classify_walls_floors(world: &mut World) {
                 is_edge = true;
                 break;
             }
-            let neighbor_bid = world.tiles.get_building_id(nx as usize, ny as usize);
+            let neighbor_bid = tiles.get_building_id(nx as usize, ny as usize);
             if neighbor_bid != Some(bid) {
                 is_edge = true;
                 break;
@@ -542,7 +707,7 @@ fn classify_walls_floors(world: &mut World) {
             floor_count += 1;
             Terrain::Floor
         };
-        world.tiles.set_terrain(cx as usize, cy as usize, terrain);
+        tiles.set_terrain(cx as usize, cy as usize, terrain);
     }
 
     log::info!("  {} wall tiles, {} floor tiles", wall_count, floor_count);
@@ -550,14 +715,14 @@ fn classify_walls_floors(world: &mut World) {
 
 /// Multi-source BFS to assign quartier_id to road tiles.
 /// Expands from all tiles that already have quartier_id != 0.
-fn fill_quartier_roads(world: &mut World, grid_w: usize, grid_h: usize) {
+fn fill_quartier_roads(tiles: &mut TileMap, grid_w: usize, grid_h: usize) {
     let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
     let mut assigned = 0usize;
 
     // Seed: all tiles with quartier_id already set.
     for y in 0..grid_h {
         for x in 0..grid_w {
-            if let Some(qid) = world.tiles.get_quartier_id(x, y)
+            if let Some(qid) = tiles.get_quartier_id(x, y)
                 && qid != 0
             {
                 queue.push_back((x, y));
@@ -566,7 +731,7 @@ fn fill_quartier_roads(world: &mut World, grid_w: usize, grid_h: usize) {
     }
 
     while let Some((x, y)) = queue.pop_front() {
-        let qid = world.tiles.get_quartier_id(x, y).unwrap_or(0);
+        let qid = tiles.get_quartier_id(x, y).unwrap_or(0);
         if qid == 0 {
             continue;
         }
@@ -579,10 +744,10 @@ fn fill_quartier_roads(world: &mut World, grid_w: usize, grid_h: usize) {
             }
             let nux = nx as usize;
             let nuy = ny as usize;
-            if let Some(nqid) = world.tiles.get_quartier_id(nux, nuy)
+            if let Some(nqid) = tiles.get_quartier_id(nux, nuy)
                 && nqid == 0
             {
-                world.tiles.set_quartier_id(nux, nuy, qid);
+                tiles.set_quartier_id(nux, nuy, qid);
                 assigned += 1;
                 queue.push_back((nux, nuy));
             }
@@ -669,22 +834,21 @@ mod tests {
 
     #[test]
     fn test_wall_floor_classification() {
-        // Create a 5x5 building block — expect 12 wall + 9 floor
-        // (actually for a 5x5 grid: perimeter = 16 wall, interior = 9 floor)
-        let mut world = World::new_with_seed(42);
-        world.tiles = TileMap::new(10, 10);
+        // Create a 5x5 building block — expect 16 wall + 9 floor
+        let mut tiles = TileMap::new(10, 10);
+        let mut buildings = BuildingRegistry::new();
 
         let bid = BuildingId(1);
         let mut tile_list = Vec::new();
         for y in 2..7 {
             for x in 2..7 {
-                world.tiles.set_terrain(x, y, Terrain::Wall);
-                world.tiles.set_building_id(x, y, bid);
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid);
                 tile_list.push((x as i32, y as i32));
             }
         }
 
-        world.buildings.insert(BuildingData {
+        buildings.insert(BuildingData {
             id: bid,
             quartier: "Test".into(),
             superficie: 100.0,
@@ -697,14 +861,14 @@ mod tests {
             occupants: Vec::new(),
         });
 
-        classify_walls_floors(&mut world);
+        classify_walls_floors(&mut tiles, &buildings);
 
         // Count walls and floors
         let mut walls = 0;
         let mut floors = 0;
         for y in 2..7 {
             for x in 2..7 {
-                match world.tiles.get_terrain(x, y) {
+                match tiles.get_terrain(x, y) {
                     Some(Terrain::Wall) => walls += 1,
                     Some(Terrain::Floor) => floors += 1,
                     other => panic!("unexpected terrain at ({x},{y}): {other:?}"),

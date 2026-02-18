@@ -526,9 +526,17 @@ fn main() {
 
     let mut world = World::new_with_seed(42);
 
-    // Load pre-built Paris map if available, otherwise random terrain.
+    // Load map: prefer binary tiles → fallback RON → fallback default terrain.
+    let paris_tiles = std::path::Path::new("data/paris.tiles");
+    let paris_meta = std::path::Path::new("data/paris.meta.ron");
     let paris_ron = std::path::Path::new("data/paris.ron");
-    if paris_ron.exists() {
+    if paris_tiles.exists() && paris_meta.exists() {
+        loading_gis::load_paris_binary(
+            &mut world,
+            paris_tiles.to_str().unwrap(),
+            paris_meta.to_str().unwrap(),
+        );
+    } else if paris_ron.exists() {
         let data = loading_gis::load_paris_ron(paris_ron.to_str().unwrap());
         loading_gis::apply_paris_ron(&mut world, data);
     } else {

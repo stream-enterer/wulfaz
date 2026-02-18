@@ -2,6 +2,8 @@
 
 # Generated map data (from preprocess binary)
 data/paris.ron
+data/paris.tiles
+data/paris.meta.ron
 
 # IDE
 .idea
