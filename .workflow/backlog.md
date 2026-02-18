@@ -28,13 +28,6 @@ That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
   - Bridges (hardcoded, 1830s-era): Pont Royal, Pont du Carrousel, Pont des Arts, Pont Neuf, Pont au Change, Pont Notre-Dame, Pont de l'Arcole, Pont Saint-Louis, Pont Marie, Pont de la Tournelle. Each bridge is a short rectangle of Bridge tiles (~5-8 tiles wide, spanning the water gap). Define each as two endpoints (tile coordinates) and fill the rectangle between them.
   - Set `quartier_id` on water tiles to 0 (unassigned). Bridge tiles get quartier from the nearest bank.
 
-- **SCALE-A04** — Chunk-aware renderer. Only render chunks overlapping camera viewport. Needs: A02.
-  - With Vec<Chunk> storage, chunk access is O(1) by index. Compute visible chunk range from camera position + viewport size, skip all others during render.
-
-- **SCALE-A05** — Lazy tile updates. `run_temperature` only ticks dirty/active chunks. Needs: A02.
-  - Binary tiles load with temperature = 16.0 (not serialized), which is already at equilibrium for Road/Courtyard. Only non-default terrain (Water=10°, Floor=18°, etc.) needs drift — skip chunks where all tiles are at target.
-  - Cold chunk fast-forward on reload: `elapsed × drift_rate`, clamp to equilibrium.
-
 ## Phase B — Entities in One Neighborhood
 
 Goal: ~200 entities with full AI on the real map.

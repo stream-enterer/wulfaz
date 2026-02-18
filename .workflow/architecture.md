@@ -36,7 +36,9 @@ struct TileMap {
 }
 ```
 
-Tile accessors keep same signatures, route through flat Vec indexing internally (no hashing). Binary serialization: WULF header (32 bytes) + chunks in row-major order. Temperature not serialized (defaults to 16.0 on load). Cold chunks fast-forward on reload: `elapsed × drift_rate`, clamp to equilibrium. See "Chunk (full definition)" section for per-tile ID layers.
+Tile accessors keep same signatures, route through flat Vec indexing internally (no hashing). Binary serialization: WULF header (32 bytes) + chunks in row-major order. Temperature not serialized — `initialize_temperatures()` sets each tile to its `terrain.target_temperature()` after load and marks all chunks `at_equilibrium`. See "Chunk (full definition)" section for per-tile ID layers.
+
+Chunk access methods: `chunk_at(cx, cy)` / `chunk_at_mut(cx, cy)` for O(1) indexed access, `visible_chunk_range(cam_x, cam_y, vp_w, vp_h) -> ChunkRange` for viewport culling.
 
 ## Building Registry
 
@@ -104,6 +106,7 @@ struct Chunk {
     quartier_id: [u8; 4096],      // 0 = unassigned, 1-36 = quartier index. Serialized.
     dirty: bool,
     last_tick: Tick,
+    at_equilibrium: bool,   // runtime-only, NOT serialized. Cleared by set_terrain().
 }
 // Binary size per chunk: 4096 + 4096×4 + 4096×2 + 4096 = 32 KB
 ```
