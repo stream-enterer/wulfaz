@@ -566,52 +566,7 @@ pub fn rasterize_paris(
         block_start.elapsed().as_secs_f64(),
     );
 
-    // --- Pass 1: BATI=2 named gardens → Garden terrain ---
-    // Only polygons with "jardin" or "parc" in nom_bati need rasterization.
-    // Non-garden BATI=2 and all BATI=3: tiles already Courtyard from block pass.
-    let garden_start = Instant::now();
-    let mut garden_tile_count = 0usize;
-    let mut garden_polygon_count = 0usize;
-    let mut skipped_bati2 = 0usize;
-    let mut skipped_bati3 = 0usize;
-
-    for bldg_ron in &data.buildings {
-        match bldg_ron.bati {
-            2 => {
-                let is_garden = bldg_ron.nom_bati.as_ref().is_some_and(|name| {
-                    let lower = name.to_lowercase();
-                    lower.contains("jardin") || lower.contains("parc")
-                });
-                if !is_garden {
-                    skipped_bati2 += 1;
-                    continue;
-                }
-                let ir = inner_refs(&bldg_ron.inner_rings);
-                let cells = scanline_fill_multi(&[&bldg_ron.polygon], &ir, grid_w, grid_h);
-                for &(cx, cy) in &cells {
-                    tiles.set_terrain(cx as usize, cy as usize, Terrain::Garden);
-                }
-                garden_tile_count += cells.len();
-                garden_polygon_count += 1;
-            }
-            3 => {
-                skipped_bati3 += 1;
-            }
-            _ => {} // BATI=1 handled in pass 2
-        }
-    }
-    log::info!(
-        "  {} garden polygons ({} tiles), {} BATI=2 courtyards skipped, \
-         {} BATI=3 features skipped in {:.1}s",
-        garden_polygon_count,
-        garden_tile_count,
-        skipped_bati2,
-        skipped_bati3,
-        garden_start.elapsed().as_secs_f64(),
-    );
-
-    // --- Pass 2: BATI=1 buildings → Wall + building_id + registry ---
-    // Overwrites Garden if a building polygon overlaps (building wins).
+    // --- Pass 1: BATI=1 buildings → Wall + building_id + registry ---
     let bldg_start = Instant::now();
     let mut total_building_tiles = 0usize;
 
@@ -678,6 +633,93 @@ pub fn rasterize_paris(
         buildings.identif_index.len(),
         total_building_tiles,
         bldg_start.elapsed().as_secs_f64(),
+    );
+
+    // --- Pass 2: ALL BATI=2 carve courtyards/gardens into buildings ---
+    // Runs AFTER BATI=1 so BATI=2 polygons overwrite Wall tiles,
+    // clearing building_id and setting terrain to Courtyard or Garden.
+    // Also updates building tile lists in the registry (S12 fix).
+    let carve_start = Instant::now();
+    let mut garden_tile_count = 0usize;
+    let mut garden_polygon_count = 0usize;
+    let mut courtyard_tile_count = 0usize;
+    let mut courtyard_polygon_count = 0usize;
+    let mut carved_from_buildings = 0usize;
+    let mut skipped_bati3 = 0usize;
+
+    // Reverse index: BuildingId.0 → registry Vec index, for tile list updates.
+    let building_idx: HashMap<u32, usize> = buildings
+        .buildings
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.id.0, i))
+        .collect();
+
+    for bldg_ron in &data.buildings {
+        match bldg_ron.bati {
+            2 => {
+                let ir = inner_refs(&bldg_ron.inner_rings);
+                let cells = scanline_fill_multi(&[&bldg_ron.polygon], &ir, grid_w, grid_h);
+                if cells.is_empty() {
+                    continue;
+                }
+
+                let is_garden = bldg_ron.nom_bati.as_ref().is_some_and(|name| {
+                    let lower = name.to_lowercase();
+                    lower.contains("jardin")
+                        || lower.contains("parc")
+                        || lower.contains("verger")
+                        || lower.contains("potager")
+                        || lower.contains("pepiniere")
+                        || lower.contains("bosquet")
+                        || lower.contains("square")
+                        || lower.contains("promenade")
+                        || lower.contains("cimetiere")
+                });
+                let terrain = if is_garden {
+                    garden_tile_count += cells.len();
+                    garden_polygon_count += 1;
+                    Terrain::Garden
+                } else {
+                    courtyard_tile_count += cells.len();
+                    courtyard_polygon_count += 1;
+                    Terrain::Courtyard
+                };
+
+                for &(cx, cy) in &cells {
+                    let ux = cx as usize;
+                    let uy = cy as usize;
+
+                    // If this tile belongs to a BATI=1 building, remove it
+                    // from that building's tile list (S12 fix).
+                    if let Some(bid_raw) = tiles.get_building_id(ux, uy)
+                        && bid_raw.0 != 0
+                        && let Some(&idx) = building_idx.get(&bid_raw.0)
+                    {
+                        buildings.buildings[idx].tiles.retain(|&t| t != (cx, cy));
+                        carved_from_buildings += 1;
+                    }
+
+                    tiles.set_terrain(ux, uy, terrain);
+                    tiles.set_building_id(ux, uy, crate::registry::BuildingId(0));
+                }
+            }
+            3 => {
+                skipped_bati3 += 1;
+            }
+            _ => {} // BATI=1 already handled
+        }
+    }
+    log::info!(
+        "  BATI=2 carving: {} garden ({} tiles), {} courtyard ({} tiles), \
+         {} tiles carved from buildings, {} BATI=3 skipped in {:.1}s",
+        garden_polygon_count,
+        garden_tile_count,
+        courtyard_polygon_count,
+        courtyard_tile_count,
+        carved_from_buildings,
+        skipped_bati3,
+        carve_start.elapsed().as_secs_f64(),
     );
 
     // --- Wall/floor classification ---
@@ -1267,7 +1309,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bati2_courtyard_not_rasterized() {
+    fn test_bati2_courtyard_rasterized() {
         let bldg = make_bldg(
             2,
             None,
@@ -1282,9 +1324,9 @@ mod tests {
         let data = make_test_map(vec![bldg]);
         let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
 
-        // BATI=2 with no garden name: tiles stay Courtyard, no building_id
+        // BATI=2 with no garden name: tiles are Courtyard, no building_id
         assert!(buildings.is_empty(), "registry should be empty");
-        let t = tiles.get_terrain(13, 13).unwrap();
+        let t = tiles.get_terrain(13, 13).expect("tile");
         assert_eq!(t, Terrain::Courtyard);
         assert!(tiles.get_building_id(13, 13).is_none());
     }
@@ -1336,11 +1378,11 @@ mod tests {
     }
 
     #[test]
-    fn test_bati1_overwrites_garden() {
-        // Garden covers 10..20 x 10..20, building covers 12..18 x 12..18
-        let garden = make_bldg(
-            2,
-            Some("Jardin public"),
+    fn test_bati2_garden_carves_into_building() {
+        // Building covers 10..20 x 10..20, garden covers 12..18 x 12..18 (inside)
+        let building = make_bldg(
+            1,
+            None,
             vec![
                 (10.0, 10.0),
                 (20.0, 10.0),
@@ -1349,9 +1391,9 @@ mod tests {
                 (10.0, 10.0),
             ],
         );
-        let building = make_bldg(
-            1,
-            None,
+        let garden = make_bldg(
+            2,
+            Some("Jardin public"),
             vec![
                 (12.0, 12.0),
                 (18.0, 12.0),
@@ -1360,26 +1402,32 @@ mod tests {
                 (12.0, 12.0),
             ],
         );
-        let data = make_test_map(vec![garden, building]);
+        let data = make_test_map(vec![building, garden]);
         let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
 
-        // Building wins in overlap area
+        // BATI=2 garden carves into building: overlap tiles are Garden
         assert_eq!(buildings.len(), 1);
-        let bd = &buildings.buildings[0];
-        for &(x, y) in &bd.tiles {
-            let t = tiles.get_terrain(x as usize, y as usize).unwrap();
-            assert!(
-                t == Terrain::Wall || t == Terrain::Floor,
-                "building tile ({x},{y}) should be Wall/Floor, got {t:?}"
-            );
-        }
+        let t_inside = tiles.get_terrain(15, 15).expect("inside garden");
+        assert_eq!(t_inside, Terrain::Garden, "carved area should be Garden");
+        // Building_id cleared in carved area
+        let bid = tiles.get_building_id(15, 15);
+        assert!(
+            bid.is_none() || bid.expect("bid").0 == 0,
+            "building_id should be cleared in carved area"
+        );
 
-        // Non-overlapping garden tiles stay Garden
-        let t_corner = tiles.get_terrain(10, 10).unwrap();
-        assert_eq!(
-            t_corner,
-            Terrain::Garden,
-            "non-overlapping garden tile should stay Garden"
+        // Non-carved building tiles still Wall/Floor
+        let t_edge = tiles.get_terrain(10, 10).expect("building edge");
+        assert!(
+            t_edge == Terrain::Wall || t_edge == Terrain::Floor,
+            "non-carved building tile should be Wall/Floor, got {t_edge:?}"
+        );
+
+        // Building tile list should NOT contain carved tiles
+        let bd = &buildings.buildings[0];
+        assert!(
+            !bd.tiles.contains(&(15, 15)),
+            "carved tile should be removed from building tile list"
         );
     }
 
