@@ -1,33 +1,134 @@
 # Backlog
 
 Incomplete work only. Delete entries when done.
+See `architecture.md` for technical spec on all SCALE tasks.
+GIS data reference: `~/Development/paris/PROJECT.md`
+
+## Phase A — Chunked Map + GIS Loading
+
+Goal: See Paris on screen. No entities.
+
+Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 30m padding).
+That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
+
+- **SCALE-A01** — Expand Terrain enum for city tiles. Update walkability, temperature targets, pathfinding costs. Blocks: A03.
+  - `Wall` — building perimeter. Blocked. Derived: any building tile with a non-building cardinal neighbor.
+  - `Floor` — building interior. Walkable. Derived: building tile surrounded on all 4 sides by building tiles.
+  - `Door` — building entrance. Walkable. Derived: wall tile adjacent to both a floor tile and a road tile.
+  - `Road` — streets and open ground. Walkable. Derived: tile outside all block polygons.
+  - `Courtyard` — enclosed yard. Walkable. Derived: tile inside a block polygon but outside all building polygons.
+  - `Water` — the Seine. Blocked. NOT in GIS data. Must be hardcoded as a band at lat ~48.856-48.860, excluding Ile de la Cite and Ile Saint-Louis. Roughly rows 2600-3050 of the grid, with island gaps.
+  - `Bridge` — walkable water crossing. Hardcode at known historical locations (Pont Neuf, Pont au Change, Pont Notre-Dame, Pont Marie, Pont de la Tournelle, Pont Royal, etc.).
+  - `Garden` — parks/green space. Walkable. 24 buildings in the data are named "parc ou jardin" (Nom_Bati field). Convert their interior tiles to Garden instead of Floor.
+  - Note: no elevation data exists. Map is flat.
+
+- **SCALE-A02** — Chunked TileMap. `HashMap<ChunkCoord, Chunk>`, 64×64 per chunk. ~7,400 chunks for full city. All tile accessors route through chunk lookup. Existing tests pass on single-chunk map. Blocks: A03, A04, A05.
+
+- **SCALE-A03** — GIS terrain loader. Blocks: A06. Needs: A01, A02.
+  - Input files (all in `~/Development/paris/data/`):
+    - `buildings/BATI.shp` — 40,356 building footprint polygons. Encoding: `latin-1`. CRS: EPSG:4326 (WGS84 lon/lat).
+    - `plots/Vasserot_Ilots.shp` — 1,215 city block polygons. Same encoding/CRS.
+  - Coordinate conversion: at lat 48.857, 1° lon = 73,490m, 1° lat = 111,320m.
+  - Viewport origin: lon 2.2981468, lat 48.8837517 (top-left = max lat).
+  - Algorithm: scanline rasterization per polygon (see `~/Development/paris/render_city.py` for working Python reference). For each polygon, find x-intersections per row, fill between pairs.
+  - Classification order: (1) rasterize all block polygons → mark Courtyard, (2) rasterize all building polygons → mark building tiles, overwriting courtyard, (3) classify building tiles into Wall vs Floor by neighbor check, (4) place Doors, (5) everything still unmarked = Road.
+  - Key building fields: `Identif` (int, unique building ID, used to join to addresses), `QUARTIER` (neighborhood name), `SUPERFICIE` (area m²), `BATI` (1=main, 2=annex, 3=market stall), `Nom_Bati` (name if notable).
+  - Rust crate: `shapefile` (reads .shp/.dbf/.shx directly).
+
+- **SCALE-A04** — Chunk-aware renderer. Only load/render chunks overlapping camera viewport. Needs: A02.
+
+- **SCALE-A05** — Lazy tile updates. `run_temperature` only ticks dirty/active chunks. Cold chunks fast-forward on reload. Needs: A02.
+
+- **SCALE-A06** — Building interior generation. Needs: A03.
+  - After wall/floor/door classification, furnish building interiors based on occupant type.
+  - Each building's address is known via the address join (see B03). Look up NAICS category for the address. Place furniture tiles accordingly:
+    - Food stores → counters, barrels, shelves
+    - Restaurants → tables, chairs, hearth
+    - Clothing → looms, counters, fabric
+    - Manufacturing → workbenches, anvils, forges
+    - Residential/unknown → beds, table, chairs, hearth, chest
+  - Buildings with no known occupant get default residential furnishing.
+  - Small buildings (<15 floor tiles) get minimal furnishing (bed, table).
+
+## Phase B — Entities in One Neighborhood
+
+Goal: ~200 entities with full AI on the real map.
+
+- **SCALE-B01** — Spatial index. `HashMap<(i32,i32), SmallVec<[Entity; 4]>>` on World, rebuilt from positions each tick. Blocks: B02.
+
+- **SCALE-B02** — Convert spatial queries. `run_combat`, `run_eating`, `run_decisions` target selection use spatial index, not full position scan. Needs: B01.
+
+- **SCALE-B03** — GIS-aware entity spawning. Needs: A03.
+  - Data pipeline (address → building → people):
+    1. `addresses/Num_Voies_Vasserot.shp` — 29,164 address points. **WARNING: this file is in Lambert projection, NOT WGS84.** The `GEOX`/`GEOY` fields contain Lambert coordinates but the `ID_PARC` field is what matters for joining. CRS conversion needed if using point geometry directly; alternatively join on ID only.
+    2. Join: `Address.ID_PARC` (e.g. "PA17936") → strip "PA" prefix → match `Building.Identif` (e.g. 17936). 92% of buildings match.
+    3. Address gives `NOM_ENTIER` (street name) + `NUM_VOIES` (house number).
+    4. `soduco/data/data_extraction_with_population.gpkg` — SQLite database, table `data_extraction_with_population`. 990,108 rows. Query: `SELECT persons, activities, NAICS FROM data_extraction_with_population WHERE "address.name" LIKE '%street%' AND "address.number" = '12' AND "source.publication_date" = 1845.0`.
+    5. Street name matching requires fuzzy normalization: SoDUCo uses abbreviations ("Fg-St-Antoine" = "Rue du Faubourg Saint-Antoine", "St-Honoré" = "Rue Saint-Honoré"). Strip "Rue de la/du/des/", expand "Fg-" → "Faubourg", "St-" → "Saint-".
+  - For known occupants (3.7% of population): spawn entity with real name, real occupation, at their building's floor tiles.
+  - For generated occupants (96.3%): see C05 for the procedural generation rules.
+  - Single neighborhood first: filter to one QUARTIER (recommend "Arcis" — 825 buildings, dense, central, ~150m×300m).
+
+- **SCALE-B04** — Increase A* node limit to 32K. Stopgap for larger-map pathing. Replaced by SCALE-D03.
+
+## Phase C — Simulation LOD (1M Population)
+
+Goal: Full city population. ~4K active, rest statistical.
+Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
+
+- **SCALE-C01** — District definitions from GIS. Blocks: C02, C04.
+  - 36 quartiers defined by the `QUARTIER` field on every building and block polygon. No separate quartier boundary geometry needed — derive bounds from the bounding box of all buildings with that QUARTIER value.
+  - Quartier sizes range from 265 buildings (Palais de Justice) to 2,391 buildings (Temple).
+  - Sub-district: blocks (`NUM_ILOT` field on buildings, `ID_ILOTS` on plot polygons) group ~30-100 buildings each. Use as LOD sub-units if quartier granularity is too coarse.
+  - Per-district density derivable from: building count, total building area (SUPERFICIE sum), and SoDUCo entry count for the target year.
+
+- **SCALE-C02** — LOD zone framework. Active/Nearby/Statistical derived from camera + district bounds. Blocks: C03, C05.
+
+- **SCALE-C03** — Zone-aware system filtering. Combat: Active only. Hunger: Active+Nearby. Statistical: no entity iteration. Needs: C02.
+
+- **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01.
+  - Seed `population_by_type` from NAICS distribution per quartier per year. The SoDUCo database has 22 industry categories. Query: `SELECT NAICS, COUNT(*) FROM data_extraction_with_population WHERE "source.publication_date" = 1845.0 GROUP BY NAICS`.
+  - City-wide distribution (1845): Manufacturing 18%, Food stores 13.5%, Clothing 11.7%, Furniture 8.2%, Legal 5.9%, Health 5.5%, Rentiers 4.5%, Arts 3.9%, Construction 3.6%. Use these as priors, adjust per quartier from actual data.
+
+- **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02, C04.
+  - Procedural population generation rules (for the 96% not in directories):
+    - **Concierge**: every building with >4 floor tiles gets one. Ground floor.
+    - **Shopkeeper household**: for each directory-listed person, generate spouse + 1-4 children + 0-1 apprentice. Place on ground floor and first upper floor.
+    - **Bourgeois tenants**: buildings >100m² get 1-2 wealthy households on lower floors (rentiers, professionals). 3-5 people each.
+    - **Working tenants**: remaining floor capacity filled with laborer households. Common unlisted occupations: blanchisseuse (laundress), couturière (seamstress), journalier (day laborer), domestique (servant), porteur d'eau (water carrier), chiffonnier (ragpicker), marchand ambulant (street vendor).
+    - **Vertical stratification**: wealthiest on floor 1 (étage noble), progressively poorer upward, servants in garret.
+    - **Floor estimate**: building height not in data. Estimate from SUPERFICIE: <50m² = 2 floors, 50-150m² = 3-4 floors, 150-400m² = 4-5 floors, >400m² = 5-6 floors. Multiply footprint area by floor count for total interior space.
+    - **Density target**: ~116 people per 1,000m² of footprint (from census population / total building area). Adjust per quartier.
+  - 16 available time snapshots from SoDUCo: 1829, 1833, 1839, 1842, 1845, 1850, 1855, 1860, 1864, 1871, 1875, 1880, 1885, 1896, 1901, 1907. Pick one year at init and load that snapshot's directory entries. Note: building geometry is fixed 1810-1836; post-1855 directory data increasingly references demolished buildings.
+
+## Phase D — Seamless Transitions
+
+Goal: Camera movement smoothly activates/deactivates zones.
+
+- **SCALE-D01** — Hydration. Statistical → active: spawn entities from distribution at building positions. Batch ~100/tick. Needs: C05, B03.
+- **SCALE-D02** — Dehydration. Active → statistical: collapse to district averages. Nearby zone buffers for ~200 ticks. Needs: C02.
+- **SCALE-D03** — HPA* pathfinding. Chunk-level nav graph, border nodes, precomputed intra-chunk paths. Replaces B04. Needs: A02.
+- **SCALE-D04** — Profile and tune. Zone radii, hydration batch size, tick budget per zone, entity count limits.
+
+## Simulation Features (parallel or post-Phase B)
+
+Developable on test map or integrated after Phase B.
+
+- **SIM-001** — Plant growth (Phase 1). Food regeneration. Garden tiles only (24 in dataset).
+- **SIM-002** — Thirst (Phase 2). Requires Water tiles (Seine) and fountains (3 named "Fontaine" buildings + "Pompe de la Samaritaine" in data).
+- **SIM-003** — Decay (Phase 1). Corpse decomposition.
+- **SIM-004** — Tiredness/sleep (Phase 2). Rest cycles. Entities return to their home building.
+- **SIM-005** — Injury (Phase 5). Non-binary damage states.
+- **SIM-006** — Weather (Phase 1). Rain/drought/cold.
+- **SIM-007** — Emotions/mood (Phase 2). Aggregate need state.
+- **SIM-008** — Relationships (Phase 5). Bonds from interaction.
+- **SIM-009** — Reputation (Phase 5). Observed behavior.
+- **SIM-010** — Building (Phase 4). Requires inventory.
+- **SIM-011** — Crafting (Phase 4). Requires recipes.
+- **SIM-012** — Fluid flow (Phase 1). Cellular automaton. Seine placement prerequisite.
 
 ## Pending (threshold not yet met)
 
-- **GROW-001** — Sub-struct grouping. Trigger: >25 World fields. Currently 8.
-- **GROW-002** — Phase function grouping. Trigger: >30 system calls. Currently 5.
-- **GROW-003** — System dependency analyzer. Trigger: >15 system files. Currently 5.
-
-## Tier 1 — Ecosystem Sustainability
-
-- **SIM-001** — Plant growth system (Phase 1). Food sources regenerate over time. Without this, world depletes and everything dies.
-- **SIM-002** — Thirst system (Phase 2). Structurally identical to hunger. Requires water tiles on map.
-- **SIM-003** — Decay system (Phase 1). Corpses decompose, tiles recycle. Prevents dead entity clutter.
-
-## Tier 2 — Behavioral Depth
-
-- **SIM-004** — Tiredness/sleep system (Phase 2). Third need axis. Rest creates vulnerability windows and scheduling.
-- **SIM-005** — Injury system (Phase 5). Damage produces injury states instead of binary alive/dead.
-- **SIM-006** — Weather system (Phase 1). Rain/drought/cold affect temperature, plant growth, mood.
-
-## Tier 3 — Social & Emergent Complexity
-
-- **SIM-007** — Emotions/mood system (Phase 2). Aggregates needs, injuries, weather, social inputs. Feeds decisions.
-- **SIM-008** — Relationships system (Phase 5). Repeated interactions build bonds. Cooperation, grudges, groups.
-- **SIM-009** — Reputation system (Phase 5). Observed behavior builds rep. Emergent social structure.
-
-## Tier 4 — World Manipulation
-
-- **SIM-010** — Building system (Phase 4). Requires inventory and decision expansion.
-- **SIM-011** — Crafting system (Phase 4). Requires recipes and inventory.
-- **SIM-012** — Fluid flow system (Phase 1). Cellular automaton for water. Lowest priority.
+- **GROW-001** — Sub-struct grouping. Trigger: >25 World fields.
+- **GROW-002** — Phase function grouping. Trigger: >30 system calls.
+- **GROW-003** — System dependency analyzer. Trigger: >15 system files.

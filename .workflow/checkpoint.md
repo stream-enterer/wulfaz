@@ -1,32 +1,20 @@
 # Checkpoint
 
 ## Active Task
-Replace Stamina system with Fatigue system
+Paris scale-up architecture planned. Ready to begin Phase A.
 
-## Modified Files
-- `src/components.rs` — Stamina→Fatigue struct, removed Charge/Flee from ActionId
-- `src/world.rs` — staminas→fatigues property table (field, despawn, validate, init, tests)
-- `src/systems/fatigue.rs` — new Phase 2 system (recovery + excess HP damage)
-- `src/systems/stamina.rs` — DELETED
-- `src/systems/gait_selection.rs` — DELETED
-- `src/systems/decisions.rs` — StaminaRatio→FatigueRatio, removed select_flee_target, Charge/Flee
-- `src/systems/wander.rs` — removed FLEE_RANGE, Flee arm, Charge from movement
-- `src/systems/combat.rs` — fatigue gain per attack, fatigue stat modifiers, unconscious check
-- `src/systems/mod.rs` — stamina/gait_selection→fatigue module
-- `src/loading.rs` — removed max_stamina, insert Fatigue{current:0}
-- `src/main.rs` — run_stamina/run_gait_selection→run_fatigue
-- `data/creatures.kdl` — removed max_stamina
-- `data/utility.ron` — removed Charge/Flee defs, added FatigueRatio to Attack
-- `tests/invariants.rs` — stamina→fatigue in spawn_creature, run_full_tick
-- `tests/determinism.rs` — stamina→fatigue in spawn_creature, run_full_tick, WorldSnapshot
+## Next Action
+SCALE-A01: Expand Terrain enum for city tiles. Then SCALE-A02: chunked TileMap.
 
-## Decisions
-- Fatigue starts at 0, gains 1.0 per attack
-- Recovery: 0.2/tick normal, 1.0/tick if >= 100 (unconscious fast recovery)
-- Stat degradation: -1 defense per 10 fatigue, -1 attack per 20 fatigue
-- Unconscious at 100: can't attack, 0 effective defense
-- HP damage above 200: 1 per 50 excess, remainder*2% chance of +1
-- FatigueRatio in utility scorer: high fatigue reduces attack desire
+## Key Decisions
+- 17M tiles, ~1M population, 64×64 chunks
+- Three-zone LOD: Active ~4K / Nearby ~50K / Statistical ~950K aggregate
+- Terrain: Road, Building, Courtyard, Garden, Water, Bridge, Wall
+- HPA* for cross-city pathfinding on chunk boundaries
+- District aggregates replace individual entities in statistical zone
+- Keep HashMap<Entity, T> for active zone — profile before optimizing
+- SIM features can develop in parallel on test map after Phase B
 
-## Status
-All 281 tests pass (135×2 unit + 5 determinism + 6 invariants). No warnings. Ready to commit.
+## Reference
+`.workflow/architecture.md` — full technical spec
+`.workflow/backlog.md` — phased task list with dependencies
