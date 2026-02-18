@@ -543,9 +543,6 @@ fn main() {
         loading::load_terrain(&mut world, "data/terrain.kdl");
     }
 
-    // Load data from KDL files
-    loading::load_creatures(&mut world, "data/creatures.kdl");
-    loading::load_items(&mut world, "data/items.kdl");
     loading::load_utility_config(&mut world, "data/utility.ron");
 
     let start_camera = Camera {

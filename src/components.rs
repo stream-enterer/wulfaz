@@ -76,6 +76,7 @@ pub struct GaitProfile {
     pub cooldowns: [u32; 6],
 }
 
+#[allow(dead_code)]
 impl GaitProfile {
     /// Get the ticks-per-tile cooldown for a gait.
     pub fn cooldown(&self, gait: Gait) -> u32 {

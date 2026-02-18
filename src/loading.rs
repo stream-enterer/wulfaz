@@ -27,12 +27,14 @@ fn parse_kdl_file(path: &str) -> Option<kdl::KdlDocument> {
 }
 
 /// Helper to get a string value from a child node's first argument.
+#[allow(dead_code)]
 fn child_str<'a>(children: &'a kdl::KdlDocument, key: &str) -> Option<&'a str> {
     children.get_arg(key)?.as_string()
 }
 
 /// Helper to get an f64 value from a child node's first argument.
 /// Accepts both float and integer values.
+#[allow(dead_code)]
 fn child_f64(children: &kdl::KdlDocument, key: &str) -> Option<f64> {
     let val = children.get_arg(key)?;
     val.as_float()
@@ -56,6 +58,7 @@ pub fn load_utility_config(world: &mut World, path: &str) {
     }
 }
 
+#[allow(dead_code)]
 /// Load creatures from a KDL file and spawn them into the world.
 pub fn load_creatures(world: &mut World, path: &str) {
     let Some(doc) = parse_kdl_file(path) else {
@@ -148,6 +151,7 @@ pub fn load_creatures(world: &mut World, path: &str) {
     }
 }
 
+#[allow(dead_code)]
 /// Load items from a KDL file and spawn them into the world.
 pub fn load_items(world: &mut World, path: &str) {
     let Some(doc) = parse_kdl_file(path) else {

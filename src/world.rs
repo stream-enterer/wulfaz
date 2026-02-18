@@ -13,6 +13,7 @@ pub struct World {
     // Entity tracking
     pub alive: HashSet<Entity>,
     pub pending_deaths: Vec<Entity>,
+    #[allow(dead_code)]
     next_entity_id: u64,
 
     // Property tables (HashMap<Entity, T>)
@@ -83,6 +84,7 @@ impl World {
         }
     }
 
+    #[allow(dead_code)]
     /// Spawn a new entity. Returns the Entity with a unique ID.
     /// The entity is added to the alive set but has no components yet.
     pub fn spawn(&mut self) -> Entity {
@@ -119,6 +121,7 @@ impl World {
 
 /// Validate world invariants. Run every tick in debug builds.
 /// Checks that no entity exists in any property table without being in alive.
+#[cfg(debug_assertions)]
 pub fn validate_world(world: &World) {
     // Check: no entity in any property table is missing from alive
     for entity in world.positions.keys() {
