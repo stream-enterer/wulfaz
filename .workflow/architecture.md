@@ -50,9 +50,13 @@ struct BuildingData {
     identif: u32,            // original Identif from BATI.shp (NOT unique per record)
     quartier: String,        // neighborhood name (36 values)
     superficie: f32,         // footprint area in m²
-    bati: u8,                // 1=main, 2=annex, 3=market stall
+    bati: u8,                // 1=built area, 2=non-built open space, 3=minor feature
     nom_bati: Option<String>,// name if notable (146 buildings)
     num_ilot: String,        // block number
+    perimetre: f32,          // perimeter in meters (PERIMETRE field)
+    geox: f64,               // centroid X, Lambert projection (GEOX field)
+    geoy: f64,               // centroid Y, Lambert projection (GEOY field)
+    date_coyec: Option<String>, // survey date (DATE_COYEC field)
     floor_count: u8,         // estimated: <50m²=2, 50-150=3-4, 150-400=4-5, >400=5-6
     tiles: Vec<(i32, i32)>,  // all tiles belonging to this building
     addresses: Vec<Address>, // joined from address shapefile
@@ -76,7 +80,7 @@ struct BuildingRegistry {
 }
 ```
 
-Note: BATI.shp has 40,350 records but only 17,155 unique Identif values. Multiple records per Identif represent separate structures on the same parcel (main + annex + stall). Vec storage ensures no data loss.
+Note: BATI.shp has 40,350 records but only 17,155 unique Identif values. Multiple BATI.shp records share the same Identif (cadastral parcel ID). BATI=1 records are built structures; BATI=2 are adjacent open spaces (courtyards, gardens). Only BATI=1 entries enter the BuildingRegistry. After filtering, ~21,040 buildings from ~17,155 unique Identif values.
 
 ## Block Registry
 
@@ -87,6 +91,7 @@ struct BlockData {
     id_ilots: String,         // original ID from Vasserot_Ilots.shp, e.g. "860IL74"
     quartier: String,         // neighborhood name
     aire: f32,                // block area in m²
+    ilots_vass: String,       // Vasserot's original block numbering (ILOTS_VASS field)
     buildings: Vec<BuildingId>, // buildings within this block
 }
 

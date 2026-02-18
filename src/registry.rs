@@ -36,10 +36,22 @@ pub struct BuildingData {
     pub quartier: String,
     /// Footprint area in m².
     pub superficie: f32,
-    /// Building type: 1=main, 2=annex, 3=market stall.
+    /// BATI classification: 1=built area, 2=non-built open space, 3=minor feature.
     pub bati: u8,
     pub nom_bati: Option<String>,
     pub num_ilot: String,
+    /// Perimeter in meters (PERIMETRE field).
+    #[serde(default)]
+    pub perimetre: f32,
+    /// Centroid X, Lambert projection (GEOX field).
+    #[serde(default)]
+    pub geox: f64,
+    /// Centroid Y, Lambert projection (GEOY field).
+    #[serde(default)]
+    pub geoy: f64,
+    /// Survey date (DATE_COYEC field).
+    #[serde(default)]
+    pub date_coyec: Option<String>,
     /// Estimated floor count, derived from superficie.
     pub floor_count: u8,
     /// All tile coordinates belonging to this building.
@@ -59,6 +71,9 @@ pub struct BlockData {
     pub quartier: String,
     /// Block area in m².
     pub aire: f32,
+    /// Vasserot's original block numbering (ILOTS_VASS field).
+    #[serde(default)]
+    pub ilots_vass: String,
     pub buildings: Vec<BuildingId>,
 }
 
@@ -180,6 +195,10 @@ mod tests {
             bati: 1,
             nom_bati: None,
             num_ilot: "860IL74".into(),
+            perimetre: 44.0,
+            geox: 601234.5,
+            geoy: 128456.7,
+            date_coyec: None,
             floor_count: 3,
             tiles: vec![(10, 20), (11, 20)],
             addresses: Vec::new(),
@@ -197,16 +216,21 @@ mod tests {
     fn test_building_registry_duplicate_identif() {
         let mut reg = BuildingRegistry::new();
 
-        // Two buildings sharing the same cadastral parcel Identif
+        // Two BATI=1 buildings sharing the same cadastral parcel Identif
+        // (e.g. main building + rear wing on same parcel)
         let id1 = reg.next_id();
         reg.insert(BuildingData {
             id: id1,
             identif: 100,
             quartier: "Arcis".into(),
             superficie: 80.0,
-            bati: 1, // main
+            bati: 1, // main building
             nom_bati: None,
             num_ilot: "T1".into(),
+            perimetre: 36.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
             floor_count: 3,
             tiles: vec![(1, 1), (2, 1)],
             addresses: Vec::new(),
@@ -219,9 +243,13 @@ mod tests {
             identif: 100,
             quartier: "Arcis".into(),
             superficie: 30.0,
-            bati: 2, // annex
+            bati: 1, // rear wing
             nom_bati: None,
             num_ilot: "T1".into(),
+            perimetre: 22.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
             floor_count: 2,
             tiles: vec![(5, 5), (6, 5)],
             addresses: Vec::new(),
@@ -233,7 +261,7 @@ mod tests {
         assert!(reg.get(id1).is_some());
         assert!(reg.get(id2).is_some());
         assert_eq!(reg.get(id1).unwrap().bati, 1);
-        assert_eq!(reg.get(id2).unwrap().bati, 2);
+        assert_eq!(reg.get(id2).unwrap().bati, 1);
 
         // Reverse lookup finds both
         let by_identif = reg.get_by_identif(100);
@@ -250,6 +278,7 @@ mod tests {
             id_ilots: "860IL74".into(),
             quartier: "Arcis".into(),
             aire: 5000.0,
+            ilots_vass: "74".into(),
             buildings: vec![BuildingId(10), BuildingId(20)],
         });
 

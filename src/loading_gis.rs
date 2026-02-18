@@ -21,6 +21,14 @@ pub struct ParisBuildingRon {
     pub bati: u8,
     pub nom_bati: Option<String>,
     pub num_ilot: String,
+    #[serde(default)]
+    pub perimetre: f32,
+    #[serde(default)]
+    pub geox: f64,
+    #[serde(default)]
+    pub geoy: f64,
+    #[serde(default)]
+    pub date_coyec: Option<String>,
     pub polygon: Vec<(f64, f64)>,
 }
 
@@ -29,6 +37,8 @@ pub struct ParisBlockRon {
     pub id_ilots: String,
     pub quartier: String,
     pub aire: f32,
+    #[serde(default)]
+    pub ilots_vass: String,
     pub polygon: Vec<(f64, f64)>,
 }
 
@@ -259,6 +269,7 @@ fn extract_blocks_from_shapefile(blocks_shp: &str) -> (Vec<ParisBlockRon>, Vec<S
         let id_ilots = get_string_field(&record, "ID_ILOTS");
         let quartier = get_string_field(&record, "QUARTIER");
         let aire = get_numeric_field(&record, "AIRE") as f32;
+        let ilots_vass = get_string_field(&record, "ILOTS_VASS");
 
         // Track quartier names.
         if !quartier_set.contains(&quartier) {
@@ -269,6 +280,7 @@ fn extract_blocks_from_shapefile(blocks_shp: &str) -> (Vec<ParisBlockRon>, Vec<S
             id_ilots,
             quartier,
             aire,
+            ilots_vass,
             polygon: ring,
         });
     }
@@ -318,6 +330,15 @@ fn extract_buildings_from_shapefile(buildings_shp: &str) -> Vec<ParisBuildingRon
             Some(nom_bati_raw)
         };
         let num_ilot = get_string_field(&record, "NUM_ILOT");
+        let perimetre = get_numeric_field(&record, "PERIMETRE") as f32;
+        let geox = get_numeric_field(&record, "GEOX");
+        let geoy = get_numeric_field(&record, "GEOY");
+        let date_raw = get_string_field(&record, "DATE_COYEC");
+        let date_coyec = if date_raw.is_empty() {
+            None
+        } else {
+            Some(date_raw)
+        };
 
         buildings.push(ParisBuildingRon {
             identif,
@@ -326,6 +347,10 @@ fn extract_buildings_from_shapefile(buildings_shp: &str) -> Vec<ParisBuildingRon
             bati,
             nom_bati,
             num_ilot,
+            perimetre,
+            geox,
+            geoy,
+            date_coyec,
             polygon: ring,
         });
     }
@@ -429,6 +454,7 @@ pub fn rasterize_paris(
             id_ilots: block_ron.id_ilots.clone(),
             quartier: block_ron.quartier.clone(),
             aire: block_ron.aire,
+            ilots_vass: block_ron.ilots_vass.clone(),
             buildings: Vec::new(),
         });
     }
@@ -439,11 +465,59 @@ pub fn rasterize_paris(
         block_start.elapsed().as_secs_f64(),
     );
 
-    // --- Buildings ---
+    // --- Pass 1: BATI=2 named gardens → Garden terrain ---
+    // Only polygons with "jardin" or "parc" in nom_bati need rasterization.
+    // Non-garden BATI=2 and all BATI=3: tiles already Courtyard from block pass.
+    let garden_start = Instant::now();
+    let mut garden_tile_count = 0usize;
+    let mut garden_polygon_count = 0usize;
+    let mut skipped_bati2 = 0usize;
+    let mut skipped_bati3 = 0usize;
+
+    for bldg_ron in &data.buildings {
+        match bldg_ron.bati {
+            2 => {
+                let is_garden = bldg_ron.nom_bati.as_ref().is_some_and(|name| {
+                    let lower = name.to_lowercase();
+                    lower.contains("jardin") || lower.contains("parc")
+                });
+                if !is_garden {
+                    skipped_bati2 += 1;
+                    continue;
+                }
+                let cells = scanline_fill(&bldg_ron.polygon, grid_w, grid_h);
+                for &(cx, cy) in &cells {
+                    tiles.set_terrain(cx as usize, cy as usize, Terrain::Garden);
+                }
+                garden_tile_count += cells.len();
+                garden_polygon_count += 1;
+            }
+            3 => {
+                skipped_bati3 += 1;
+            }
+            _ => {} // BATI=1 handled in pass 2
+        }
+    }
+    log::info!(
+        "  {} garden polygons ({} tiles), {} BATI=2 courtyards skipped, \
+         {} BATI=3 features skipped in {:.1}s",
+        garden_polygon_count,
+        garden_tile_count,
+        skipped_bati2,
+        skipped_bati3,
+        garden_start.elapsed().as_secs_f64(),
+    );
+
+    // --- Pass 2: BATI=1 buildings → Wall + building_id + registry ---
+    // Overwrites Garden if a building polygon overlaps (building wins).
     let bldg_start = Instant::now();
     let mut total_building_tiles = 0usize;
 
     for bldg_ron in &data.buildings {
+        if bldg_ron.bati != 1 {
+            continue;
+        }
+
         let cells = scanline_fill(&bldg_ron.polygon, grid_w, grid_h);
         if cells.is_empty() {
             continue;
@@ -485,6 +559,10 @@ pub fn rasterize_paris(
             bati: bldg_ron.bati,
             nom_bati: bldg_ron.nom_bati.clone(),
             num_ilot: bldg_ron.num_ilot.clone(),
+            perimetre: bldg_ron.perimetre,
+            geox: bldg_ron.geox,
+            geoy: bldg_ron.geoy,
+            date_coyec: bldg_ron.date_coyec.clone(),
             floor_count,
             tiles: tile_list,
             addresses: Vec::new(),
@@ -846,6 +924,10 @@ mod tests {
             bati: 1,
             nom_bati: None,
             num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
             floor_count: 3,
             tiles: tile_list,
             addresses: Vec::new(),
@@ -926,12 +1008,17 @@ mod tests {
                 bati: 1,
                 nom_bati: Some("Mairie".into()),
                 num_ilot: "860IL74".into(),
+                perimetre: 44.0,
+                geox: 601234.5,
+                geoy: 128456.7,
+                date_coyec: Some("1830".into()),
                 polygon: vec![(10.0, 10.0), (20.0, 10.0), (20.0, 20.0), (10.0, 20.0)],
             }],
             blocks: vec![ParisBlockRon {
                 id_ilots: "860IL74".into(),
                 quartier: "Arcis".into(),
                 aire: 5000.0,
+                ilots_vass: "74".into(),
                 polygon: vec![(5.0, 5.0), (25.0, 5.0), (25.0, 25.0), (5.0, 25.0)],
             }],
             quartier_names: vec!["Arcis".into(), "Marais".into()],
@@ -947,7 +1034,254 @@ mod tests {
         assert_eq!(back.buildings[0].identif, 42);
         assert_eq!(back.buildings[0].nom_bati, Some("Mairie".into()));
         assert_eq!(back.blocks.len(), 1);
+        assert_eq!(back.buildings[0].perimetre, 44.0);
+        assert_eq!(back.buildings[0].geox, 601234.5);
+        assert_eq!(back.buildings[0].geoy, 128456.7);
+        assert_eq!(back.buildings[0].date_coyec, Some("1830".into()));
         assert_eq!(back.blocks[0].id_ilots, "860IL74");
+        assert_eq!(back.blocks[0].ilots_vass, "74");
         assert_eq!(back.quartier_names, vec!["Arcis", "Marais"]);
+    }
+
+    /// Helper: build a minimal ParisMapRon for rasterization tests.
+    /// Block covers 5..25 x 5..25, building/garden polygons placed inside.
+    fn make_test_map(bldg_entries: Vec<ParisBuildingRon>) -> ParisMapRon {
+        ParisMapRon {
+            grid_width: 30,
+            grid_height: 30,
+            buildings: bldg_entries,
+            blocks: vec![ParisBlockRon {
+                id_ilots: "BLK1".into(),
+                quartier: "TestQ".into(),
+                aire: 400.0,
+                ilots_vass: "1".into(),
+                polygon: vec![
+                    (5.0, 5.0),
+                    (25.0, 5.0),
+                    (25.0, 25.0),
+                    (5.0, 25.0),
+                    (5.0, 5.0),
+                ],
+            }],
+            quartier_names: vec!["TestQ".into()],
+        }
+    }
+
+    fn make_bldg(bati: u8, nom_bati: Option<&str>, poly: Vec<(f64, f64)>) -> ParisBuildingRon {
+        ParisBuildingRon {
+            identif: 1,
+            quartier: "TestQ".into(),
+            superficie: 100.0,
+            bati,
+            nom_bati: nom_bati.map(|s| s.to_string()),
+            num_ilot: "BLK1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            polygon: poly,
+        }
+    }
+
+    #[test]
+    fn test_bati1_rasterized_as_building() {
+        let bldg = make_bldg(
+            1,
+            None,
+            vec![
+                (10.0, 10.0),
+                (16.0, 10.0),
+                (16.0, 16.0),
+                (10.0, 16.0),
+                (10.0, 10.0),
+            ],
+        );
+        let data = make_test_map(vec![bldg]);
+        let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
+
+        // Building tiles should be Wall or Floor, with building_id != 0
+        assert!(!buildings.is_empty(), "registry should have 1 building");
+        assert_eq!(buildings.len(), 1);
+        let bd = &buildings.buildings[0];
+        assert!(!bd.tiles.is_empty());
+        for &(x, y) in &bd.tiles {
+            let t = tiles.get_terrain(x as usize, y as usize).unwrap();
+            assert!(
+                t == Terrain::Wall || t == Terrain::Floor,
+                "expected Wall/Floor at ({x},{y}), got {t:?}"
+            );
+            assert!(tiles.get_building_id(x as usize, y as usize).is_some());
+        }
+    }
+
+    #[test]
+    fn test_bati2_courtyard_not_rasterized() {
+        let bldg = make_bldg(
+            2,
+            None,
+            vec![
+                (10.0, 10.0),
+                (16.0, 10.0),
+                (16.0, 16.0),
+                (10.0, 16.0),
+                (10.0, 10.0),
+            ],
+        );
+        let data = make_test_map(vec![bldg]);
+        let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
+
+        // BATI=2 with no garden name: tiles stay Courtyard, no building_id
+        assert!(buildings.is_empty(), "registry should be empty");
+        let t = tiles.get_terrain(13, 13).unwrap();
+        assert_eq!(t, Terrain::Courtyard);
+        assert!(tiles.get_building_id(13, 13).is_none());
+    }
+
+    #[test]
+    fn test_bati2_garden_detected() {
+        let bldg = make_bldg(
+            2,
+            Some("Parc ou jardin"),
+            vec![
+                (10.0, 10.0),
+                (16.0, 10.0),
+                (16.0, 16.0),
+                (10.0, 16.0),
+                (10.0, 10.0),
+            ],
+        );
+        let data = make_test_map(vec![bldg]);
+        let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
+
+        // BATI=2 with garden name: tiles become Garden, no building_id
+        assert!(buildings.is_empty(), "registry should be empty");
+        let t = tiles.get_terrain(13, 13).unwrap();
+        assert_eq!(t, Terrain::Garden);
+        assert!(tiles.get_building_id(13, 13).is_none());
+    }
+
+    #[test]
+    fn test_bati3_not_rasterized() {
+        let bldg = make_bldg(
+            3,
+            Some("Fontaine"),
+            vec![
+                (10.0, 10.0),
+                (16.0, 10.0),
+                (16.0, 16.0),
+                (10.0, 16.0),
+                (10.0, 10.0),
+            ],
+        );
+        let data = make_test_map(vec![bldg]);
+        let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
+
+        // BATI=3: tiles stay Courtyard, no building_id
+        assert!(buildings.is_empty(), "registry should be empty");
+        let t = tiles.get_terrain(13, 13).unwrap();
+        assert_eq!(t, Terrain::Courtyard);
+        assert!(tiles.get_building_id(13, 13).is_none());
+    }
+
+    #[test]
+    fn test_bati1_overwrites_garden() {
+        // Garden covers 10..20 x 10..20, building covers 12..18 x 12..18
+        let garden = make_bldg(
+            2,
+            Some("Jardin public"),
+            vec![
+                (10.0, 10.0),
+                (20.0, 10.0),
+                (20.0, 20.0),
+                (10.0, 20.0),
+                (10.0, 10.0),
+            ],
+        );
+        let building = make_bldg(
+            1,
+            None,
+            vec![
+                (12.0, 12.0),
+                (18.0, 12.0),
+                (18.0, 18.0),
+                (12.0, 18.0),
+                (12.0, 12.0),
+            ],
+        );
+        let data = make_test_map(vec![garden, building]);
+        let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
+
+        // Building wins in overlap area
+        assert_eq!(buildings.len(), 1);
+        let bd = &buildings.buildings[0];
+        for &(x, y) in &bd.tiles {
+            let t = tiles.get_terrain(x as usize, y as usize).unwrap();
+            assert!(
+                t == Terrain::Wall || t == Terrain::Floor,
+                "building tile ({x},{y}) should be Wall/Floor, got {t:?}"
+            );
+        }
+
+        // Non-overlapping garden tiles stay Garden
+        let t_corner = tiles.get_terrain(10, 10).unwrap();
+        assert_eq!(
+            t_corner,
+            Terrain::Garden,
+            "non-overlapping garden tile should stay Garden"
+        );
+    }
+
+    #[test]
+    fn test_only_bati1_in_registry() {
+        let b1 = make_bldg(
+            1,
+            None,
+            vec![
+                (7.0, 7.0),
+                (12.0, 7.0),
+                (12.0, 12.0),
+                (7.0, 12.0),
+                (7.0, 7.0),
+            ],
+        );
+        let b2_court = make_bldg(
+            2,
+            None,
+            vec![
+                (13.0, 7.0),
+                (18.0, 7.0),
+                (18.0, 12.0),
+                (13.0, 12.0),
+                (13.0, 7.0),
+            ],
+        );
+        let b2_garden = make_bldg(
+            2,
+            Some("Jardin"),
+            vec![
+                (7.0, 13.0),
+                (12.0, 13.0),
+                (12.0, 18.0),
+                (7.0, 18.0),
+                (7.0, 13.0),
+            ],
+        );
+        let b3 = make_bldg(
+            3,
+            Some("Fontaine"),
+            vec![
+                (13.0, 13.0),
+                (18.0, 13.0),
+                (18.0, 18.0),
+                (13.0, 18.0),
+                (13.0, 13.0),
+            ],
+        );
+        let data = make_test_map(vec![b1, b2_court, b2_garden, b3]);
+        let (_tiles, buildings, _blocks, _) = rasterize_paris(&data);
+
+        // Only BATI=1 entries in registry
+        assert_eq!(buildings.len(), 1, "only BATI=1 should be in registry");
+        assert_eq!(buildings.buildings[0].bati, 1);
     }
 }
