@@ -1,22 +1,14 @@
 # Checkpoint
 
 ## Active Task
-All 12 rasterization pipeline simplifications (S01–S12) are fixed.
+Backlog planning updates (no code changes).
 
 ## Completed
-- **S01** (90dc3e9): Inner ring support via extract_rings + scanline_fill_multi
-- **S02+S03+S04** (583c8ff): Extraction diagnostics + pre-filter at actual grid resolution
-- **S05+S06+S07+S12** (f4df6de): Three-pass rasterization, BATI=2 carving, expanded garden terms, tile list rebuild
-- **S09+S10+S11** (0f52fcd): Majority-vote block assignment, overlap logging
-
-## Pipeline (final)
-```
-1. Blocks         → Courtyard + block_id + quartier_id
-2. BATI=1         → Wall + building_id  (majority-vote block assignment)
-3. ALL BATI=2     → Courtyard/Garden, clear building_id, update tile lists
-4. classify_walls_floors  (on surviving BATI=1 tiles only)
-5. fill_quartier_roads    (BFS quartier_id to Road tiles)
-```
+- S01–S12 rasterization simplifications all fixed (commits 90dc3e9–24f4099)
+- Updated A07 spec: extract all 16 SoDUCo years, `occupants_by_year: HashMap<u16, Vec<Occupant>>`, runtime year selection via `world.active_year`
+- Added match logging to A07 (per-year summary with top-10 unmatched street names)
+- Added design review blockers to B05, B06, B03, C04, C05 (all procedural generation items)
+- Updated architecture.md structs to match new A07 multi-year design
 
 ## Next Action
-Run preprocessor to regenerate binary data, visually verify Halle au Ble courtyard.
+Regenerate binary data from preprocessor, visually verify Halle au Ble courtyard. Then begin A07 implementation.

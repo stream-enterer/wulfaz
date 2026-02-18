@@ -153,16 +153,14 @@ Old events are overwritten, not accumulated unboundedly. Do not use
 
 ## TileMap
 
-Grid data lives in `TileMap` using flat `Vec<T>` arrays. Never HashMap.
+Grid data lives in `TileMap`. Use accessor methods only:
 
 ```rust
 world.tiles.get_terrain(x, y)
 world.tiles.set_temperature(x, y, temp)
-// Internally indexed by y * width + x
 ```
 
-Systems that read/write tile data use these methods. Do not index the
-Vec arrays directly.
+Do not index internal arrays directly. See `architecture.md` for storage layout.
 
 ## Spatial Scale
 
@@ -276,36 +274,11 @@ dependencies from source code.
 
 ## Project Structure
 
-```
-CLAUDE.md
-Cargo.toml
-.workflow/
-  backlog.md             # incomplete tasks only — delete when done
-  checkpoint.md          # rolling state snapshot — overwritten, never appended
-data/
-  creatures.kdl          # creature definitions
-  items.kdl              # item definitions
-  terrain.kdl            # terrain definitions
-src/
-  main.rs                # phased main loop
-  world.rs               # World struct, spawn, despawn, validate
-  events.rs              # Event enum + EventLog ring buffer
-  components.rs          # property structs (Position, Hunger, etc.)
-  tile_map.rs            # TileMap with flat Vec arrays
-  loading.rs             # KDL parsing, entity spawning
-  render.rs              # display output
-  rng.rs                 # deterministic seeded RNG wrapper
-  systems/
-    mod.rs
-    hunger.rs
-    wander.rs
-    eating.rs
-    combat.rs
-    death.rs             # ALWAYS last in Phase 5
-tests/
-  invariants.rs          # property-based cross-system tests
-  determinism.rs         # replay/seed tests
-```
+See `architecture.md` for the current file listing. Key conventions:
+- `.workflow/backlog.md` — incomplete tasks only, delete when done
+- `.workflow/checkpoint.md` — rolling state snapshot, overwritten not appended
+- `src/systems/` — one system per file
+- `systems/death.rs` — ALWAYS last in Phase 5
 
 ## Checkpoint Protocol
 

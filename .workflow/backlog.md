@@ -11,17 +11,19 @@ Goal: See Paris on screen. No entities.
 Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 30m padding).
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
-- **SCALE-A07** — Address + occupant loading. Needs: A03. Blocks: B06, B03, C04, C05.
-  - Joins address and occupant data to buildings. Two-stage preprocessor pipeline, same pattern as A03.
+- **SCALE-A07** — Address + occupant loading (all years). Needs: A03. Blocks: B06, B03, C04, C05.
+  - Joins address and occupant data to buildings for all 16 SoDUCo snapshots. Two-stage preprocessor pipeline, same pattern as A03.
   - **Preprocessor** (extend `preprocess.rs`):
-    - Step 1: Read `addresses/Num_Voies_Vasserot.shp` (29,164 points, encoding `latin-1`). **WARNING: Lambert projection, NOT WGS84.** Use `ID_PARC` field only (ignore point geometry). Strip "PA" prefix → match to `Identif` via `identif_index`. Attach street name (`NOM_ENTIER`) and house number (`NUM_VOIES`).
-    - Step 2: Open `soduco/data/data_extraction_with_population.gpkg` (SQLite). For the chosen year, query all entries. Fuzzy-match street names to addresses from Step 1. Attach occupants (name, activity, NAICS) to buildings.
+    - Step 1: Read `addresses/Num_Voies_Vasserot.shp` (29,164 points, encoding `latin-1`). **WARNING: Lambert projection, NOT WGS84.** Use `ID_PARC` field only (ignore point geometry). Strip "PA" prefix → match to `Identif` via `identif_index`. Attach street name (`NOM_ENTIER`) and house number (`NUM_VOIES`). Addresses are time-invariant — processed once.
+    - Step 2: Open `soduco/data/data_extraction_with_population.gpkg` (SQLite). Query **all 16 years** (1829, 1833, 1839, 1842, 1845, 1850, 1855, 1860, 1864, 1871, 1875, 1880, 1885, 1896, 1901, 1907). For each year, fuzzy-match street names to addresses from Step 1. Attach occupants (name, activity, NAICS) to buildings, keyed by year.
     - Street name normalization: strip "Rue de la/du/des/", expand "Fg-" → "Faubourg", "St-" → "Saint-", case-insensitive compare.
+    - **Match logging**: after Step 2, log per-year summary: total GeoPackage entries, matched to building, unmatched (with top-10 unmatched street names and their counts). Helps tune normalization rules iteratively.
     - Build `StreetRegistry` (see architecture.md) — each unique street name gets a `StreetId`, maps street name → list of buildings.
-    - Write results into `paris.meta.ron`: populate `addresses` and `occupants` fields on `BuildingData`, add `StreetRegistry` section.
-  - **Game load** (no new file reads): `load_paris_binary` already deserializes `BuildingData` including addresses/occupants. Reconstruct `StreetRegistry` from loaded address data on `world.buildings`.
+    - Write results into `paris.meta.ron`: populate `addresses` and `occupants_by_year` fields on `BuildingData`, add `StreetRegistry` section.
+  - **Data structure**: `BuildingData.occupants_by_year: HashMap<u16, Vec<Occupant>>` — keyed by snapshot year. Each year's occupant list is independent. Buildings absent from a year's directory have no entry for that key.
+  - **Game load** (no new file reads): `load_paris_binary` deserializes `BuildingData` including addresses and all-year occupants. Active year selected at runtime via `world.active_year` (default 1845). Reconstruct `StreetRegistry` from loaded address data on `world.buildings`.
   - The game never touches shapefiles or GeoPackage. All joins and fuzzy matching happen offline in the preprocessor.
-  - After this step: building registry knows occupants and NAICS categories, street registry knows all street names and their buildings. Feeds B06 (furniture by NAICS), B03 (entity spawning), C04 (district aggregates), C05 (population seeding).
+  - After this step: building registry knows occupants and NAICS categories for all 16 snapshots, street registry knows all street names and their buildings. Feeds B06 (furniture by NAICS at active year), B03 (entity spawning from active year), C04 (district aggregates), C05 (population seeding). Downstream consumers index into `occupants_by_year[world.active_year]`.
 
 - **SCALE-A08** — Seine + bridge placement. Needs: A03.
   - **Preprocessor** (extend `preprocess.rs`): runs after block/building rasterization, before writing binary tiles.
@@ -37,14 +39,14 @@ That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
 Goal: ~200 entities with full AI on the real map.
 
-- **SCALE-B05** — Door placement + passage carving. Needs: A03. Blocks: B06, B03.
+- **SCALE-B05** — Door placement + passage carving. Needs: A03. Blocks: B06, B03. **BLOCKED: design review required.**
   - **Preprocessor** (extend `preprocess.rs`): runs after wall/floor classification, same pattern as classify_walls_floors. Static tile modification baked into `paris.tiles`.
   - Place Door tiles: for each building, find a wall tile adjacent to both a floor tile and a Road or Courtyard tile. That tile becomes a Door.
   - Landlocked buildings (no wall tile adjacent to Road or Courtyard): carve a 1-tile passage through intervening buildings to the nearest Road or Courtyard. This models the narrow covered passages (allées) that provided access to interior buildings in dense Parisian blocks.
   - Garden buildings (24 "parc ou jardin"): convert their interior Floor tiles to Garden instead of Floor.
   - Game loads Door/Garden terrain from binary, no runtime classification needed.
 
-- **SCALE-B06** — Building interior generation. Needs: B05, A07.
+- **SCALE-B06** — Building interior generation. Needs: B05, A07. **BLOCKED: design review required.**
   - **Preprocessor** (extend `preprocess.rs`): runs after door placement + address loading. Static tile modifications baked into `paris.tiles`.
   - Furnish building interiors based on occupant type. NAICS category from building registry (populated by A07 in preprocessor). Place furniture tiles:
     - Food stores → counters, barrels, shelves
@@ -60,7 +62,7 @@ Goal: ~200 entities with full AI on the real map.
 
 - **SCALE-B02** — Convert spatial queries. `run_combat`, `run_eating`, `run_decisions` target selection use spatial index, not full position scan. Needs: B01.
 
-- **SCALE-B03** — GIS-aware entity spawning. Needs: A07, B05.
+- **SCALE-B03** — GIS-aware entity spawning. Needs: A07, B05. **BLOCKED: design review required.**
   - The building registry (populated by A03 + A07) already knows each building's occupants, addresses, and NAICS categories. This task spawns actual entities from that data.
   - For known occupants (3.7% of population): spawn entity with real name, real occupation, at their building's floor tiles. Position from building's tile list in the registry.
   - For generated occupants (96.3%): see C05 for the procedural generation rules.
@@ -84,11 +86,11 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
 
 - **SCALE-C03** — Zone-aware system filtering. Combat: Active only. Hunger: Active+Nearby. Statistical: no entity iteration. Needs: C02.
 
-- **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01, A07.
+- **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01, A07. **BLOCKED: design review required.**
   - Seed `population_by_type` from NAICS distribution per quartier. 22 industry categories. Aggregate from building registry occupant data (baked in by A07 preprocessor), not from raw GeoPackage.
   - City-wide distribution (1845): Manufacturing 18%, Food stores 13.5%, Clothing 11.7%, Furniture 8.2%, Legal 5.9%, Health 5.5%, Rentiers 4.5%, Arts 3.9%, Construction 3.6%. Use these as priors, adjust per quartier from actual registry data.
 
-- **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02, C04, A07.
+- **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02, C04, A07. **BLOCKED: design review required.**
   - Procedural population generation rules (for the 96% not in directories):
     - **Concierge**: every building with >4 floor tiles gets one. Ground floor.
     - **Shopkeeper household**: for each directory-listed person, generate spouse + 1-4 children + 0-1 apprentice. Place on ground floor and first upper floor.
@@ -97,7 +99,7 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
     - **Vertical stratification**: wealthiest on floor 1 (étage noble), progressively poorer upward, servants in garret.
     - **Floor estimate**: building height not in data. Estimate from SUPERFICIE: <50m² = 2 floors, 50-150m² = 3-4 floors, 150-400m² = 4-5 floors, >400m² = 5-6 floors. Multiply footprint area by floor count for total interior space.
     - **Density target**: ~116 people per 1,000m² of footprint (from census population / total building area). Adjust per quartier.
-  - 16 available time snapshots from SoDUCo: 1829, 1833, 1839, 1842, 1845, 1850, 1855, 1860, 1864, 1871, 1875, 1880, 1885, 1896, 1901, 1907. Year is chosen at preprocess time (A07 bakes that year's directory entries into the metadata). Note: building geometry is fixed 1810-1836; post-1855 directory data increasingly references demolished buildings.
+  - 16 available time snapshots from SoDUCo: 1829, 1833, 1839, 1842, 1845, 1850, 1855, 1860, 1864, 1871, 1875, 1880, 1885, 1896, 1901, 1907. A07 bakes all years into the metadata; active year selected at runtime via `world.active_year` (default 1845). Note: building geometry is fixed 1810-1836; post-1855 directory data increasingly references demolished buildings.
 
 ## Phase D — Seamless Transitions
 

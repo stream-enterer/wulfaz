@@ -59,13 +59,13 @@ struct BuildingData {
     date_coyec: Option<String>, // survey date (DATE_COYEC field)
     floor_count: u8,         // estimated: <50m²=2, 50-150=3-4, 150-400=4-5, >400=5-6
     tiles: Vec<(i32, i32)>,  // all tiles belonging to this building
-    addresses: Vec<Address>, // joined from address shapefile
+    addresses: Vec<Address>, // joined from address shapefile (time-invariant)
+    occupants_by_year: HashMap<u16, Vec<Occupant>>, // keyed by SoDUCo snapshot year
 }
 
 struct Address {
     street: String,       // NOM_ENTIER from address shapefile
     number: String,       // NUM_VOIES
-    occupants: Vec<Occupant>, // joined from SoDUCo for chosen year
 }
 
 struct Occupant {
@@ -117,7 +117,7 @@ struct Chunk {
 ```
 
 All per-tile ID layers populated during GIS loading (SCALE-A03) and are write-once (static city). Lookup chains:
-- Tile → `BuildingId` → `buildings[id-1]` → quartier, occupants, NAICS, floor count, addresses. O(1) Vec index.
+- Tile → `BuildingId` → `buildings[id-1]` → quartier, floor count, addresses, `occupants_by_year[active_year]` → NAICS. O(1) Vec index.
 - Tile → `BlockId` → `BlockData` → block ID string, area, member buildings.
 - Tile → `quartier_id` → district name. Covers all tiles, not just buildings (road tiles get quartier from nearest block polygon or Voronoi fill).
 
@@ -173,9 +173,10 @@ Chunk borders → entry/exit nodes. Precompute intra-chunk shortest paths betwee
 ## Registry Ownership
 
 All registries live on `World` alongside `tiles`:
-- `world.buildings: BuildingRegistry` — populated by A03
+- `world.buildings: BuildingRegistry` — populated by A03, occupants added by A07
 - `world.blocks: BlockRegistry` — populated by A03
 - `world.streets: StreetRegistry` — populated by A07
+- `world.active_year: u16` — selects which SoDUCo snapshot to use (default 1845). Indexes into `occupants_by_year` on BuildingData. 16 available years: 1829, 1833, 1839, 1842, 1845, 1850, 1855, 1860, 1864, 1871, 1875, 1880, 1885, 1896, 1901, 1907.
 
 ## District Aggregates
 
@@ -200,6 +201,53 @@ struct District {
 **Hydrate** (statistical → active): Spawn entities from district distribution. Position from building footprints. Stats sampled from district averages ± noise. Batch ~100/tick to avoid pop-in.
 
 **Dehydrate** (active → statistical): Collapse entity stats back into district averages. Remove from property tables. Nearby zone buffers the transition — entities simplify for ~200 ticks before collapsing.
+
+## Project Structure
+
+```
+CLAUDE.md
+Cargo.toml
+.workflow/
+  backlog.md             # incomplete tasks only — delete when done
+  checkpoint.md          # rolling state snapshot — overwritten, never appended
+  architecture.md        # this file — rottable specs, data structures, file listing
+data/
+  creatures.kdl          # creature definitions (KDL)
+  items.kdl              # item definitions (KDL)
+  terrain.kdl            # terrain definitions (KDL)
+  paris.ron              # intermediate GIS data (shapefile → RON)
+  paris.meta.ron         # building/block registries, serialized
+  paris.tiles            # binary tile data (WULF format, chunked)
+  utility.ron            # preprocessor utility data
+src/
+  main.rs                # phased main loop + wgpu renderer
+  lib.rs                 # crate root
+  world.rs               # World struct, spawn, despawn, validate
+  events.rs              # Event enum + EventLog ring buffer
+  components.rs          # property structs (Position, Hunger, etc.)
+  tile_map.rs            # TileMap — chunked storage, accessors, binary ser/de
+  registry.rs            # BuildingRegistry, BlockRegistry, BuildingData, Address, Occupant
+  loading.rs             # KDL parsing, entity spawning (small test map)
+  loading_gis.rs         # GIS shapefile parsing, rasterization, binary load
+  render.rs              # terminal/debug display output
+  font.rs                # FreeType glyph rasterization + atlas
+  rng.rs                 # deterministic seeded RNG wrapper
+  bin/
+    preprocess.rs        # offline GIS → binary pipeline
+  systems/
+    mod.rs
+    hunger.rs            # Phase 2: hunger increase
+    fatigue.rs           # Phase 2: fatigue/tiredness
+    temperature.rs       # Phase 1: tile heat diffusion
+    decisions.rs         # Phase 3: AI target selection
+    wander.rs            # Phase 4: movement
+    eating.rs            # Phase 4: food consumption
+    combat.rs            # Phase 4: fighting
+    death.rs             # Phase 5: ALWAYS last
+tests/
+  invariants.rs          # property-based cross-system tests
+  determinism.rs         # replay/seed tests
+```
 
 ## What Does NOT Change
 
