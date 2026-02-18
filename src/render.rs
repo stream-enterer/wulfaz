@@ -65,19 +65,27 @@ pub fn render_world_to_string(
         grid.push(row);
     }
 
-    // Overlay alive entity icons that fall within the viewport.
-    for (&entity, pos) in &world.positions {
-        if !world.alive.contains(&entity) {
-            continue;
-        }
-        if let Some(icon) = world.icons.get(&entity) {
-            let vx = pos.x - cam_x;
-            let vy = pos.y - cam_y;
-            if vx >= 0 && vy >= 0 {
-                let vxu = vx as usize;
-                let vyu = vy as usize;
-                if vxu < viewport_cols && vyu < viewport_rows {
-                    grid[vyu][vxu] = icon.ch;
+    // Overlay alive entity icons in two passes: items first, creatures on top.
+    // An entity is a "creature" if it has combat_stats; otherwise it's an item.
+    // This ensures creatures are always visible when sharing a tile with items.
+    for pass in 0..2 {
+        for (&entity, pos) in &world.positions {
+            if !world.alive.contains(&entity) {
+                continue;
+            }
+            let is_creature = world.combat_stats.contains_key(&entity);
+            if (pass == 0) == is_creature {
+                continue; // pass 0: items only; pass 1: creatures only
+            }
+            if let Some(icon) = world.icons.get(&entity) {
+                let vx = pos.x - cam_x;
+                let vy = pos.y - cam_y;
+                if vx >= 0 && vy >= 0 {
+                    let vxu = vx as usize;
+                    let vyu = vy as usize;
+                    if vxu < viewport_cols && vyu < viewport_rows {
+                        grid[vyu][vxu] = icon.ch;
+                    }
                 }
             }
         }
@@ -308,23 +316,46 @@ mod tests {
     }
 
     #[test]
-    fn multiple_entities_on_same_tile() {
+    fn creature_renders_on_top_of_item() {
         let mut world = World::new_with_seed(42);
         world.tiles = crate::tile_map::TileMap::new(5, 5);
 
-        let e1 = world.spawn();
-        world.positions.insert(e1, Position { x: 2, y: 2 });
-        world.icons.insert(e1, Icon { ch: 'a' });
+        // Item (no combat_stats) — drawn first
+        let item = world.spawn();
+        world.positions.insert(item, Position { x: 2, y: 2 });
+        world.icons.insert(item, Icon { ch: '/' });
 
-        let e2 = world.spawn();
-        world.positions.insert(e2, Position { x: 2, y: 2 });
-        world.icons.insert(e2, Icon { ch: 'b' });
+        // Creature (has combat_stats) — drawn on top
+        let creature = world.spawn();
+        world.positions.insert(creature, Position { x: 2, y: 2 });
+        world.icons.insert(creature, Icon { ch: 'g' });
+        world.combat_stats.insert(
+            creature,
+            CombatStats {
+                attack: 10.0,
+                defense: 5.0,
+                aggression: 0.8,
+            },
+        );
 
         let output = render_full(&world);
         let lines: Vec<&str> = output.lines().collect();
-        let ch = lines[2].chars().nth(2).unwrap();
-        // One of the two entities will be displayed (HashMap iteration order).
-        assert!(ch == 'a' || ch == 'b');
+        // Creature always wins
+        assert_eq!(lines[2].chars().nth(2), Some('g'));
+    }
+
+    #[test]
+    fn item_visible_when_no_creature() {
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(5, 5);
+
+        let item = world.spawn();
+        world.positions.insert(item, Position { x: 2, y: 2 });
+        world.icons.insert(item, Icon { ch: '/' });
+
+        let output = render_full(&world);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines[2].chars().nth(2), Some('/'));
     }
 
     #[test]
