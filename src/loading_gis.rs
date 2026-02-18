@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::time::Instant;
 
@@ -669,45 +669,35 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
 }
 
 /// Classify building tiles into Wall vs Floor.
-/// A tile is Wall if any cardinal neighbor is not in the same building.
-/// Otherwise it's Floor.
+/// A tile is Wall if any cardinal neighbor is not in the same building's
+/// original polygon. Uses each building's own tile set (not the global tile
+/// map's building_id) so overlapping polygons at party walls don't create
+/// false thick walls.
 fn classify_walls_floors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     let mut wall_count = 0usize;
     let mut floor_count = 0usize;
-    let grid_w = tiles.width() as i32;
-    let grid_h = tiles.height() as i32;
 
-    // Collect all (tile, building_id) pairs, then classify.
-    let all_tiles: Vec<(i32, i32, BuildingId)> = buildings
-        .buildings
-        .values()
-        .flat_map(|b| b.tiles.iter().map(move |&(x, y)| (x, y, b.id)))
-        .collect();
+    for bdata in buildings.buildings.values() {
+        let tile_set: HashSet<(i32, i32)> = bdata.tiles.iter().copied().collect();
 
-    for (cx, cy, bid) in all_tiles {
-        let mut is_edge = false;
-        for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-            let nx = cx + dx;
-            let ny = cy + dy;
-            if nx < 0 || ny < 0 || nx >= grid_w || ny >= grid_h {
-                is_edge = true;
-                break;
+        for &(cx, cy) in &bdata.tiles {
+            let mut is_edge = false;
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                if !tile_set.contains(&(cx + dx, cy + dy)) {
+                    is_edge = true;
+                    break;
+                }
             }
-            let neighbor_bid = tiles.get_building_id(nx as usize, ny as usize);
-            if neighbor_bid != Some(bid) {
-                is_edge = true;
-                break;
-            }
+
+            let terrain = if is_edge {
+                wall_count += 1;
+                Terrain::Wall
+            } else {
+                floor_count += 1;
+                Terrain::Floor
+            };
+            tiles.set_terrain(cx as usize, cy as usize, terrain);
         }
-
-        let terrain = if is_edge {
-            wall_count += 1;
-            Terrain::Wall
-        } else {
-            floor_count += 1;
-            Terrain::Floor
-        };
-        tiles.set_terrain(cx as usize, cy as usize, terrain);
     }
 
     log::info!("  {} wall tiles, {} floor tiles", wall_count, floor_count);
