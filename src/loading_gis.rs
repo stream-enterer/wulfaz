@@ -30,6 +30,9 @@ pub struct ParisBuildingRon {
     #[serde(default)]
     pub date_coyec: Option<String>,
     pub polygon: Vec<(f64, f64)>,
+    /// Inner rings (holes) in the polygon. Empty for most records.
+    #[serde(default)]
+    pub inner_rings: Vec<Vec<(f64, f64)>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -40,6 +43,9 @@ pub struct ParisBlockRon {
     #[serde(default)]
     pub ilots_vass: String,
     pub polygon: Vec<(f64, f64)>,
+    /// Inner rings (holes) in the polygon. Empty for most records.
+    #[serde(default)]
+    pub inner_rings: Vec<Vec<(f64, f64)>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -125,35 +131,69 @@ fn polygon_to_meters(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
 }
 
 /// Scanline polygon rasterization using even-odd fill rule.
-/// Returns all tile coordinates (x, y) inside the polygon.
+/// Single-ring convenience wrapper.
+#[allow(dead_code)]
 pub fn scanline_fill(ring: &[(f64, f64)], width: usize, height: usize) -> Vec<(i32, i32)> {
+    scanline_fill_multi(&[ring], &[], width, height)
+}
+
+/// Scanline polygon rasterization with inner ring (hole) support.
+/// Collects edge intersections from ALL rings; the even-odd rule
+/// naturally excludes areas inside inner rings (holes).
+pub fn scanline_fill_multi(
+    outer: &[&[(f64, f64)]],
+    inner_rings: &[&[(f64, f64)]],
+    width: usize,
+    height: usize,
+) -> Vec<(i32, i32)> {
     let mut filled = Vec::new();
-    if ring.len() < 3 {
+
+    // Gather Y bounds from all rings.
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let all_rings: Vec<&[(f64, f64)]> = outer.iter().chain(inner_rings.iter()).copied().collect();
+    for ring in &all_rings {
+        for &(_, y) in *ring {
+            if y < min_y {
+                min_y = y;
+            }
+            if y > max_y {
+                max_y = y;
+            }
+        }
+    }
+
+    if min_y > max_y {
         return filled;
     }
 
-    let ys: Vec<f64> = ring.iter().map(|p| p.1).collect();
-    let min_row = (ys.iter().cloned().fold(f64::INFINITY, f64::min).floor() as i32).max(0);
-    let max_row =
-        (ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max).ceil() as i32).min(height as i32 - 1);
-
-    let n = ring.len();
+    let min_row = (min_y.floor() as i32).max(0);
+    let max_row = (max_y.ceil() as i32).min(height as i32 - 1);
 
     for row in min_row..=max_row {
         let y = row as f64 + 0.5;
         let mut intersections = Vec::new();
-        let mut j = n - 1;
-        for i in 0..n {
-            let yi = ring[i].1;
-            let yj = ring[j].1;
-            if (yi > y) != (yj > y) {
-                let xi = ring[i].0;
-                let xj = ring[j].0;
-                let x_int = xi + (y - yi) / (yj - yi) * (xj - xi);
-                intersections.push(x_int);
+
+        // Collect intersections from ALL rings (outer + inner).
+        for ring in &all_rings {
+            if ring.len() < 3 {
+                continue;
             }
-            j = i;
+            let n = ring.len();
+            let mut j = n - 1;
+            for i in 0..n {
+                let yi = ring[i].1;
+                let yj = ring[j].1;
+                if (yi > y) != (yj > y) {
+                    let xi = ring[i].0;
+                    let xj = ring[j].0;
+                    let x_int = xi + (y - yi) / (yj - yi) * (xj - xi);
+                    intersections.push(x_int);
+                }
+                j = i;
+            }
         }
+
         intersections.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut k = 0;
@@ -198,14 +238,29 @@ fn bbox_overlaps(points: &[(f64, f64)]) -> bool {
         || min_lat > VIEW_MAX_LAT)
 }
 
+/// Extract outer ring and inner rings (holes) from a shapefile polygon.
+/// Returns (outer_ring, inner_rings). outer_ring is empty if no rings exist.
+type Ring = Vec<(f64, f64)>;
+
 #[allow(dead_code)]
-fn extract_outer_ring(shape: &shapefile::Polygon) -> Vec<(f64, f64)> {
-    // The first ring in the polygon is the outer ring.
-    if let Some(ring) = shape.rings().first() {
-        ring.points().iter().map(|p| (p.x, p.y)).collect()
-    } else {
-        Vec::new()
+fn extract_rings(shape: &shapefile::Polygon) -> (Ring, Vec<Ring>) {
+    let mut outer = Vec::new();
+    let mut inners = Vec::new();
+    for ring in shape.rings() {
+        let points: Vec<(f64, f64)> = ring.points().iter().map(|p| (p.x, p.y)).collect();
+        match ring {
+            shapefile::PolygonRing::Outer(_) => {
+                if outer.is_empty() {
+                    outer = points;
+                }
+                // Multiple outer rings in one record: take the first.
+            }
+            shapefile::PolygonRing::Inner(_) => {
+                inners.push(points);
+            }
+        }
     }
+    (outer, inners)
 }
 
 #[allow(dead_code)]
@@ -255,14 +310,16 @@ fn extract_blocks_from_shapefile(blocks_shp: &str) -> (Vec<ParisBlockRon>, Vec<S
             _ => continue,
         };
 
-        let outer = extract_outer_ring(&polygon);
+        let (outer, inners) = extract_rings(&polygon);
         if outer.is_empty() || !bbox_overlaps(&outer) {
             continue;
         }
 
         let ring = polygon_to_meters(&outer);
+        let inner_m: Vec<Vec<(f64, f64)>> = inners.iter().map(|r| polygon_to_meters(r)).collect();
+        let inner_refs: Vec<&[(f64, f64)]> = inner_m.iter().map(|v| v.as_slice()).collect();
         // Skip blocks with no rasterizable area.
-        if scanline_fill(&ring, 10000, 10000).is_empty() {
+        if scanline_fill_multi(&[&ring], &inner_refs, 10000, 10000).is_empty() {
             continue;
         }
 
@@ -282,6 +339,7 @@ fn extract_blocks_from_shapefile(blocks_shp: &str) -> (Vec<ParisBlockRon>, Vec<S
             aire,
             ilots_vass,
             polygon: ring,
+            inner_rings: inner_m,
         });
     }
 
@@ -309,13 +367,15 @@ fn extract_buildings_from_shapefile(buildings_shp: &str) -> Vec<ParisBuildingRon
             _ => continue,
         };
 
-        let outer = extract_outer_ring(&polygon);
+        let (outer, inners) = extract_rings(&polygon);
         if outer.is_empty() || !bbox_overlaps(&outer) {
             continue;
         }
 
         let ring = polygon_to_meters(&outer);
-        if scanline_fill(&ring, 10000, 10000).is_empty() {
+        let inner_m: Vec<Vec<(f64, f64)>> = inners.iter().map(|r| polygon_to_meters(r)).collect();
+        let inner_refs: Vec<&[(f64, f64)]> = inner_m.iter().map(|v| v.as_slice()).collect();
+        if scanline_fill_multi(&[&ring], &inner_refs, 10000, 10000).is_empty() {
             continue;
         }
 
@@ -352,6 +412,7 @@ fn extract_buildings_from_shapefile(buildings_shp: &str) -> Vec<ParisBuildingRon
             geoy,
             date_coyec,
             polygon: ring,
+            inner_rings: inner_m,
         });
     }
 
@@ -403,6 +464,11 @@ pub fn build_from_shapefiles(buildings_shp: &str, blocks_shp: &str) -> ParisMapR
     }
 }
 
+/// Build slice refs from inner_rings for scanline_fill_multi.
+fn inner_refs(rings: &[Vec<(f64, f64)>]) -> Vec<&[(f64, f64)]> {
+    rings.iter().map(|v| v.as_slice()).collect()
+}
+
 // --- Rasterization: RON polygons → TileMap + registries ---
 
 /// Rasterize all polygons and run classification/BFS, returning standalone products.
@@ -431,7 +497,8 @@ pub fn rasterize_paris(
     let mut total_block_tiles = 0usize;
 
     for block_ron in &data.blocks {
-        let cells = scanline_fill(&block_ron.polygon, grid_w, grid_h);
+        let ir = inner_refs(&block_ron.inner_rings);
+        let cells = scanline_fill_multi(&[&block_ron.polygon], &ir, grid_w, grid_h);
         if cells.is_empty() {
             continue;
         }
@@ -485,7 +552,8 @@ pub fn rasterize_paris(
                     skipped_bati2 += 1;
                     continue;
                 }
-                let cells = scanline_fill(&bldg_ron.polygon, grid_w, grid_h);
+                let ir = inner_refs(&bldg_ron.inner_rings);
+                let cells = scanline_fill_multi(&[&bldg_ron.polygon], &ir, grid_w, grid_h);
                 for &(cx, cy) in &cells {
                     tiles.set_terrain(cx as usize, cy as usize, Terrain::Garden);
                 }
@@ -518,7 +586,8 @@ pub fn rasterize_paris(
             continue;
         }
 
-        let cells = scanline_fill(&bldg_ron.polygon, grid_w, grid_h);
+        let ir = inner_refs(&bldg_ron.inner_rings);
+        let cells = scanline_fill_multi(&[&bldg_ron.polygon], &ir, grid_w, grid_h);
         if cells.is_empty() {
             continue;
         }
@@ -997,6 +1066,51 @@ mod tests {
     }
 
     #[test]
+    fn test_scanline_fill_inner_ring_hole() {
+        // Outer ring: 10x10 square (0..10, 0..10)
+        let outer = vec![
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ];
+        // Inner ring: 4x4 hole (3..7, 3..7)
+        let inner = vec![(3.0, 3.0), (7.0, 3.0), (7.0, 7.0), (3.0, 7.0), (3.0, 3.0)];
+        let tiles = scanline_fill_multi(&[outer.as_slice()], &[inner.as_slice()], 20, 20);
+        let tile_set: std::collections::HashSet<(i32, i32)> = tiles.iter().copied().collect();
+
+        // Tiles inside the hole (3..7, 3..7) should NOT be filled
+        for y in 3..7 {
+            for x in 3..7 {
+                assert!(
+                    !tile_set.contains(&(x, y)),
+                    "tile ({x},{y}) should be inside the hole"
+                );
+            }
+        }
+
+        // Tiles between outer and inner rings should be filled
+        // Check a ring of tiles just outside the hole
+        for x in 0..10 {
+            assert!(tile_set.contains(&(x, 0)), "tile ({x},0) should be filled");
+            assert!(tile_set.contains(&(x, 9)), "tile ({x},9) should be filled");
+        }
+        for y in 0..10 {
+            assert!(tile_set.contains(&(0, y)), "tile (0,{y}) should be filled");
+            assert!(tile_set.contains(&(9, y)), "tile (9,{y}) should be filled");
+        }
+
+        // Total: 10*10 outer - 4*4 hole = 84 tiles
+        assert_eq!(
+            tiles.len(),
+            84,
+            "expected 10x10 - 4x4 = 84 tiles, got {}",
+            tiles.len()
+        );
+    }
+
+    #[test]
     fn test_paris_ron_roundtrip() {
         let data = ParisMapRon {
             grid_width: 100,
@@ -1013,6 +1127,7 @@ mod tests {
                 geoy: 128456.7,
                 date_coyec: Some("1830".into()),
                 polygon: vec![(10.0, 10.0), (20.0, 10.0), (20.0, 20.0), (10.0, 20.0)],
+                inner_rings: Vec::new(),
             }],
             blocks: vec![ParisBlockRon {
                 id_ilots: "860IL74".into(),
@@ -1020,6 +1135,7 @@ mod tests {
                 aire: 5000.0,
                 ilots_vass: "74".into(),
                 polygon: vec![(5.0, 5.0), (25.0, 5.0), (25.0, 25.0), (5.0, 25.0)],
+                inner_rings: Vec::new(),
             }],
             quartier_names: vec!["Arcis".into(), "Marais".into()],
         };
@@ -1062,6 +1178,7 @@ mod tests {
                     (5.0, 25.0),
                     (5.0, 5.0),
                 ],
+                inner_rings: Vec::new(),
             }],
             quartier_names: vec!["TestQ".into()],
         }
@@ -1080,6 +1197,7 @@ mod tests {
             geoy: 0.0,
             date_coyec: None,
             polygon: poly,
+            inner_rings: Vec::new(),
         }
     }
 
