@@ -23,7 +23,9 @@ use wulfaz::systems::combat::run_combat;
 use wulfaz::systems::death::run_death;
 use wulfaz::systems::decisions::run_decisions;
 use wulfaz::systems::eating::run_eating;
+use wulfaz::systems::gait_selection::run_gait_selection;
 use wulfaz::systems::hunger::run_hunger;
+use wulfaz::systems::stamina::run_stamina;
 use wulfaz::systems::temperature::run_temperature;
 use wulfaz::systems::wander::run_wander;
 use wulfaz::tile_map::TileMap;
@@ -51,6 +53,13 @@ fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
     world.healths.insert(
         e,
         Health {
+            current: 100.0,
+            max: 100.0,
+        },
+    );
+    world.staminas.insert(
+        e,
+        Stamina {
             current: 100.0,
             max: 100.0,
         },
@@ -104,9 +113,11 @@ fn run_full_tick(world: &mut World, tick: Tick) {
     run_temperature(world, tick);
     // Phase 2: Needs
     run_hunger(world, tick);
+    run_stamina(world, tick);
     // Phase 3: Decisions
     run_decisions(world, tick);
     // Phase 4: Actions
+    run_gait_selection(world, tick);
     run_wander(world, tick);
     run_eating(world, tick);
     run_combat(world, tick);
@@ -150,6 +161,8 @@ struct WorldSnapshot {
     hungers: Vec<(u64, u32)>, // f32 bits as u32 for exact comparison
     /// Sorted (entity_id, health_current) for all entities with health.
     healths: Vec<(u64, u32)>,
+    /// Sorted (entity_id, stamina_current) for all entities with stamina.
+    staminas: Vec<(u64, u32)>,
     /// Sorted (entity_id, action_id_ordinal) for all entities with intentions.
     intentions: Vec<(u64, u8)>,
     /// Total event count in the log.
@@ -182,6 +195,13 @@ impl WorldSnapshot {
             .collect();
         healths.sort_by_key(|&(id, _)| id);
 
+        let mut staminas: Vec<(u64, u32)> = world
+            .staminas
+            .iter()
+            .map(|(&e, s)| (e.0, s.current.to_bits()))
+            .collect();
+        staminas.sort_by_key(|&(id, _)| id);
+
         let mut intentions: Vec<(u64, u8)> = world
             .intentions
             .iter()
@@ -195,6 +215,7 @@ impl WorldSnapshot {
             positions,
             hungers,
             healths,
+            staminas,
             intentions,
             event_count: world.events.len(),
         }
@@ -208,6 +229,7 @@ impl PartialEq for WorldSnapshot {
             && self.positions == other.positions
             && self.hungers == other.hungers
             && self.healths == other.healths
+            && self.staminas == other.staminas
             && self.intentions == other.intentions
             && self.event_count == other.event_count
     }
@@ -221,6 +243,7 @@ impl std::fmt::Debug for WorldSnapshot {
             .field("positions_len", &self.positions.len())
             .field("hungers_len", &self.hungers.len())
             .field("healths_len", &self.healths.len())
+            .field("staminas_len", &self.staminas.len())
             .field("intentions_len", &self.intentions.len())
             .field("event_count", &self.event_count)
             .finish()

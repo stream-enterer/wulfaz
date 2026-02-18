@@ -40,6 +40,13 @@ pub struct Health {
     pub max: f32,
 }
 
+/// Stamina — drained by fast gaits, recovered by slow gaits.
+#[derive(Debug, Clone, Copy)]
+pub struct Stamina {
+    pub current: f32,
+    pub max: f32,
+}
+
 /// Combat stats for entities that can fight.
 #[derive(Debug, Clone, Copy)]
 pub struct CombatStats {
@@ -121,6 +128,8 @@ pub enum ActionId {
     Wander,
     Eat,
     Attack,
+    Charge,
+    Flee,
 }
 
 /// What an entity intends to do this tick, written by the Phase 3 scorer.
@@ -268,5 +277,15 @@ mod tests {
     fn nutrition_field() {
         let n = Nutrition { value: 25.0 };
         assert_eq!(n.value, 25.0);
+    }
+
+    #[test]
+    fn stamina_fields() {
+        let s = Stamina {
+            current: 80.0,
+            max: 100.0,
+        };
+        assert_eq!(s.current, 80.0);
+        assert_eq!(s.max, 100.0);
     }
 }

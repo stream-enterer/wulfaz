@@ -22,7 +22,9 @@ use systems::combat::run_combat;
 use systems::death::run_death;
 use systems::decisions::run_decisions;
 use systems::eating::run_eating;
+use systems::gait_selection::run_gait_selection;
 use systems::hunger::run_hunger;
+use systems::stamina::run_stamina;
 use systems::temperature::run_temperature;
 use systems::wander::run_wander;
 use world::World;
@@ -276,11 +278,13 @@ impl ApplicationHandler for App {
 
                     // === Phase 2: Needs ===
                     run_hunger(&mut self.world, tick);
+                    run_stamina(&mut self.world, tick);
 
                     // === Phase 3: Decisions ===
                     run_decisions(&mut self.world, tick);
 
                     // === Phase 4: Actions ===
+                    run_gait_selection(&mut self.world, tick);
                     run_wander(&mut self.world, tick);
                     run_eating(&mut self.world, tick);
                     run_combat(&mut self.world, tick);

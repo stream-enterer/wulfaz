@@ -32,7 +32,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
 
         // Gate on intention if present, else legacy fallback
         if let Some(intention) = world.intentions.get(&attacker) {
-            if intention.action != ActionId::Attack {
+            if intention.action != ActionId::Attack && intention.action != ActionId::Charge {
                 continue;
             }
         } else if aggression <= 0.5 {
