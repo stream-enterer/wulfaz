@@ -5,6 +5,75 @@ use crate::events::Event;
 use crate::tile_map::Terrain;
 use crate::world::World;
 
+/// Render a one-line hover info string for the tile at (tile_x, tile_y).
+///
+/// Format: `(x, y) Terrain | Quartier | 42 Rue de Rivoli — Boulangerie | occupant (activity) +N more`
+/// Returns `"---"` if coords are out of bounds.
+///
+/// This function is READ-ONLY and does not modify world state.
+pub fn render_hover_info(world: &World, tile_x: i32, tile_y: i32) -> String {
+    if tile_x < 0 || tile_y < 0 {
+        return "---".to_string();
+    }
+    let ux = tile_x as usize;
+    let uy = tile_y as usize;
+
+    let terrain = match world.tiles.get_terrain(ux, uy) {
+        Some(t) => t,
+        None => return "---".to_string(),
+    };
+
+    let mut parts = vec![format!("({}, {}) {:?}", tile_x, tile_y, terrain)];
+
+    // Quartier
+    if let Some(qid) = world.tiles.get_quartier_id(ux, uy)
+        && qid > 0
+        && let Some(name) = world.quartier_names.get((qid - 1) as usize)
+    {
+        parts.push(name.clone());
+    }
+
+    // Building
+    if let Some(bid) = world.tiles.get_building_id(ux, uy)
+        && let Some(building) = world.buildings.get(bid)
+    {
+        // Address
+        let addr = if let Some(a) = building.addresses.first() {
+            format!("{} {}", a.house_number, a.street_name)
+        } else {
+            "no address".to_string()
+        };
+
+        // Append nom_bati if present
+        let addr_part = if let Some(ref nom) = building.nom_bati {
+            format!("{} — {}", addr, nom)
+        } else {
+            addr
+        };
+        parts.push(addr_part);
+
+        // Occupants for active year
+        let occ_part = if let Some(occupants) = building.occupants_by_year.get(&world.active_year) {
+            if occupants.is_empty() {
+                "no occupants".to_string()
+            } else {
+                let first = &occupants[0];
+                let label = format!("{} ({})", first.name, first.activity);
+                if occupants.len() > 1 {
+                    format!("{} +{} more", label, occupants.len() - 1)
+                } else {
+                    label
+                }
+            }
+        } else {
+            "no occupants".to_string()
+        };
+        parts.push(occ_part);
+    }
+
+    parts.join(" | ")
+}
+
 /// Convert a terrain tile to its display character.
 fn terrain_char(terrain: Terrain) -> char {
     match terrain {
@@ -491,5 +560,92 @@ mod tests {
         let world = World::new_with_seed(42);
         let output = render_recent_events(&world, 5);
         assert!(output.is_empty());
+    }
+
+    // --- Hover info ---
+
+    #[test]
+    fn hover_info_out_of_bounds() {
+        let world = World::new_with_seed(42);
+        assert_eq!(render_hover_info(&world, -1, 0), "---");
+        assert_eq!(render_hover_info(&world, 0, -1), "---");
+        assert_eq!(render_hover_info(&world, 999, 999), "---");
+    }
+
+    #[test]
+    fn hover_info_terrain_only() {
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(5, 5);
+        world.tiles.set_terrain(2, 3, Terrain::Water);
+
+        let info = render_hover_info(&world, 2, 3);
+        assert_eq!(info, "(2, 3) Water");
+    }
+
+    #[test]
+    fn hover_info_with_quartier() {
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(5, 5);
+        world.tiles.set_quartier_id(1, 1, 2);
+        world.quartier_names = vec!["Arcis".into(), "Marais".into()];
+
+        let info = render_hover_info(&world, 1, 1);
+        assert_eq!(info, "(1, 1) Road | Marais");
+    }
+
+    #[test]
+    fn hover_info_with_building() {
+        use crate::registry::{Address, BuildingData, BuildingId, Occupant};
+        use std::collections::HashMap;
+
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(5, 5);
+        world.tiles.set_terrain(2, 2, Terrain::Floor);
+        world.tiles.set_building_id(2, 2, BuildingId(1));
+        world.active_year = 1845;
+
+        let mut occ_map = HashMap::new();
+        occ_map.insert(
+            1845u16,
+            vec![
+                Occupant {
+                    name: "Jean Dupont".into(),
+                    activity: "flour merchant".into(),
+                    naics: "".into(),
+                },
+                Occupant {
+                    name: "Marie".into(),
+                    activity: "baker".into(),
+                    naics: "".into(),
+                },
+            ],
+        );
+
+        world.buildings.insert(BuildingData {
+            id: BuildingId(1),
+            identif: 42,
+            quartier: "Arcis".into(),
+            superficie: 120.0,
+            bati: 1,
+            nom_bati: Some("Boulangerie".into()),
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 3,
+            tiles: vec![(2, 2)],
+            addresses: vec![Address {
+                street_name: "Rue de Rivoli".into(),
+                house_number: "42".into(),
+            }],
+            occupants_by_year: occ_map,
+        });
+
+        let info = render_hover_info(&world, 2, 2);
+        assert_eq!(
+            info,
+            "(2, 2) Floor | 42 Rue de Rivoli \u{2014} Boulangerie | Jean Dupont (flour merchant) +1 more"
+        );
     }
 }

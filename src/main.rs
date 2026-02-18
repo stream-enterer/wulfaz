@@ -466,10 +466,13 @@ impl ApplicationHandler for App {
 
                             let status_lines = 1_usize;
                             let event_lines = 5_usize;
+                            let hover_lines = 1_usize;
                             let status_h = status_lines as f32 * m.line_height;
                             let event_h = event_lines as f32 * m.line_height;
+                            let hover_h = hover_lines as f32 * m.line_height;
                             let map_cell = m.line_height;
-                            let map_pixel_h = screen_h as f32 - status_h - event_h - padding * 4.0;
+                            let map_pixel_h =
+                                screen_h as f32 - status_h - event_h - hover_h - padding * 4.0;
                             let map_pixel_w = screen_w as f32 - padding * 2.0;
 
                             let viewport_cols = (map_pixel_w / map_cell).floor().max(1.0) as usize;
@@ -495,6 +498,25 @@ impl ApplicationHandler for App {
                             self.camera.x = self.camera.x.clamp(0, max_cam_x);
                             self.camera.y = self.camera.y.clamp(0, max_cam_y);
 
+                            // Compute hovered tile from cursor position
+                            let hover_text = {
+                                let px = self.cursor_pos.x as f32;
+                                let py = self.cursor_pos.y as f32;
+                                let vx = (px - self.map_origin.0) / self.map_cell_size;
+                                let vy = (py - self.map_origin.1) / self.map_cell_size;
+                                if vx >= 0.0
+                                    && vy >= 0.0
+                                    && (vx as usize) < viewport_cols
+                                    && (vy as usize) < viewport_rows
+                                {
+                                    let tile_x = self.camera.x + vx as i32;
+                                    let tile_y = self.camera.y + vy as i32;
+                                    render::render_hover_info(&self.world, tile_x, tile_y)
+                                } else {
+                                    "---".to_string()
+                                }
+                            };
+
                             let status = render::render_status(&self.world);
                             let map_text = render::render_world_to_string(
                                 &self.world,
@@ -508,6 +530,8 @@ impl ApplicationHandler for App {
                             font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
                             font.prepare_text(&status, padding, padding);
                             font.prepare_map(&map_text, padding, map_y);
+                            let hover_y = map_y + viewport_rows as f32 * map_cell;
+                            font.prepare_text(&hover_text, padding, hover_y);
                             let event_y = screen_h as f32 - event_h - padding;
                             font.prepare_text(&events, padding, event_y);
 
