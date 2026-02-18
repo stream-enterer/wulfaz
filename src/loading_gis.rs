@@ -295,31 +295,43 @@ fn get_integer_field(record: &shapefile::dbase::Record, name: &str) -> i32 {
 // --- Preprocess pipeline: extract RON from shapefiles ---
 
 #[allow(dead_code)]
-fn extract_blocks_from_shapefile(blocks_shp: &str) -> (Vec<ParisBlockRon>, Vec<String>) {
+fn extract_blocks_from_shapefile(
+    blocks_shp: &str,
+    grid_w: usize,
+    grid_h: usize,
+) -> (Vec<ParisBlockRon>, Vec<String>) {
     let mut reader = shapefile::Reader::from_path(blocks_shp)
         .unwrap_or_else(|e| panic!("Failed to open {blocks_shp}: {e}"));
 
     let mut blocks = Vec::new();
     let mut quartier_set: Vec<String> = Vec::new();
+    let mut non_polygon_count = 0usize;
+    let mut out_of_viewport = 0usize;
+    let mut zero_area = 0usize;
 
     for result in reader.iter_shapes_and_records() {
         let (shape, record) = result.unwrap_or_else(|e| panic!("Error reading block record: {e}"));
 
         let polygon = match shape {
             shapefile::Shape::Polygon(p) => p,
-            _ => continue,
+            _ => {
+                non_polygon_count += 1;
+                continue;
+            }
         };
 
         let (outer, inners) = extract_rings(&polygon);
         if outer.is_empty() || !bbox_overlaps(&outer) {
+            out_of_viewport += 1;
             continue;
         }
 
         let ring = polygon_to_meters(&outer);
         let inner_m: Vec<Vec<(f64, f64)>> = inners.iter().map(|r| polygon_to_meters(r)).collect();
         let inner_refs: Vec<&[(f64, f64)]> = inner_m.iter().map(|v| v.as_slice()).collect();
-        // Skip blocks with no rasterizable area.
-        if scanline_fill_multi(&[&ring], &inner_refs, 10000, 10000).is_empty() {
+        // Skip blocks with no rasterizable area at actual grid resolution.
+        if scanline_fill_multi(&[&ring], &inner_refs, grid_w, grid_h).is_empty() {
+            zero_area += 1;
             continue;
         }
 
@@ -344,19 +356,29 @@ fn extract_blocks_from_shapefile(blocks_shp: &str) -> (Vec<ParisBlockRon>, Vec<S
     }
 
     log::info!(
-        "  Extracted {} blocks, {} quartiers",
+        "  Extracted {} blocks, {} quartiers (dropped: {} non-polygon, {} out-of-viewport, {} zero-area)",
         blocks.len(),
-        quartier_set.len()
+        quartier_set.len(),
+        non_polygon_count,
+        out_of_viewport,
+        zero_area,
     );
     (blocks, quartier_set)
 }
 
 #[allow(dead_code)]
-fn extract_buildings_from_shapefile(buildings_shp: &str) -> Vec<ParisBuildingRon> {
+fn extract_buildings_from_shapefile(
+    buildings_shp: &str,
+    grid_w: usize,
+    grid_h: usize,
+) -> Vec<ParisBuildingRon> {
     let mut reader = shapefile::Reader::from_path(buildings_shp)
         .unwrap_or_else(|e| panic!("Failed to open {buildings_shp}: {e}"));
 
     let mut buildings = Vec::new();
+    let mut non_polygon_count = 0usize;
+    let mut out_of_viewport = 0usize;
+    let mut zero_area = 0usize;
 
     for result in reader.iter_shapes_and_records() {
         let (shape, record) =
@@ -364,18 +386,24 @@ fn extract_buildings_from_shapefile(buildings_shp: &str) -> Vec<ParisBuildingRon
 
         let polygon = match shape {
             shapefile::Shape::Polygon(p) => p,
-            _ => continue,
+            _ => {
+                non_polygon_count += 1;
+                continue;
+            }
         };
 
         let (outer, inners) = extract_rings(&polygon);
         if outer.is_empty() || !bbox_overlaps(&outer) {
+            out_of_viewport += 1;
             continue;
         }
 
         let ring = polygon_to_meters(&outer);
         let inner_m: Vec<Vec<(f64, f64)>> = inners.iter().map(|r| polygon_to_meters(r)).collect();
         let inner_refs: Vec<&[(f64, f64)]> = inner_m.iter().map(|v| v.as_slice()).collect();
-        if scanline_fill_multi(&[&ring], &inner_refs, 10000, 10000).is_empty() {
+        // Skip buildings with no rasterizable area at actual grid resolution.
+        if scanline_fill_multi(&[&ring], &inner_refs, grid_w, grid_h).is_empty() {
+            zero_area += 1;
             continue;
         }
 
@@ -416,7 +444,13 @@ fn extract_buildings_from_shapefile(buildings_shp: &str) -> Vec<ParisBuildingRon
         });
     }
 
-    log::info!("  Extracted {} buildings", buildings.len());
+    log::info!(
+        "  Extracted {} buildings (dropped: {} non-polygon, {} out-of-viewport, {} zero-area)",
+        buildings.len(),
+        non_polygon_count,
+        out_of_viewport,
+        zero_area,
+    );
     buildings
 }
 
@@ -434,14 +468,14 @@ pub fn build_from_shapefiles(buildings_shp: &str, blocks_shp: &str) -> ParisMapR
     );
 
     let block_start = Instant::now();
-    let (blocks, quartier_names) = extract_blocks_from_shapefile(blocks_shp);
+    let (blocks, quartier_names) = extract_blocks_from_shapefile(blocks_shp, grid_w, grid_h);
     log::info!(
         "Blocks extracted in {:.1}s",
         block_start.elapsed().as_secs_f64()
     );
 
     let bldg_start = Instant::now();
-    let buildings = extract_buildings_from_shapefile(buildings_shp);
+    let buildings = extract_buildings_from_shapefile(buildings_shp, grid_w, grid_h);
     log::info!(
         "Buildings extracted in {:.1}s",
         bldg_start.elapsed().as_secs_f64()
