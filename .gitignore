@@ -1,7 +1,7 @@
 /target
 
 # Generated map data (from preprocess binary)
-data/paris.bin
+data/paris.ron
 
 # IDE
 .idea

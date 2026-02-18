@@ -16,7 +16,7 @@ impl Hash for Entity {
 
 /// Simulation tick counter. Never use raw u64 where a Tick is meant.
 /// Never cast between Tick and Entity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Tick(pub u64);
 
 /// Spatial position on the tile grid.

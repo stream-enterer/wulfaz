@@ -1,18 +1,15 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
-
 /// Unique building identifier — matches `Identif` field from BATI.shp.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BuildingId(pub u32);
 
 /// Sequential block identifier, assigned during GIS loading.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId(pub u16);
 
 /// Placeholder for address data, populated by A07.
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize)]
 pub struct Address {
     pub street_name: String,
     pub house_number: String,
@@ -20,14 +17,12 @@ pub struct Address {
 
 /// Placeholder for occupant data, populated by A07.
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize)]
 pub struct Occupant {
     pub name: String,
     pub activity: String,
 }
 
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize)]
 pub struct BuildingData {
     pub id: BuildingId,
     pub quartier: String,
@@ -48,7 +43,6 @@ pub struct BuildingData {
 }
 
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize)]
 pub struct BlockData {
     pub id: BlockId,
     /// Original ID from shapefile, e.g. "860IL74".
@@ -59,7 +53,7 @@ pub struct BlockData {
     pub buildings: Vec<BuildingId>,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct BuildingRegistry {
     pub buildings: HashMap<BuildingId, BuildingData>,
 }
@@ -81,7 +75,7 @@ impl BuildingRegistry {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct BlockRegistry {
     pub blocks: HashMap<BlockId, BlockData>,
 }

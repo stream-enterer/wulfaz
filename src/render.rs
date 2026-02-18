@@ -257,7 +257,7 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines[3].chars().nth(2), Some('g'));
         // Other cells remain terrain.
-        assert_eq!(lines[3].chars().nth(0), Some('.'));
+        assert_eq!(lines[3].chars().next(), Some('.'));
     }
 
     #[test]

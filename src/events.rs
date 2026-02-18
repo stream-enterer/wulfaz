@@ -147,7 +147,7 @@ mod tests {
         log.push(make_spawned(2, 1));
         log.push(make_spawned(3, 2));
 
-        let ticks: Vec<u64> = log.iter().map(|e| event_tick(e)).collect();
+        let ticks: Vec<u64> = log.iter().map(event_tick).collect();
         assert_eq!(ticks, vec![0, 1, 2]);
     }
 
@@ -162,7 +162,7 @@ mod tests {
 
         assert_eq!(log.len(), 3);
 
-        let ticks: Vec<u64> = log.iter().map(|e| event_tick(e)).collect();
+        let ticks: Vec<u64> = log.iter().map(event_tick).collect();
         assert_eq!(ticks, vec![2, 3, 4]);
     }
 
@@ -225,7 +225,7 @@ mod tests {
         log.push(make_spawned(2, 1));
 
         assert_eq!(log.len(), 1);
-        let ticks: Vec<u64> = log.iter().map(|e| event_tick(e)).collect();
+        let ticks: Vec<u64> = log.iter().map(event_tick).collect();
         assert_eq!(ticks, vec![1]);
     }
 
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn all_event_variants_have_tick() {
-        let events = vec![
+        let events = [
             Event::Spawned {
                 entity: Entity(1),
                 tick: Tick(0),

@@ -1,93 +1,100 @@
-#![allow(dead_code)] // Used by preprocess binary via wulfaz::loading_gis.
-
 use std::collections::{HashMap, VecDeque};
-use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::Write;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use shapefile::dbase::FieldValue;
 
-use crate::registry::{
-    BlockData, BlockId, BlockRegistry, BuildingData, BuildingId, BuildingRegistry,
-    estimate_floor_count,
-};
+use crate::registry::{BlockData, BlockId, BuildingData, BuildingId, estimate_floor_count};
 use crate::tile_map::{Terrain, TileMap};
 use crate::world::World;
 
-/// Version stamp — increment when the binary format changes.
-const MAP_DATA_VERSION: u32 = 1;
+// --- RON data types (decoupled from runtime types) ---
 
-/// Serializable bundle of all GIS-derived map data.
 #[derive(Serialize, Deserialize)]
-pub struct ParisMapData {
-    pub version: u32,
-    pub tiles: TileMap,
-    pub buildings: BuildingRegistry,
-    pub blocks: BlockRegistry,
+pub struct ParisBuildingRon {
+    pub identif: u32,
+    pub quartier: String,
+    pub superficie: f32,
+    pub bati: u8,
+    pub nom_bati: Option<String>,
+    pub num_ilot: String,
+    pub polygon: Vec<(f64, f64)>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ParisBlockRon {
+    pub id_ilots: String,
+    pub quartier: String,
+    pub aire: f32,
+    pub polygon: Vec<(f64, f64)>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ParisMapRon {
+    pub grid_width: usize,
+    pub grid_height: usize,
+    pub buildings: Vec<ParisBuildingRon>,
+    pub blocks: Vec<ParisBlockRon>,
     pub quartier_names: Vec<String>,
 }
 
-/// Serialize map data to a binary file.
-pub fn save_map_data(data: &ParisMapData, path: &str) {
-    let file = File::create(path).unwrap_or_else(|e| panic!("Failed to create {path}: {e}"));
-    let writer = BufWriter::new(file);
-    bincode::serialize_into(writer, data)
-        .unwrap_or_else(|e| panic!("Failed to serialize map data: {e}"));
+// --- RON serialization ---
+
+/// Write ParisMapRon to a RON file. Used by preprocess binary.
+#[allow(dead_code)]
+pub fn save_paris_ron(data: &ParisMapRon, path: &str) {
+    let pretty = ron::ser::PrettyConfig::default();
+    let ron_str = ron::ser::to_string_pretty(data, pretty)
+        .unwrap_or_else(|e| panic!("Failed to serialize RON: {e}"));
+    let mut file =
+        std::fs::File::create(path).unwrap_or_else(|e| panic!("Failed to create {path}: {e}"));
+    file.write_all(ron_str.as_bytes())
+        .unwrap_or_else(|e| panic!("Failed to write {path}: {e}"));
 }
 
-/// Deserialize map data from a binary file.
-pub fn load_map_data(path: &str) -> ParisMapData {
-    let file = File::open(path).unwrap_or_else(|e| panic!("Failed to open {path}: {e}"));
-    let reader = BufReader::new(file);
-    let data: ParisMapData = bincode::deserialize_from(reader)
-        .unwrap_or_else(|e| panic!("Failed to deserialize map data: {e}"));
-    assert_eq!(
-        data.version, MAP_DATA_VERSION,
-        "Map data version mismatch: file has {}, expected {}",
-        data.version, MAP_DATA_VERSION
-    );
-    data
+/// Read ParisMapRon from a RON file.
+pub fn load_paris_ron(path: &str) -> ParisMapRon {
+    let ron_str =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
+    ron::from_str(&ron_str).unwrap_or_else(|e| panic!("Failed to parse RON from {path}: {e}"))
 }
 
-/// Load pre-built map data into World.
-pub fn apply_map_data(world: &mut World, data: ParisMapData) {
-    world.tiles = data.tiles;
-    world.buildings = data.buildings;
-    world.blocks = data.blocks;
-    world.quartier_names = data.quartier_names;
-}
-
-// --- Coordinate conversion constants ---
+// --- Coordinate conversion (used by preprocess pipeline + tests) ---
 // At lat 48.857°, 1° longitude ≈ 73,490 m, 1° latitude ≈ 111,320 m.
 #[allow(dead_code)]
 const LAT_CENTER: f64 = 48.857;
+#[allow(dead_code)]
 const M_PER_DEG_LON: f64 = 111_320.0 * 0.6579; // cos(48.857°) ≈ 0.6579
+#[allow(dead_code)]
 const M_PER_DEG_LAT: f64 = 111_320.0;
+#[allow(dead_code)]
 const PAD: f64 = 30.0; // meters padding on all sides
 
-// Viewport bounds: outermost building vertices.
+#[allow(dead_code)]
 const VIEW_MIN_LON: f64 = 2.298_146_8;
+#[allow(dead_code)]
 const VIEW_MAX_LON: f64 = 2.384_218_3;
+#[allow(dead_code)]
 const VIEW_MIN_LAT: f64 = 48.841_093_9;
+#[allow(dead_code)]
 const VIEW_MAX_LAT: f64 = 48.883_751_7;
 
-/// Convert lon/lat to tile coordinates (meters from top-left origin).
+#[allow(dead_code)]
 fn lonlat_to_tile(lon: f64, lat: f64) -> (f64, f64) {
     let x = (lon - VIEW_MIN_LON) * M_PER_DEG_LON + PAD;
     let y = (VIEW_MAX_LAT - lat) * M_PER_DEG_LAT + PAD;
     (x, y)
 }
 
-/// Compute grid dimensions from the viewport bounds + padding.
+#[allow(dead_code)]
 fn compute_grid_size() -> (usize, usize) {
     let w = ((VIEW_MAX_LON - VIEW_MIN_LON) * M_PER_DEG_LON).ceil() as usize + PAD as usize * 2;
     let h = ((VIEW_MAX_LAT - VIEW_MIN_LAT) * M_PER_DEG_LAT).ceil() as usize + PAD as usize * 2;
     (w, h)
 }
 
-/// Convert a shapefile polygon ring (lon/lat points) to tile-space coordinates.
-/// Only converts the outer ring (first part).
+#[allow(dead_code)]
 fn polygon_to_meters(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
     points
         .iter()
@@ -143,7 +150,7 @@ pub fn scanline_fill(ring: &[(f64, f64)], width: usize, height: usize) -> Vec<(i
     filled
 }
 
-/// Check if a polygon's bounding box overlaps the viewport.
+#[allow(dead_code)]
 fn bbox_overlaps(points: &[(f64, f64)]) -> bool {
     let mut min_lon = f64::INFINITY;
     let mut max_lon = f64::NEG_INFINITY;
@@ -169,8 +176,7 @@ fn bbox_overlaps(points: &[(f64, f64)]) -> bool {
         || min_lat > VIEW_MAX_LAT)
 }
 
-/// Extract the outer ring points from a shapefile polygon shape.
-/// Returns lon/lat pairs for the first ring only.
+#[allow(dead_code)]
 fn extract_outer_ring(shape: &shapefile::Polygon) -> Vec<(f64, f64)> {
     // The first ring in the polygon is the outer ring.
     if let Some(ring) = shape.rings().first() {
@@ -180,7 +186,7 @@ fn extract_outer_ring(shape: &shapefile::Polygon) -> Vec<(f64, f64)> {
     }
 }
 
-/// Helper: extract a string field from a dbase record, returning empty string on missing/null.
+#[allow(dead_code)]
 fn get_string_field(record: &shapefile::dbase::Record, name: &str) -> String {
     match record.get(name) {
         Some(FieldValue::Character(Some(s))) => s.trim().to_string(),
@@ -189,7 +195,7 @@ fn get_string_field(record: &shapefile::dbase::Record, name: &str) -> String {
     }
 }
 
-/// Helper: extract a numeric field as f64 from a dbase record.
+#[allow(dead_code)]
 fn get_numeric_field(record: &shapefile::dbase::Record, name: &str) -> f64 {
     match record.get(name) {
         Some(FieldValue::Numeric(Some(v))) => *v,
@@ -200,7 +206,7 @@ fn get_numeric_field(record: &shapefile::dbase::Record, name: &str) -> f64 {
     }
 }
 
-/// Helper: extract an integer field from a dbase record.
+#[allow(dead_code)]
 fn get_integer_field(record: &shapefile::dbase::Record, name: &str) -> i32 {
     match record.get(name) {
         Some(FieldValue::Integer(v)) => *v,
@@ -209,73 +215,15 @@ fn get_integer_field(record: &shapefile::dbase::Record, name: &str) -> i32 {
     }
 }
 
-/// Build ParisMapData from shapefiles. Used by the preprocess binary.
-pub fn build_from_shapefiles(buildings_shp: &str, blocks_shp: &str) -> ParisMapData {
-    let total_start = Instant::now();
+// --- Preprocess pipeline: extract RON from shapefiles ---
 
-    let (grid_w, grid_h) = compute_grid_size();
-    log::info!(
-        "GIS grid: {}×{} tiles ({} chunks)",
-        grid_w,
-        grid_h,
-        (grid_w.div_ceil(64)) * (grid_h.div_ceil(64))
-    );
-
-    // Use a temporary World to run the loading pipeline.
-    let mut world = World::new_with_seed(0);
-    world.tiles = TileMap::new(grid_w, grid_h);
-
-    let block_start = Instant::now();
-    load_blocks(&mut world, blocks_shp, grid_w, grid_h);
-    log::info!(
-        "Blocks loaded in {:.1}s",
-        block_start.elapsed().as_secs_f64()
-    );
-
-    let bldg_start = Instant::now();
-    load_buildings(&mut world, buildings_shp, grid_w, grid_h);
-    log::info!(
-        "Buildings loaded in {:.1}s",
-        bldg_start.elapsed().as_secs_f64()
-    );
-
-    let class_start = Instant::now();
-    classify_walls_floors(&mut world);
-    log::info!(
-        "Wall/floor classification in {:.1}s",
-        class_start.elapsed().as_secs_f64()
-    );
-
-    let bfs_start = Instant::now();
-    fill_quartier_roads(&mut world, grid_w, grid_h);
-    log::info!("Quartier BFS in {:.1}s", bfs_start.elapsed().as_secs_f64());
-
-    log::info!(
-        "GIS loading complete in {:.1}s: {} blocks, {} buildings, {} quartiers",
-        total_start.elapsed().as_secs_f64(),
-        world.blocks.blocks.len(),
-        world.buildings.buildings.len(),
-        world.quartier_names.len(),
-    );
-
-    ParisMapData {
-        version: MAP_DATA_VERSION,
-        tiles: world.tiles,
-        buildings: world.buildings,
-        blocks: world.blocks,
-        quartier_names: world.quartier_names,
-    }
-}
-
-/// Load block polygons from Vasserot_Ilots.shp.
-/// Marks tiles as Courtyard, sets block_id and quartier_id.
-fn load_blocks(world: &mut World, blocks_shp: &str, grid_w: usize, grid_h: usize) {
+#[allow(dead_code)]
+fn extract_blocks_from_shapefile(blocks_shp: &str) -> (Vec<ParisBlockRon>, Vec<String>) {
     let mut reader = shapefile::Reader::from_path(blocks_shp)
         .unwrap_or_else(|e| panic!("Failed to open {blocks_shp}: {e}"));
 
-    let mut quartier_map: HashMap<String, u8> = HashMap::new();
-    let mut next_block_id: u16 = 1;
-    let mut total_block_tiles = 0usize;
+    let mut blocks = Vec::new();
+    let mut quartier_set: Vec<String> = Vec::new();
 
     for result in reader.iter_shapes_and_records() {
         let (shape, record) = result.unwrap_or_else(|e| panic!("Error reading block record: {e}"));
@@ -291,8 +239,8 @@ fn load_blocks(world: &mut World, blocks_shp: &str, grid_w: usize, grid_h: usize
         }
 
         let ring = polygon_to_meters(&outer);
-        let cells = scanline_fill(&ring, grid_w, grid_h);
-        if cells.is_empty() {
+        // Skip blocks with no rasterizable area.
+        if scanline_fill(&ring, 10000, 10000).is_empty() {
             continue;
         }
 
@@ -300,53 +248,33 @@ fn load_blocks(world: &mut World, blocks_shp: &str, grid_w: usize, grid_h: usize
         let quartier = get_string_field(&record, "QUARTIER");
         let aire = get_numeric_field(&record, "AIRE") as f32;
 
-        // Assign quartier_id (1-based).
-        let next_qid = quartier_map.len() as u8 + 1;
-        let quartier_id = *quartier_map.entry(quartier.clone()).or_insert(next_qid);
-
-        let block_id = BlockId(next_block_id);
-        next_block_id += 1;
-
-        for &(cx, cy) in &cells {
-            let ux = cx as usize;
-            let uy = cy as usize;
-            world.tiles.set_terrain(ux, uy, Terrain::Courtyard);
-            world.tiles.set_block_id(ux, uy, block_id);
-            world.tiles.set_quartier_id(ux, uy, quartier_id);
+        // Track quartier names.
+        if !quartier_set.contains(&quartier) {
+            quartier_set.push(quartier.clone());
         }
-        total_block_tiles += cells.len();
 
-        world.blocks.insert(BlockData {
-            id: block_id,
+        blocks.push(ParisBlockRon {
             id_ilots,
             quartier,
             aire,
-            buildings: Vec::new(),
+            polygon: ring,
         });
     }
 
-    // Build quartier_names from the map (indexed by quartier_id - 1).
-    let mut names = vec![String::new(); quartier_map.len()];
-    for (name, &id) in &quartier_map {
-        names[(id - 1) as usize] = name.clone();
-    }
-    world.quartier_names = names;
-
     log::info!(
-        "  {} blocks, {} block tiles, {} quartiers",
-        world.blocks.blocks.len(),
-        total_block_tiles,
-        world.quartier_names.len(),
+        "  Extracted {} blocks, {} quartiers",
+        blocks.len(),
+        quartier_set.len()
     );
+    (blocks, quartier_set)
 }
 
-/// Load building polygons from BATI.shp.
-/// Marks tiles with building_id, overwrites terrain temporarily (classified later).
-fn load_buildings(world: &mut World, buildings_shp: &str, grid_w: usize, grid_h: usize) {
+#[allow(dead_code)]
+fn extract_buildings_from_shapefile(buildings_shp: &str) -> Vec<ParisBuildingRon> {
     let mut reader = shapefile::Reader::from_path(buildings_shp)
         .unwrap_or_else(|e| panic!("Failed to open {buildings_shp}: {e}"));
 
-    let mut total_building_tiles = 0usize;
+    let mut buildings = Vec::new();
 
     for result in reader.iter_shapes_and_records() {
         let (shape, record) =
@@ -363,8 +291,7 @@ fn load_buildings(world: &mut World, buildings_shp: &str, grid_w: usize, grid_h:
         }
 
         let ring = polygon_to_meters(&outer);
-        let cells = scanline_fill(&ring, grid_w, grid_h);
-        if cells.is_empty() {
+        if scanline_fill(&ring, 10000, 10000).is_empty() {
             continue;
         }
 
@@ -380,10 +307,135 @@ fn load_buildings(world: &mut World, buildings_shp: &str, grid_w: usize, grid_h:
         };
         let num_ilot = get_string_field(&record, "NUM_ILOT");
 
-        let building_id = BuildingId(identif);
-        let floor_count = estimate_floor_count(superficie);
+        buildings.push(ParisBuildingRon {
+            identif,
+            quartier,
+            superficie,
+            bati,
+            nom_bati,
+            num_ilot,
+            polygon: ring,
+        });
+    }
 
-        // Determine which block this building sits in (from block_id already set on tiles).
+    log::info!("  Extracted {} buildings", buildings.len());
+    buildings
+}
+
+/// Build ParisMapRon from shapefiles. Used by the preprocess binary.
+#[allow(dead_code)]
+pub fn build_from_shapefiles(buildings_shp: &str, blocks_shp: &str) -> ParisMapRon {
+    let total_start = Instant::now();
+
+    let (grid_w, grid_h) = compute_grid_size();
+    log::info!(
+        "GIS grid: {}×{} tiles ({} chunks)",
+        grid_w,
+        grid_h,
+        (grid_w.div_ceil(64)) * (grid_h.div_ceil(64))
+    );
+
+    let block_start = Instant::now();
+    let (blocks, quartier_names) = extract_blocks_from_shapefile(blocks_shp);
+    log::info!(
+        "Blocks extracted in {:.1}s",
+        block_start.elapsed().as_secs_f64()
+    );
+
+    let bldg_start = Instant::now();
+    let buildings = extract_buildings_from_shapefile(buildings_shp);
+    log::info!(
+        "Buildings extracted in {:.1}s",
+        bldg_start.elapsed().as_secs_f64()
+    );
+
+    log::info!(
+        "Extraction complete in {:.1}s: {} blocks, {} buildings, {} quartiers",
+        total_start.elapsed().as_secs_f64(),
+        blocks.len(),
+        buildings.len(),
+        quartier_names.len(),
+    );
+
+    ParisMapRon {
+        grid_width: grid_w,
+        grid_height: grid_h,
+        buildings,
+        blocks,
+        quartier_names,
+    }
+}
+
+// --- Game-side loader: reconstruct TileMap from RON polygons ---
+
+/// Reconstruct the full TileMap, registries, and quartier data from RON polygons.
+pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
+    let total_start = Instant::now();
+
+    let grid_w = data.grid_width;
+    let grid_h = data.grid_height;
+    world.tiles = TileMap::new(grid_w, grid_h);
+
+    // Build quartier name→id map (1-based).
+    let mut quartier_map: HashMap<String, u8> = HashMap::new();
+    for (i, name) in data.quartier_names.iter().enumerate() {
+        quartier_map.insert(name.clone(), (i + 1) as u8);
+    }
+    world.quartier_names = data.quartier_names;
+
+    // --- Blocks ---
+    let block_start = Instant::now();
+    let mut next_block_id: u16 = 1;
+    let mut total_block_tiles = 0usize;
+
+    for block_ron in &data.blocks {
+        let cells = scanline_fill(&block_ron.polygon, grid_w, grid_h);
+        if cells.is_empty() {
+            continue;
+        }
+
+        let quartier_id = quartier_map.get(&block_ron.quartier).copied().unwrap_or(0);
+        let block_id = BlockId(next_block_id);
+        next_block_id += 1;
+
+        for &(cx, cy) in &cells {
+            let ux = cx as usize;
+            let uy = cy as usize;
+            world.tiles.set_terrain(ux, uy, Terrain::Courtyard);
+            world.tiles.set_block_id(ux, uy, block_id);
+            world.tiles.set_quartier_id(ux, uy, quartier_id);
+        }
+        total_block_tiles += cells.len();
+
+        world.blocks.insert(BlockData {
+            id: block_id,
+            id_ilots: block_ron.id_ilots.clone(),
+            quartier: block_ron.quartier.clone(),
+            aire: block_ron.aire,
+            buildings: Vec::new(),
+        });
+    }
+    log::info!(
+        "  {} blocks, {} block tiles in {:.1}s",
+        world.blocks.blocks.len(),
+        total_block_tiles,
+        block_start.elapsed().as_secs_f64(),
+    );
+
+    // --- Buildings ---
+    let bldg_start = Instant::now();
+    let mut total_building_tiles = 0usize;
+
+    for bldg_ron in &data.buildings {
+        let cells = scanline_fill(&bldg_ron.polygon, grid_w, grid_h);
+        if cells.is_empty() {
+            continue;
+        }
+
+        let building_id = BuildingId(bldg_ron.identif);
+        let floor_count = estimate_floor_count(bldg_ron.superficie);
+
+        // Determine which block this building sits in.
         let mut block_for_building: Option<BlockId> = None;
         for &(cx, cy) in &cells {
             if let Some(bid) = world.tiles.get_block_id(cx as usize, cy as usize) {
@@ -392,25 +444,16 @@ fn load_buildings(world: &mut World, buildings_shp: &str, grid_w: usize, grid_h:
             }
         }
 
-        // Mark tiles: set building_id, set terrain to Wall (temporary — classified later).
         let mut tile_list = Vec::with_capacity(cells.len());
         for &(cx, cy) in &cells {
             let ux = cx as usize;
             let uy = cy as usize;
             world.tiles.set_terrain(ux, uy, Terrain::Wall);
             world.tiles.set_building_id(ux, uy, building_id);
-
-            // Inherit quartier from block if not already set.
-            if world.tiles.get_quartier_id(ux, uy) == Some(0) {
-                // Look up quartier from the building record itself.
-                // (This shouldn't normally happen since blocks are loaded first.)
-            }
-
             tile_list.push((cx, cy));
         }
         total_building_tiles += cells.len();
 
-        // Add building to its block's buildings list.
         if let Some(bid) = block_for_building
             && let Some(block) = world.blocks.blocks.get_mut(&bid)
         {
@@ -419,22 +462,43 @@ fn load_buildings(world: &mut World, buildings_shp: &str, grid_w: usize, grid_h:
 
         world.buildings.insert(BuildingData {
             id: building_id,
-            quartier,
-            superficie,
-            bati,
-            nom_bati,
-            num_ilot,
+            quartier: bldg_ron.quartier.clone(),
+            superficie: bldg_ron.superficie,
+            bati: bldg_ron.bati,
+            nom_bati: bldg_ron.nom_bati.clone(),
+            num_ilot: bldg_ron.num_ilot.clone(),
             floor_count,
             tiles: tile_list,
             addresses: Vec::new(),
             occupants: Vec::new(),
         });
     }
-
     log::info!(
-        "  {} buildings, {} building tiles",
+        "  {} buildings, {} building tiles in {:.1}s",
         world.buildings.buildings.len(),
         total_building_tiles,
+        bldg_start.elapsed().as_secs_f64(),
+    );
+
+    // --- Wall/floor classification ---
+    let class_start = Instant::now();
+    classify_walls_floors(world);
+    log::info!(
+        "  Wall/floor classification in {:.1}s",
+        class_start.elapsed().as_secs_f64()
+    );
+
+    // --- Quartier BFS ---
+    let bfs_start = Instant::now();
+    fill_quartier_roads(world, grid_w, grid_h);
+    log::info!(
+        "  Quartier BFS in {:.1}s",
+        bfs_start.elapsed().as_secs_f64()
+    );
+
+    log::info!(
+        "Paris map loaded in {:.1}s",
+        total_start.elapsed().as_secs_f64(),
     );
 }
 
@@ -540,8 +604,8 @@ mod tests {
         assert!(!tiles.is_empty());
         // All tiles should be within bounds
         for &(x, y) in &tiles {
-            assert!(x >= 0 && x < 20);
-            assert!(y >= 0 && y < 20);
+            assert!((0..20).contains(&x));
+            assert!((0..20).contains(&y));
         }
         // Row 5 (middle) should have tiles — triangle widens going down
         let row5: Vec<i32> = tiles.iter().filter(|t| t.1 == 5).map(|t| t.0).collect();
@@ -684,8 +748,8 @@ mod tests {
         let tiles = scanline_fill(&ring, 10, 10);
         // Should only produce tiles within [0, 10)
         for &(x, y) in &tiles {
-            assert!(x >= 0 && x < 10, "x={x} out of bounds");
-            assert!(y >= 0 && y < 10, "y={y} out of bounds");
+            assert!((0..10).contains(&x), "x={x} out of bounds");
+            assert!((0..10).contains(&y), "y={y} out of bounds");
         }
         // Should fill approximately 5x5 = 25 tiles (the in-bounds quarter)
         assert!(
@@ -693,5 +757,42 @@ mod tests {
             "len={}",
             tiles.len()
         );
+    }
+
+    #[test]
+    fn test_paris_ron_roundtrip() {
+        let data = ParisMapRon {
+            grid_width: 100,
+            grid_height: 80,
+            buildings: vec![ParisBuildingRon {
+                identif: 42,
+                quartier: "Arcis".into(),
+                superficie: 120.0,
+                bati: 1,
+                nom_bati: Some("Mairie".into()),
+                num_ilot: "860IL74".into(),
+                polygon: vec![(10.0, 10.0), (20.0, 10.0), (20.0, 20.0), (10.0, 20.0)],
+            }],
+            blocks: vec![ParisBlockRon {
+                id_ilots: "860IL74".into(),
+                quartier: "Arcis".into(),
+                aire: 5000.0,
+                polygon: vec![(5.0, 5.0), (25.0, 5.0), (25.0, 25.0), (5.0, 25.0)],
+            }],
+            quartier_names: vec!["Arcis".into(), "Marais".into()],
+        };
+
+        let ron_str = ron::ser::to_string_pretty(&data, ron::ser::PrettyConfig::default())
+            .expect("serialize");
+        let back: ParisMapRon = ron::from_str(&ron_str).expect("deserialize");
+
+        assert_eq!(back.grid_width, 100);
+        assert_eq!(back.grid_height, 80);
+        assert_eq!(back.buildings.len(), 1);
+        assert_eq!(back.buildings[0].identif, 42);
+        assert_eq!(back.buildings[0].nom_bati, Some("Mairie".into()));
+        assert_eq!(back.blocks.len(), 1);
+        assert_eq!(back.blocks[0].id_ilots, "860IL74");
+        assert_eq!(back.quartier_names, vec!["Arcis", "Marais"]);
     }
 }

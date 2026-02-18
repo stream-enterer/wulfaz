@@ -1,8 +1,8 @@
 //! One-time GIS preprocessing tool.
-//! Reads Paris shapefiles, rasterizes onto tile grid, writes binary map file.
+//! Reads Paris shapefiles, extracts polygon data, writes RON map file.
 //!
 //! Usage: cargo run --bin preprocess [PARIS_DATA_DIR] [OUTPUT_PATH]
-//! Defaults: PARIS_DATA from env or "../../paris/data", output "data/paris.bin"
+//! Defaults: PARIS_DATA from env or "../../paris/data", output "data/paris.ron"
 
 use std::time::Instant;
 
@@ -22,7 +22,7 @@ fn main() {
     let output_path = if args.len() > 2 {
         args[2].clone()
     } else {
-        "data/paris.bin".into()
+        "data/paris.ron".into()
     };
 
     let buildings_shp = format!("{paris_data}/buildings/BATI.shp");
@@ -42,13 +42,13 @@ fn main() {
 
     println!(
         "Saving to {output_path} ({} buildings, {} blocks, {} quartiers)...",
-        data.buildings.buildings.len(),
-        data.blocks.blocks.len(),
+        data.buildings.len(),
+        data.blocks.len(),
         data.quartier_names.len(),
     );
 
     let save_start = Instant::now();
-    loading_gis::save_map_data(&data, &output_path);
+    loading_gis::save_paris_ron(&data, &output_path);
 
     let file_size = std::fs::metadata(&output_path)
         .map(|m| m.len())

@@ -527,10 +527,10 @@ fn main() {
     let mut world = World::new_with_seed(42);
 
     // Load pre-built Paris map if available, otherwise random terrain.
-    let paris_bin = std::path::Path::new("data/paris.bin");
-    if paris_bin.exists() {
-        let data = loading_gis::load_map_data(paris_bin.to_str().unwrap());
-        loading_gis::apply_map_data(&mut world, data);
+    let paris_ron = std::path::Path::new("data/paris.ron");
+    if paris_ron.exists() {
+        let data = loading_gis::load_paris_ron(paris_ron.to_str().unwrap());
+        loading_gis::apply_paris_ron(&mut world, data);
     } else {
         loading::load_terrain(&mut world, "data/terrain.kdl");
     }

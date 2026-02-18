@@ -2,8 +2,6 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
-
 use crate::components::Tick;
 use crate::registry::{BlockId, BuildingId};
 
@@ -11,7 +9,7 @@ use crate::registry::{BlockId, BuildingId};
 pub const CHUNK_SIZE: usize = 64;
 const CHUNK_AREA: usize = CHUNK_SIZE * CHUNK_SIZE;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Terrain {
     Road,      // streets, alleys, open ground — walkable
     Wall,      // building perimeter — blocked
@@ -38,7 +36,7 @@ impl Terrain {
 }
 
 /// Chunk coordinate — identifies a 64×64 chunk in the world grid.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkCoord {
     pub cx: i32,
     pub cy: i32,
@@ -51,20 +49,14 @@ impl fmt::Debug for ChunkCoord {
 }
 
 /// A 64×64 tile chunk with terrain and temperature layers.
-#[derive(Serialize, Deserialize)]
 pub struct Chunk {
-    #[serde(with = "serde_big_array::BigArray")]
     terrain: [Terrain; CHUNK_AREA],
-    #[serde(with = "serde_big_array::BigArray")]
     temperature: [f32; CHUNK_AREA],
     /// 0 = no building, else Identif value from BATI.shp.
-    #[serde(with = "serde_big_array::BigArray")]
     building_id: [u32; CHUNK_AREA],
     /// 0 = no block, else sequential BlockId.
-    #[serde(with = "serde_big_array::BigArray")]
     block_id: [u16; CHUNK_AREA],
     /// 0 = unassigned, 1-36 = quartier index.
-    #[serde(with = "serde_big_array::BigArray")]
     quartier_id: [u8; CHUNK_AREA],
     /// Set to true when any tile in this chunk is modified.
     pub dirty: bool,
@@ -149,7 +141,6 @@ impl Chunk {
     }
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct TileMap {
     chunks: HashMap<ChunkCoord, Chunk>,
     width: usize,  // total tiles
