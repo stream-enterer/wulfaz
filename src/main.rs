@@ -59,7 +59,9 @@ impl GpuState {
             ..Default::default()
         });
 
-        let surface = instance.create_surface(window.clone()).unwrap();
+        let surface = instance
+            .create_surface(window.clone())
+            .expect("create surface");
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::default(),
@@ -232,7 +234,7 @@ impl ApplicationHandler for App {
             .with_title("Wulfaz")
             .with_inner_size(winit::dpi::LogicalSize::new(800.0, 600.0));
 
-        let window = Arc::new(event_loop.create_window(attrs).unwrap());
+        let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let gpu = GpuState::new(window.clone());
 
         let font_renderer = font::FontRenderer::new(
@@ -374,7 +376,7 @@ impl ApplicationHandler for App {
                         if self.world.player.is_some() {
                             // Roguelike: advance on player action only
                             if let Some(action) = self.pending_player_action.take() {
-                                let player = self.world.player.unwrap();
+                                let player = self.world.player.expect("player entity");
                                 match action {
                                     PlayerAction::Move(dx, dy) => {
                                         let can_move =
@@ -533,11 +535,11 @@ fn main() {
     if paris_tiles.exists() && paris_meta.exists() {
         loading_gis::load_paris_binary(
             &mut world,
-            paris_tiles.to_str().unwrap(),
-            paris_meta.to_str().unwrap(),
+            paris_tiles.to_str().expect("tiles path UTF-8"),
+            paris_meta.to_str().expect("meta path UTF-8"),
         );
     } else if paris_ron.exists() {
-        let data = loading_gis::load_paris_ron(paris_ron.to_str().unwrap());
+        let data = loading_gis::load_paris_ron(paris_ron.to_str().expect("ron path UTF-8"));
         loading_gis::apply_paris_ron(&mut world, data);
     } else {
         loading::load_terrain(&mut world, "data/terrain.kdl");
@@ -552,7 +554,7 @@ fn main() {
         y: world.tiles.height() as i32 / 2,
     };
 
-    let event_loop = EventLoop::new().unwrap();
+    let event_loop = EventLoop::new().expect("create event loop");
     let mut app = App {
         gpu: None,
         font: None,
@@ -566,5 +568,5 @@ fn main() {
         map_origin: (0.0, 0.0),
         map_cell_size: 0.0,
     };
-    event_loop.run_app(&mut app).unwrap();
+    event_loop.run_app(&mut app).expect("run event loop");
 }

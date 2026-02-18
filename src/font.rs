@@ -464,13 +464,13 @@ fn query_fontconfig(families: &[&str]) -> Option<HintingConfig> {
         fn FcPatternDestroy(p: *mut std::ffi::c_void);
     }
 
-    let fc_family = CString::new("family").unwrap();
-    let fc_file = CString::new("file").unwrap();
-    let fc_hinting = CString::new("hinting").unwrap();
-    let fc_hintstyle = CString::new("hintstyle").unwrap();
+    let fc_family = CString::new("family").expect("CString family");
+    let fc_file = CString::new("file").expect("CString file");
+    let fc_hinting = CString::new("hinting").expect("CString hinting");
+    let fc_hintstyle = CString::new("hintstyle").expect("CString hintstyle");
 
     for family in families {
-        let family_c = CString::new(*family).unwrap();
+        let family_c = CString::new(*family).expect("CString family name");
         unsafe {
             let pat = FcPatternCreate();
             if pat.is_null() {
