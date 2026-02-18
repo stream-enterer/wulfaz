@@ -11,20 +11,6 @@ Goal: See Paris on screen. No entities.
 Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 30m padding).
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
-- **SCALE-A01** — Expand Terrain enum for city tiles. Update walkability, temperature targets, pathfinding costs. Blocks: A03.
-  - `Road` — streets and open ground. Walkable.
-  - `Wall` — building perimeter. Blocked.
-  - `Floor` — building interior. Walkable.
-  - `Door` — building entrance. Walkable.
-  - `Courtyard` — enclosed yard within a city block. Walkable.
-  - `Garden` — parks/green space. Walkable.
-  - `Water` — river. Blocked.
-  - `Bridge` — river crossing. Walkable.
-  - Derivation rules for each type are in the tasks that place them: A03 (Wall, Floor, Courtyard, Road), A08 (Water, Bridge), B05 (Door, Garden).
-  - No elevation data exists. Map is flat.
-
-- **SCALE-A02** — Chunked TileMap. `HashMap<ChunkCoord, Chunk>`, 64×64 per chunk. ~7,400 chunks for full city. All tile accessors route through chunk lookup. Existing tests pass on single-chunk map. Blocks: A03, A04, A05.
-
 - **SCALE-A03** — GIS terrain loader + building registry. Blocks: A07, A08, B05. Needs: A01, A02.
   - Input files (all in `~/Development/paris/data/`):
     - `buildings/BATI.shp` — 40,356 building footprint polygons. Encoding: `latin-1`. CRS: EPSG:4326 (WGS84 lon/lat).

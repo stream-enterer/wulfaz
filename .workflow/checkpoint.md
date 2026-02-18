@@ -1,29 +1,22 @@
 # Checkpoint
 
 ## Active Task
-SCALE-A01 complete. Ready for SCALE-A02: chunked TileMap.
+SCALE-A02 complete. Ready for next task.
 
 ## Next Action
-SCALE-A02: Implement `HashMap<ChunkCoord, Chunk>` with 64×64 chunks. All tile accessors route through chunk lookup.
+SCALE-A03 (GIS terrain loader) or SCALE-A05 (lazy tile updates) — both unblocked.
 
 ## Key Decisions
-- 30M tiles (6,309 x 4,753), ~1M population, 64×64 chunks, ~7,400 chunks
-- Three-zone LOD: Active ~4K / Nearby ~50K / Statistical ~950K aggregate
-- Terrain enum: Road, Wall, Floor, Door, Courtyard, Garden, Water, Bridge (implemented)
-- Walkability: Wall and Water blocked, all others walkable
-- Temperature targets: Water 10°, Bridge 12°, Garden 15°, Wall 15°, Road 16°, Courtyard 16°, Door 17°, Floor 18°
-- Default terrain: Road (16°C), replaces old Grass (20°C)
-- Render chars: Road=. Wall=# Floor=_ Door=+ Courtyard=, Garden=" Water=~ Bridge==
-- Per-tile ID layers: building_id, block_id, quartier_id (all write-once from GIS data)
-- Registries: BuildingRegistry, BlockRegistry, StreetRegistry — persist all shapefile metadata
+- Chunked TileMap: 64×64 chunks via `HashMap<ChunkCoord, Chunk>`
+- Chunk struct: terrain + temperature arrays, dirty flag, last_tick
+- Public API unchanged — all callers work without modification
+- New chunk-level accessors: get_chunk, get_chunk_mut, chunks, chunks_mut, tile_to_chunk
+- set_terrain/set_temperature mark chunk dirty for future A05 use
+- Auto-creates chunks via entry().or_insert_with() for dynamic growth
+- 64×64 test map = exactly 1 chunk, same behavior as before
 
-## Modified Files (A01)
-- `src/tile_map.rs` — Terrain enum, walkability, default Road
-- `src/systems/temperature.rs` — 8 terrain temperature targets
-- `src/render.rs` — terrain display characters
-- `src/loading.rs` — random scatter for test map
-- `src/systems/wander.rs` — test fix (Stone→Wall)
-- `data/terrain.kdl` — terrain definitions
+## Modified Files (A02)
+- `src/tile_map.rs` — full rewrite: ChunkCoord, Chunk, HashMap storage, chunk routing
 
 ## Reference
 `.workflow/architecture.md` — full technical spec

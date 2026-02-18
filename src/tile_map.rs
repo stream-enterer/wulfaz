@@ -1,5 +1,12 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::fmt;
+
+use crate::components::Tick;
+
+/// Side length of each chunk in tiles. 1 chunk = 64×64 = 4096 tiles.
+pub const CHUNK_SIZE: usize = 64;
+const CHUNK_AREA: usize = CHUNK_SIZE * CHUNK_SIZE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Terrain {
@@ -27,22 +34,109 @@ impl Terrain {
     }
 }
 
-#[derive(Debug)]
+/// Chunk coordinate — identifies a 64×64 chunk in the world grid.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChunkCoord {
+    pub cx: i32,
+    pub cy: i32,
+}
+
+impl fmt::Debug for ChunkCoord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ChunkCoord({}, {})", self.cx, self.cy)
+    }
+}
+
+/// A 64×64 tile chunk with terrain and temperature layers.
+pub struct Chunk {
+    terrain: [Terrain; CHUNK_AREA],
+    temperature: [f32; CHUNK_AREA],
+    /// Set to true when any tile in this chunk is modified.
+    pub dirty: bool,
+    /// Last simulation tick that touched this chunk.
+    pub last_tick: Tick,
+}
+
+impl fmt::Debug for Chunk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Chunk")
+            .field("dirty", &self.dirty)
+            .field("last_tick", &self.last_tick)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Chunk {
+    /// Create a new chunk with default terrain (Road) and temperature (16°C).
+    fn new() -> Self {
+        Self {
+            terrain: [Terrain::Road; CHUNK_AREA],
+            temperature: [16.0; CHUNK_AREA],
+            dirty: false,
+            last_tick: Tick(0),
+        }
+    }
+
+    fn local_index(lx: usize, ly: usize) -> usize {
+        debug_assert!(lx < CHUNK_SIZE && ly < CHUNK_SIZE);
+        ly * CHUNK_SIZE + lx
+    }
+
+    pub fn get_terrain(&self, lx: usize, ly: usize) -> Terrain {
+        self.terrain[Self::local_index(lx, ly)]
+    }
+
+    pub fn set_terrain(&mut self, lx: usize, ly: usize, t: Terrain) {
+        self.terrain[Self::local_index(lx, ly)] = t;
+        self.dirty = true;
+    }
+
+    pub fn get_temperature(&self, lx: usize, ly: usize) -> f32 {
+        self.temperature[Self::local_index(lx, ly)]
+    }
+
+    pub fn set_temperature(&mut self, lx: usize, ly: usize, temp: f32) {
+        self.temperature[Self::local_index(lx, ly)] = temp;
+        self.dirty = true;
+    }
+}
+
 pub struct TileMap {
-    width: usize,
-    height: usize,
-    terrain: Vec<Terrain>,
-    temperature: Vec<f32>,
+    chunks: HashMap<ChunkCoord, Chunk>,
+    width: usize,  // total tiles
+    height: usize, // total tiles
+}
+
+impl fmt::Debug for TileMap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TileMap")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("chunks", &self.chunks.len())
+            .finish()
+    }
 }
 
 impl TileMap {
     pub fn new(width: usize, height: usize) -> Self {
-        let size = width * height;
+        let chunks_x = width.div_ceil(CHUNK_SIZE);
+        let chunks_y = height.div_ceil(CHUNK_SIZE);
+        let mut chunks = HashMap::with_capacity(chunks_x * chunks_y);
+        for cy in 0..chunks_y {
+            for cx in 0..chunks_x {
+                chunks.insert(
+                    ChunkCoord {
+                        cx: cx as i32,
+                        cy: cy as i32,
+                    },
+                    Chunk::new(),
+                );
+            }
+        }
         Self {
+            chunks,
             width,
             height,
-            terrain: vec![Terrain::Road; size],
-            temperature: vec![16.0; size], // Road target = 16°C
         }
     }
 
@@ -54,37 +148,99 @@ impl TileMap {
         self.height
     }
 
-    fn index(&self, x: usize, y: usize) -> Option<usize> {
-        if x < self.width && y < self.height {
-            Some(y * self.width + x)
-        } else {
-            None
+    /// Convert tile coordinates to chunk coord + local offset.
+    /// Returns None if out of bounds.
+    fn chunk_and_local(&self, x: usize, y: usize) -> Option<(ChunkCoord, usize, usize)> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let coord = ChunkCoord {
+            cx: (x / CHUNK_SIZE) as i32,
+            cy: (y / CHUNK_SIZE) as i32,
+        };
+        let lx = x % CHUNK_SIZE;
+        let ly = y % CHUNK_SIZE;
+        Some((coord, lx, ly))
+    }
+
+    /// Convert tile coordinates to a ChunkCoord (public, for A04/A05).
+    #[allow(dead_code)]
+    pub fn tile_to_chunk(x: usize, y: usize) -> ChunkCoord {
+        ChunkCoord {
+            cx: (x / CHUNK_SIZE) as i32,
+            cy: (y / CHUNK_SIZE) as i32,
         }
     }
 
     pub fn get_terrain(&self, x: usize, y: usize) -> Option<Terrain> {
-        self.index(x, y).map(|i| self.terrain[i])
+        let (coord, lx, ly) = self.chunk_and_local(x, y)?;
+        self.chunks.get(&coord).map(|c| c.get_terrain(lx, ly))
     }
 
     pub fn set_terrain(&mut self, x: usize, y: usize, t: Terrain) {
-        if let Some(i) = self.index(x, y) {
-            self.terrain[i] = t;
+        if x >= self.width || y >= self.height {
+            return;
         }
+        let coord = ChunkCoord {
+            cx: (x / CHUNK_SIZE) as i32,
+            cy: (y / CHUNK_SIZE) as i32,
+        };
+        let lx = x % CHUNK_SIZE;
+        let ly = y % CHUNK_SIZE;
+        self.chunks
+            .entry(coord)
+            .or_insert_with(Chunk::new)
+            .set_terrain(lx, ly, t);
     }
 
     pub fn get_temperature(&self, x: usize, y: usize) -> Option<f32> {
-        self.index(x, y).map(|i| self.temperature[i])
+        let (coord, lx, ly) = self.chunk_and_local(x, y)?;
+        self.chunks.get(&coord).map(|c| c.get_temperature(lx, ly))
     }
 
     pub fn set_temperature(&mut self, x: usize, y: usize, temp: f32) {
-        if let Some(i) = self.index(x, y) {
-            self.temperature[i] = temp;
+        if x >= self.width || y >= self.height {
+            return;
         }
+        let coord = ChunkCoord {
+            cx: (x / CHUNK_SIZE) as i32,
+            cy: (y / CHUNK_SIZE) as i32,
+        };
+        let lx = x % CHUNK_SIZE;
+        let ly = y % CHUNK_SIZE;
+        self.chunks
+            .entry(coord)
+            .or_insert_with(Chunk::new)
+            .set_temperature(lx, ly, temp);
     }
 
     /// Check if a tile is walkable (in-bounds and terrain allows passage).
     pub fn is_walkable(&self, x: usize, y: usize) -> bool {
         self.get_terrain(x, y).is_some_and(|t| t.is_walkable())
+    }
+
+    /// Get an immutable reference to a chunk by coordinate (for A04/A05).
+    #[allow(dead_code)]
+    pub fn get_chunk(&self, coord: ChunkCoord) -> Option<&Chunk> {
+        self.chunks.get(&coord)
+    }
+
+    /// Get a mutable reference to a chunk by coordinate (for A04/A05).
+    #[allow(dead_code)]
+    pub fn get_chunk_mut(&mut self, coord: ChunkCoord) -> Option<&mut Chunk> {
+        self.chunks.get_mut(&coord)
+    }
+
+    /// Iterate over all chunks (for A04/A05).
+    #[allow(dead_code)]
+    pub fn chunks(&self) -> impl Iterator<Item = (&ChunkCoord, &Chunk)> {
+        self.chunks.iter()
+    }
+
+    /// Iterate over all chunks mutably (for A04/A05).
+    #[allow(dead_code)]
+    pub fn chunks_mut(&mut self) -> impl Iterator<Item = (&ChunkCoord, &mut Chunk)> {
+        self.chunks.iter_mut()
     }
 
     /// A* pathfinding from start to goal on the tile grid (8-directional, √2 diagonal cost).
@@ -278,14 +434,108 @@ mod tests {
     }
 
     #[test]
-    fn test_index_matches_y_times_width_plus_x() {
-        let map = TileMap::new(10, 8);
+    fn test_chunk_and_local_mapping() {
+        let map = TileMap::new(200, 150);
 
-        assert_eq!(map.index(0, 0), Some(0));
-        assert_eq!(map.index(1, 0), Some(1));
-        assert_eq!(map.index(0, 1), Some(10));
-        assert_eq!(map.index(3, 2), Some(2 * 10 + 3));
-        assert_eq!(map.index(9, 7), Some(7 * 10 + 9));
+        // Tile (0,0) → chunk (0,0), local (0,0)
+        let (coord, lx, ly) = map.chunk_and_local(0, 0).unwrap();
+        assert_eq!(coord, ChunkCoord { cx: 0, cy: 0 });
+        assert_eq!((lx, ly), (0, 0));
+
+        // Tile (63,63) → chunk (0,0), local (63,63)
+        let (coord, lx, ly) = map.chunk_and_local(63, 63).unwrap();
+        assert_eq!(coord, ChunkCoord { cx: 0, cy: 0 });
+        assert_eq!((lx, ly), (63, 63));
+
+        // Tile (64,0) → chunk (1,0), local (0,0)
+        let (coord, lx, ly) = map.chunk_and_local(64, 0).unwrap();
+        assert_eq!(coord, ChunkCoord { cx: 1, cy: 0 });
+        assert_eq!((lx, ly), (0, 0));
+
+        // Tile (65,64) → chunk (1,1), local (1,0)
+        let (coord, lx, ly) = map.chunk_and_local(65, 64).unwrap();
+        assert_eq!(coord, ChunkCoord { cx: 1, cy: 1 });
+        assert_eq!((lx, ly), (1, 0));
+
+        // Tile (199,149) → chunk (3,2), local (7,21)
+        let (coord, lx, ly) = map.chunk_and_local(199, 149).unwrap();
+        assert_eq!(coord, ChunkCoord { cx: 3, cy: 2 });
+        assert_eq!((lx, ly), (199 % 64, 149 % 64));
+
+        // Out of bounds
+        assert!(map.chunk_and_local(200, 0).is_none());
+        assert!(map.chunk_and_local(0, 150).is_none());
+    }
+
+    #[test]
+    fn test_tile_to_chunk() {
+        assert_eq!(TileMap::tile_to_chunk(0, 0), ChunkCoord { cx: 0, cy: 0 });
+        assert_eq!(TileMap::tile_to_chunk(63, 63), ChunkCoord { cx: 0, cy: 0 });
+        assert_eq!(TileMap::tile_to_chunk(64, 0), ChunkCoord { cx: 1, cy: 0 });
+        assert_eq!(
+            TileMap::tile_to_chunk(128, 128),
+            ChunkCoord { cx: 2, cy: 2 }
+        );
+    }
+
+    #[test]
+    fn test_multi_chunk_get_set() {
+        // 200×150 map spans 4×3 = 12 chunks
+        let mut map = TileMap::new(200, 150);
+
+        // Set terrain in different chunks
+        map.set_terrain(0, 0, Terrain::Water); // chunk (0,0)
+        map.set_terrain(100, 0, Terrain::Wall); // chunk (1,0)
+        map.set_terrain(0, 100, Terrain::Garden); // chunk (0,1)
+        map.set_terrain(199, 149, Terrain::Bridge); // chunk (3,2)
+
+        assert_eq!(map.get_terrain(0, 0), Some(Terrain::Water));
+        assert_eq!(map.get_terrain(100, 0), Some(Terrain::Wall));
+        assert_eq!(map.get_terrain(0, 100), Some(Terrain::Garden));
+        assert_eq!(map.get_terrain(199, 149), Some(Terrain::Bridge));
+
+        // Unmodified tiles are still Road
+        assert_eq!(map.get_terrain(50, 50), Some(Terrain::Road));
+        assert_eq!(map.get_terrain(130, 80), Some(Terrain::Road));
+    }
+
+    #[test]
+    fn test_chunk_dirty_tracking() {
+        let mut map = TileMap::new(200, 150);
+
+        // All chunks start clean
+        for (_, chunk) in map.chunks() {
+            assert!(!chunk.dirty);
+        }
+
+        // Modify a tile in chunk (1,1)
+        map.set_terrain(70, 70, Terrain::Water);
+
+        let coord = ChunkCoord { cx: 1, cy: 1 };
+        assert!(map.get_chunk(coord).unwrap().dirty);
+
+        // Chunk (0,0) should still be clean
+        let coord0 = ChunkCoord { cx: 0, cy: 0 };
+        assert!(!map.get_chunk(coord0).unwrap().dirty);
+    }
+
+    #[test]
+    fn test_chunk_count() {
+        // 64×64 → exactly 1 chunk
+        let map = TileMap::new(64, 64);
+        assert_eq!(map.chunks().count(), 1);
+
+        // 65×65 → 2×2 = 4 chunks
+        let map = TileMap::new(65, 65);
+        assert_eq!(map.chunks().count(), 4);
+
+        // 200×150 → 4×3 = 12 chunks (ceil(200/64) × ceil(150/64))
+        let map = TileMap::new(200, 150);
+        assert_eq!(map.chunks().count(), 12);
+
+        // 0×0 → 0 chunks
+        let map = TileMap::new(0, 0);
+        assert_eq!(map.chunks().count(), 0);
     }
 
     #[test]
