@@ -128,6 +128,12 @@ pub fn render_status(world: &World) -> String {
         status.push_str(&parts.join(" "));
     }
 
+    if let Some(player) = world.player
+        && let Some(name) = world.names.get(&player)
+    {
+        status.push_str(&format!(" | @{}", name.value));
+    }
+
     status
 }
 

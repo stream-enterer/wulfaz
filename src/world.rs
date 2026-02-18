@@ -36,6 +36,8 @@ pub struct World {
     pub rng: StdRng,
     pub tick: Tick,
     pub utility_config: UtilityConfig,
+    /// Player-controlled entity. None = realtime mode, Some = roguelike mode.
+    pub player: Option<Entity>,
 }
 
 impl World {
@@ -66,6 +68,7 @@ impl World {
             rng: create_rng(seed),
             tick: Tick(0),
             utility_config: UtilityConfig::default(),
+            player: None,
         }
     }
 
@@ -83,6 +86,9 @@ impl World {
     /// If you add a new property table to World, add a corresponding remove here.
     pub fn despawn(&mut self, entity: Entity) {
         self.alive.remove(&entity);
+        if self.player == Some(entity) {
+            self.player = None;
+        }
         self.positions.remove(&entity);
         self.hungers.remove(&entity);
         self.healths.remove(&entity);

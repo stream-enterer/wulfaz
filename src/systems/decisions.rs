@@ -227,6 +227,7 @@ pub fn run_decisions(world: &mut World, _tick: Tick) {
         .action_states
         .keys()
         .filter(|e| !world.pending_deaths.contains(e))
+        .filter(|e| world.player != Some(**e))
         .copied()
         .collect();
     entities.sort_by_key(|e| e.0);
