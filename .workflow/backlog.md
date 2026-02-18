@@ -12,34 +12,41 @@ Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 3
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
 - **SCALE-A07** — Address + occupant loading. Needs: A03. Blocks: B06, B03, C04, C05.
-  - Loads address data and joins it to buildings in the registry. This is a data-loading step, not entity spawning.
-  - Step 1: Read `addresses/Num_Voies_Vasserot.shp` (29,164 points, encoding `latin-1`). **WARNING: Lambert projection, NOT WGS84.** Use `ID_PARC` field only (ignore point geometry). Strip "PA" prefix → match to `BuildingId`. Attach street name (`NOM_ENTIER`) and house number (`NUM_VOIES`) to each building in the registry.
-  - Step 2: Open `soduco/data/data_extraction_with_population.gpkg` (SQLite). For the chosen year, query all entries. Fuzzy-match street names to the address data attached in Step 1. Attach matching occupants (name, activity, NAICS) to each building's address records.
-  - Street name normalization: strip "Rue de la/du/des/", expand "Fg-" → "Faubourg", "St-" → "Saint-", case-insensitive compare.
-  - **Street registry**: as addresses are loaded, build a `StreetRegistry` (see architecture.md). Each unique street name gets a `StreetId`. The registry maps street name → list of buildings on that street. Streets have no tile geometry (they're negative space), but the registry enables name lookups in both directions.
-  - After this step, the building registry knows: which buildings have known occupants, what their occupations are, and what NAICS category each building falls under. The street registry knows all street names and which buildings front each street. This feeds B06 (furniture by NAICS), B03 (entity spawning), C04 (district aggregates), and C05 (population seeding).
+  - Joins address and occupant data to buildings. Two-stage preprocessor pipeline, same pattern as A03.
+  - **Preprocessor** (extend `preprocess.rs`):
+    - Step 1: Read `addresses/Num_Voies_Vasserot.shp` (29,164 points, encoding `latin-1`). **WARNING: Lambert projection, NOT WGS84.** Use `ID_PARC` field only (ignore point geometry). Strip "PA" prefix → match to `Identif` via `identif_index`. Attach street name (`NOM_ENTIER`) and house number (`NUM_VOIES`).
+    - Step 2: Open `soduco/data/data_extraction_with_population.gpkg` (SQLite). For the chosen year, query all entries. Fuzzy-match street names to addresses from Step 1. Attach occupants (name, activity, NAICS) to buildings.
+    - Street name normalization: strip "Rue de la/du/des/", expand "Fg-" → "Faubourg", "St-" → "Saint-", case-insensitive compare.
+    - Build `StreetRegistry` (see architecture.md) — each unique street name gets a `StreetId`, maps street name → list of buildings.
+    - Write results into `paris.meta.ron`: populate `addresses` and `occupants` fields on `BuildingData`, add `StreetRegistry` section.
+  - **Game load** (no new file reads): `load_paris_binary` already deserializes `BuildingData` including addresses/occupants. Reconstruct `StreetRegistry` from loaded address data on `world.buildings`.
+  - The game never touches shapefiles or GeoPackage. All joins and fuzzy matching happen offline in the preprocessor.
+  - After this step: building registry knows occupants and NAICS categories, street registry knows all street names and their buildings. Feeds B06 (furniture by NAICS), B03 (entity spawning), C04 (district aggregates), C05 (population seeding).
 
-- **SCALE-A08** — Seine + bridge placement. Needs: A03. Blocks: A04.
-  - The Seine is NOT in any GIS dataset. Must be hardcoded.
-  - River band: approximately lat 48.856-48.860, which maps to roughly tile rows 2600-3050 (y-axis, from top). The band is not uniform width — it narrows and widens.
-  - Island exclusions: Ile de la Cite (quartier "Cite") and Ile Saint-Louis (quartier "Ile Saint-Louis"). Their building/block polygons are already rasterized by A03. Any tile inside these block polygons is NOT water — it's already Courtyard or building. Only overwrite tiles that are currently Road.
-  - Method: define the river as a polygon (list of lat/lon vertices tracing both banks), rasterize with the same scanline fill used for blocks, then mark all resulting tiles as Water UNLESS they already have a building_id or block_id (island tiles).
-  - River polygon source: trace from a historical map or define as a simple band with manually adjusted vertices at the bends. ~20-30 vertices should suffice.
-  - Bridges (hardcoded, 1830s-era): Pont Royal, Pont du Carrousel, Pont des Arts, Pont Neuf, Pont au Change, Pont Notre-Dame, Pont de l'Arcole, Pont Saint-Louis, Pont Marie, Pont de la Tournelle. Each bridge is a short rectangle of Bridge tiles (~5-8 tiles wide, spanning the water gap). Define each as two endpoints (tile coordinates) and fill the rectangle between them.
+- **SCALE-A08** — Seine + bridge placement. Needs: A03.
+  - **Preprocessor** (extend `preprocess.rs`): runs after block/building rasterization, before writing binary tiles.
+  - The Seine is NOT in any GIS dataset. Hardcoded polygon vertices in `loading_gis.rs`.
+  - River band: approximately lat 48.856-48.860, tile rows ~2600-3050 (y-axis, from top). Not uniform width.
+  - Island exclusions: Ile de la Cite (quartier "Cite") and Ile Saint-Louis (quartier "Ile Saint-Louis"). Only overwrite tiles that are currently Road (tiles with building_id or block_id are already Courtyard or building from A03).
+  - Method: define river as a polygon (~20-30 vertices tracing both banks), rasterize with `scanline_fill`, mark resulting tiles as Water unless they already have building_id or block_id.
+  - Bridges (hardcoded, 1830s-era): Pont Royal, Pont du Carrousel, Pont des Arts, Pont Neuf, Pont au Change, Pont Notre-Dame, Pont de l'Arcole, Pont Saint-Louis, Pont Marie, Pont de la Tournelle. Each bridge: two endpoints (tile coordinates), fill the rectangle between them with Bridge tiles (~5-8 wide).
   - Set `quartier_id` on water tiles to 0 (unassigned). Bridge tiles get quartier from the nearest bank.
+  - Result baked into `paris.tiles` binary. Game loads Water/Bridge terrain the same as any other tile.
 
 ## Phase B — Entities in One Neighborhood
 
 Goal: ~200 entities with full AI on the real map.
 
 - **SCALE-B05** — Door placement + passage carving. Needs: A03. Blocks: B06, B03.
+  - **Preprocessor** (extend `preprocess.rs`): runs after wall/floor classification, same pattern as classify_walls_floors. Static tile modification baked into `paris.tiles`.
   - Place Door tiles: for each building, find a wall tile adjacent to both a floor tile and a Road or Courtyard tile. That tile becomes a Door.
   - Landlocked buildings (no wall tile adjacent to Road or Courtyard): carve a 1-tile passage through intervening buildings to the nearest Road or Courtyard. This models the narrow covered passages (allées) that provided access to interior buildings in dense Parisian blocks.
   - Garden buildings (24 "parc ou jardin"): convert their interior Floor tiles to Garden instead of Floor.
+  - Game loads Door/Garden terrain from binary, no runtime classification needed.
 
 - **SCALE-B06** — Building interior generation. Needs: B05, A07.
-  - After door placement, furnish building interiors based on occupant type.
-  - Each building's NAICS category is known from the building registry (populated by A07). Look up NAICS category for the building's occupants. Place furniture tiles accordingly:
+  - **Preprocessor** (extend `preprocess.rs`): runs after door placement + address loading. Static tile modifications baked into `paris.tiles`.
+  - Furnish building interiors based on occupant type. NAICS category from building registry (populated by A07 in preprocessor). Place furniture tiles:
     - Food stores → counters, barrels, shelves
     - Restaurants → tables, chairs, hearth
     - Clothing → looms, counters, fabric
@@ -47,6 +54,7 @@ Goal: ~200 entities with full AI on the real map.
     - Residential/unknown → beds, table, chairs, hearth, chest
   - Buildings with no known occupant get default residential furnishing.
   - Small buildings (<15 floor tiles) get minimal furnishing (bed, table).
+  - Requires new Terrain variants for furniture types (or a separate furniture tile layer in Chunk).
 
 - **SCALE-B01** — Spatial index. `HashMap<(i32,i32), SmallVec<[Entity; 4]>>` on World, rebuilt from positions each tick. Blocks: B02.
 
@@ -70,15 +78,15 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
   - 36 quartiers defined by the `QUARTIER` field on every building and block polygon. No separate quartier boundary geometry needed — derive bounds from the bounding box of all buildings with that QUARTIER value.
   - Quartier sizes range from 265 buildings (Palais de Justice) to 2,391 buildings (Temple).
   - Sub-district: blocks (`NUM_ILOT` field on buildings, `ID_ILOTS` on plot polygons) group ~30-100 buildings each. Use as LOD sub-units if quartier granularity is too coarse.
-  - Per-district density derivable from: building count, total building area (SUPERFICIE sum), and SoDUCo entry count for the target year.
+  - Per-district density derivable from: building count, total building area (SUPERFICIE sum), and occupant count from building registry (baked in by A07).
 
 - **SCALE-C02** — LOD zone framework. Active/Nearby/Statistical derived from camera + district bounds. Needs: C01. Blocks: C03, C05.
 
 - **SCALE-C03** — Zone-aware system filtering. Combat: Active only. Hunger: Active+Nearby. Statistical: no entity iteration. Needs: C02.
 
 - **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01, A07.
-  - Seed `population_by_type` from NAICS distribution per quartier per year. The SoDUCo database has 22 industry categories. Query: `SELECT NAICS, COUNT(*) FROM data_extraction_with_population WHERE "source.publication_date" = 1845.0 GROUP BY NAICS`.
-  - City-wide distribution (1845): Manufacturing 18%, Food stores 13.5%, Clothing 11.7%, Furniture 8.2%, Legal 5.9%, Health 5.5%, Rentiers 4.5%, Arts 3.9%, Construction 3.6%. Use these as priors, adjust per quartier from actual data.
+  - Seed `population_by_type` from NAICS distribution per quartier. 22 industry categories. Aggregate from building registry occupant data (baked in by A07 preprocessor), not from raw GeoPackage.
+  - City-wide distribution (1845): Manufacturing 18%, Food stores 13.5%, Clothing 11.7%, Furniture 8.2%, Legal 5.9%, Health 5.5%, Rentiers 4.5%, Arts 3.9%, Construction 3.6%. Use these as priors, adjust per quartier from actual registry data.
 
 - **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02, C04, A07.
   - Procedural population generation rules (for the 96% not in directories):
@@ -89,7 +97,7 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
     - **Vertical stratification**: wealthiest on floor 1 (étage noble), progressively poorer upward, servants in garret.
     - **Floor estimate**: building height not in data. Estimate from SUPERFICIE: <50m² = 2 floors, 50-150m² = 3-4 floors, 150-400m² = 4-5 floors, >400m² = 5-6 floors. Multiply footprint area by floor count for total interior space.
     - **Density target**: ~116 people per 1,000m² of footprint (from census population / total building area). Adjust per quartier.
-  - 16 available time snapshots from SoDUCo: 1829, 1833, 1839, 1842, 1845, 1850, 1855, 1860, 1864, 1871, 1875, 1880, 1885, 1896, 1901, 1907. Pick one year at init and load that snapshot's directory entries. Note: building geometry is fixed 1810-1836; post-1855 directory data increasingly references demolished buildings.
+  - 16 available time snapshots from SoDUCo: 1829, 1833, 1839, 1842, 1845, 1850, 1855, 1860, 1864, 1871, 1875, 1880, 1885, 1896, 1901, 1907. Year is chosen at preprocess time (A07 bakes that year's directory entries into the metadata). Note: building geometry is fixed 1810-1836; post-1855 directory data increasingly references demolished buildings.
 
 ## Phase D — Seamless Transitions
 
