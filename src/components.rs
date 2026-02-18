@@ -40,11 +40,12 @@ pub struct Health {
     pub max: f32,
 }
 
-/// Stamina — drained by fast gaits, recovered by slow gaits.
+/// Fatigue — accumulated from combat, degrades effectiveness.
+/// Starts at 0. Effects: -1 defense per 10, -1 attack per 20.
+/// At 100: unconscious. Over 200: excess converts to HP damage.
 #[derive(Debug, Clone, Copy)]
-pub struct Stamina {
+pub struct Fatigue {
     pub current: f32,
-    pub max: f32,
 }
 
 /// Combat stats for entities that can fight.
@@ -128,8 +129,6 @@ pub enum ActionId {
     Wander,
     Eat,
     Attack,
-    Charge,
-    Flee,
 }
 
 /// What an entity intends to do this tick, written by the Phase 3 scorer.
@@ -280,12 +279,8 @@ mod tests {
     }
 
     #[test]
-    fn stamina_fields() {
-        let s = Stamina {
-            current: 80.0,
-            max: 100.0,
-        };
-        assert_eq!(s.current, 80.0);
-        assert_eq!(s.max, 100.0);
+    fn fatigue_fields() {
+        let f = Fatigue { current: 30.0 };
+        assert_eq!(f.current, 30.0);
     }
 }

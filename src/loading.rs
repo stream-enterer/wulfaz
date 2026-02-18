@@ -84,7 +84,6 @@ pub fn load_creatures(world: &mut World, path: &str) {
         let icon_ch = icon_str.chars().next().unwrap_or('?');
         let max_hunger = child_f64(children, "max_hunger").unwrap_or(100.0) as f32;
         let aggression = child_f64(children, "aggression").unwrap_or(0.0) as f32;
-        let max_stamina = child_f64(children, "max_stamina").unwrap_or(100.0) as f32;
         let gaits_str = child_str(children, "gaits").unwrap_or("biped");
 
         let e = world.spawn();
@@ -118,13 +117,7 @@ pub fn load_creatures(world: &mut World, path: &str) {
                 max: 100.0,
             },
         );
-        world.staminas.insert(
-            e,
-            Stamina {
-                current: max_stamina,
-                max: max_stamina,
-            },
-        );
+        world.fatigues.insert(e, Fatigue { current: 0.0 });
         world.combat_stats.insert(
             e,
             CombatStats {

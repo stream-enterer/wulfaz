@@ -18,7 +18,7 @@ pub struct World {
     pub positions: HashMap<Entity, Position>,
     pub hungers: HashMap<Entity, Hunger>,
     pub healths: HashMap<Entity, Health>,
-    pub staminas: HashMap<Entity, Stamina>,
+    pub fatigues: HashMap<Entity, Fatigue>,
     pub combat_stats: HashMap<Entity, CombatStats>,
     pub gait_profiles: HashMap<Entity, GaitProfile>,
     pub current_gaits: HashMap<Entity, Gait>,
@@ -49,7 +49,7 @@ impl World {
             positions: HashMap::new(),
             hungers: HashMap::new(),
             healths: HashMap::new(),
-            staminas: HashMap::new(),
+            fatigues: HashMap::new(),
             combat_stats: HashMap::new(),
             gait_profiles: HashMap::new(),
             current_gaits: HashMap::new(),
@@ -86,7 +86,7 @@ impl World {
         self.positions.remove(&entity);
         self.hungers.remove(&entity);
         self.healths.remove(&entity);
-        self.staminas.remove(&entity);
+        self.fatigues.remove(&entity);
         self.combat_stats.remove(&entity);
         self.gait_profiles.remove(&entity);
         self.current_gaits.remove(&entity);
@@ -128,10 +128,10 @@ pub fn validate_world(world: &World) {
         );
     }
 
-    for entity in world.staminas.keys() {
+    for entity in world.fatigues.keys() {
         assert!(
             world.alive.contains(entity),
-            "zombie entity {:?} in staminas but not in alive",
+            "zombie entity {:?} in fatigues but not in alive",
             entity
         );
     }
@@ -253,13 +253,7 @@ mod tests {
                 max: 100.0,
             },
         );
-        world.staminas.insert(
-            e,
-            Stamina {
-                current: 100.0,
-                max: 100.0,
-            },
-        );
+        world.fatigues.insert(e, Fatigue { current: 0.0 });
         world.combat_stats.insert(
             e,
             CombatStats {
@@ -310,7 +304,7 @@ mod tests {
         assert!(!world.positions.contains_key(&e));
         assert!(!world.hungers.contains_key(&e));
         assert!(!world.healths.contains_key(&e));
-        assert!(!world.staminas.contains_key(&e));
+        assert!(!world.fatigues.contains_key(&e));
         assert!(!world.combat_stats.contains_key(&e));
         assert!(!world.gait_profiles.contains_key(&e));
         assert!(!world.current_gaits.contains_key(&e));

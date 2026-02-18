@@ -4,9 +4,6 @@ use crate::tile_map::is_diagonal_step;
 use crate::world::World;
 use rand::RngExt;
 
-/// How far (Chebyshev) a fleeing entity runs from its threat (30 meters).
-const FLEE_RANGE: i32 = 30;
-
 /// √2 multiplier as fixed-point (141/100) for diagonal movement cost.
 const DIAGONAL_FACTOR: u32 = 141;
 
@@ -74,47 +71,12 @@ pub fn run_wander(world: &mut World, tick: Tick) {
 
         // Determine goal position
         let goal: Option<(i32, i32)> = match action {
-            Some(ActionId::Eat) | Some(ActionId::Attack) | Some(ActionId::Charge) => {
+            Some(ActionId::Eat) | Some(ActionId::Attack) => {
                 // Pathfind to target entity's position
                 intention
                     .and_then(|i| i.target)
                     .and_then(|t| world.positions.get(&t))
                     .map(|p| (p.x, p.y))
-            }
-            Some(ActionId::Flee) => {
-                // Flee: compute point in opposite direction from threat
-                intention
-                    .and_then(|i| i.target)
-                    .and_then(|t| world.positions.get(&t))
-                    .map(|threat_pos| {
-                        let dx = pos.x - threat_pos.x;
-                        let dy = pos.y - threat_pos.y;
-                        if dx == 0 && dy == 0 {
-                            // Same tile as threat: pick random direction
-                            let dir = world.rng.random_range(0..8);
-                            let (rdx, rdy) = match dir {
-                                0 => (0, -1),
-                                1 => (1, -1),
-                                2 => (1, 0),
-                                3 => (1, 1),
-                                4 => (0, 1),
-                                5 => (-1, 1),
-                                6 => (-1, 0),
-                                _ => (-1, -1),
-                            };
-                            let gx = (pos.x + rdx * FLEE_RANGE).clamp(0, (map_w - 1).max(0));
-                            let gy = (pos.y + rdy * FLEE_RANGE).clamp(0, (map_h - 1).max(0));
-                            (gx, gy)
-                        } else {
-                            // Normalize direction and scale by FLEE_RANGE
-                            let len = ((dx * dx + dy * dy) as f32).sqrt();
-                            let ndx = (dx as f32 / len * FLEE_RANGE as f32) as i32;
-                            let ndy = (dy as f32 / len * FLEE_RANGE as f32) as i32;
-                            let gx = (pos.x + ndx).clamp(0, (map_w - 1).max(0));
-                            let gy = (pos.y + ndy).clamp(0, (map_h - 1).max(0));
-                            (gx, gy)
-                        }
-                    })
             }
             _ => {
                 // Wander or no intention: use cached wander target or pick new
@@ -179,11 +141,7 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             }
 
             // Update wander target for Wander/no-intention entities
-            if action != Some(ActionId::Eat)
-                && action != Some(ActionId::Attack)
-                && action != Some(ActionId::Charge)
-                && action != Some(ActionId::Flee)
-            {
+            if action != Some(ActionId::Eat) && action != Some(ActionId::Attack) {
                 if step_count >= path.len() {
                     // Arrived (or will arrive) — clear target
                     wander_target_updates.push((e, None));

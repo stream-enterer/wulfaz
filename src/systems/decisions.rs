@@ -32,7 +32,7 @@ pub struct Curve {
 pub enum InputAxis {
     HungerRatio,
     HealthRatio,
-    StaminaRatio,
+    FatigueRatio,
     FoodNearby,
     EnemyNearby,
     Aggression,
@@ -104,11 +104,12 @@ fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
                 0.0
             }
         }
-        InputAxis::StaminaRatio => {
-            if let Some(s) = world.staminas.get(&entity) {
-                if s.max > 0.0 { s.current / s.max } else { 1.0 }
+        InputAxis::FatigueRatio => {
+            // 0.0 = fresh, 1.0 = at unconscious threshold (100 fatigue)
+            if let Some(f) = world.fatigues.get(&entity) {
+                (f.current / 100.0).clamp(0.0, 2.0)
             } else {
-                1.0 // no stamina component = unlimited stamina
+                0.0 // no fatigue component = no fatigue
             }
         }
         InputAxis::FoodNearby => {
@@ -185,22 +186,6 @@ fn select_eat_target(world: &World, entity: Entity) -> Option<Entity> {
                 .then_with(|| a.0.0.cmp(&b.0.0))
         })
         .map(|(e, _, _)| e)
-}
-
-fn select_flee_target(world: &World, entity: Entity) -> Option<Entity> {
-    let pos = world.positions.get(&entity)?;
-    world
-        .combat_stats
-        .iter()
-        .filter(|&(&e, cs)| e != entity && cs.aggression > 0.2)
-        .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
-        .filter_map(|(&e, _)| {
-            let ep = world.positions.get(&e)?;
-            let dist = (ep.x - pos.x).abs().max((ep.y - pos.y).abs());
-            Some((e, dist))
-        })
-        .min_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.0.cmp(&b.0.0)))
-        .map(|(e, _)| e)
 }
 
 fn select_attack_target(world: &World, entity: Entity) -> Option<Entity> {
@@ -331,8 +316,7 @@ pub fn run_decisions(world: &mut World, _tick: Tick) {
         // Select target
         let target = match best_action {
             ActionId::Eat => select_eat_target(world, entity),
-            ActionId::Attack | ActionId::Charge => select_attack_target(world, entity),
-            ActionId::Flee => select_flee_target(world, entity),
+            ActionId::Attack => select_attack_target(world, entity),
             _ => None,
         };
 

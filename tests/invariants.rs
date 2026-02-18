@@ -19,9 +19,8 @@ use wulfaz::components::*;
 use wulfaz::systems::combat::run_combat;
 use wulfaz::systems::death::run_death;
 use wulfaz::systems::eating::run_eating;
-use wulfaz::systems::gait_selection::run_gait_selection;
+use wulfaz::systems::fatigue::run_fatigue;
 use wulfaz::systems::hunger::run_hunger;
-use wulfaz::systems::stamina::run_stamina;
 use wulfaz::systems::temperature::run_temperature;
 use wulfaz::systems::wander::run_wander;
 use wulfaz::tile_map::TileMap;
@@ -54,13 +53,7 @@ fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
             max: 100.0,
         },
     );
-    world.staminas.insert(
-        e,
-        Stamina {
-            current: 100.0,
-            max: 100.0,
-        },
-    );
+    world.fatigues.insert(e, Fatigue { current: 0.0 });
     world.combat_stats.insert(
         e,
         CombatStats {
@@ -102,10 +95,9 @@ fn run_full_tick(world: &mut World, tick: Tick) {
     run_temperature(world, tick);
     // Phase 2: Needs
     run_hunger(world, tick);
-    run_stamina(world, tick);
+    run_fatigue(world, tick);
     // Phase 3: Decisions (no systems yet)
     // Phase 4: Actions
-    run_gait_selection(world, tick);
     run_wander(world, tick);
     run_eating(world, tick);
     run_combat(world, tick);
@@ -295,8 +287,8 @@ fn dead_entities_removed_from_all_tables() {
             "entity should not be in healths"
         );
         assert!(
-            !world.staminas.contains_key(&e),
-            "entity should not be in staminas"
+            !world.fatigues.contains_key(&e),
+            "entity should not be in fatigues"
         );
         assert!(
             !world.combat_stats.contains_key(&e),

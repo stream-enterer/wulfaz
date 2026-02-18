@@ -1,13 +1,53 @@
 use crate::components::{ActionId, Entity, Tick};
 use crate::events::Event;
+use crate::systems::fatigue::UNCONSCIOUS_THRESHOLD;
 use crate::world::World;
 use rand::RngExt;
 
-/// Phase 4 (Actions): Combat resolution.
+/// Fatigue gained per attack (flat cost, standing in for encumbrance).
+const ATTACK_FATIGUE_COST: f32 = 1.0;
+
+/// Compute fatigue-modified damage: effective_attack - effective_defense, min 1.0.
+/// Fatigue degrades stats: -1 defense per 10 fatigue, -1 attack per 20 fatigue.
+/// Unconscious defenders (fatigue >= 100) have 0 effective defense.
+fn compute_fatigue_damage(world: &World, attacker: Entity, defender: Entity) -> f32 {
+    let base_atk = world
+        .combat_stats
+        .get(&attacker)
+        .map(|cs| cs.attack)
+        .unwrap_or(0.0);
+    let base_def = world
+        .combat_stats
+        .get(&defender)
+        .map(|cs| cs.defense)
+        .unwrap_or(0.0);
+    let fatigue_a = world
+        .fatigues
+        .get(&attacker)
+        .map(|f| f.current)
+        .unwrap_or(0.0);
+    let fatigue_d = world
+        .fatigues
+        .get(&defender)
+        .map(|f| f.current)
+        .unwrap_or(0.0);
+
+    let eff_atk = (base_atk - fatigue_a / 20.0).max(0.0);
+    let eff_def = if fatigue_d >= UNCONSCIOUS_THRESHOLD {
+        0.0
+    } else {
+        (base_def - fatigue_d / 10.0).max(0.0)
+    };
+    (eff_atk - eff_def).max(1.0)
+}
+
+/// Phase 4 (Actions): Combat resolution with fatigue.
 ///
 /// Finds entities with combat_stats, health, and position that share a tile
-/// with another combatant. Melee range: same tile = within 1 meter. Aggressive entities (aggression > 0.5) attack if
-/// an RNG check passes. Damage = attacker.attack - defender.defense (min 1.0).
+/// with another combatant. Unconscious entities (fatigue >= 100) cannot attack.
+/// Fatigue degrades stats: -1 defense per 10, -1 attack per 20.
+/// Each attack costs the attacker ATTACK_FATIGUE_COST fatigue.
+/// Damage = effective_attack - effective_defense (min 1.0).
 /// Defender health is reduced; if it drops to 0 or below, a death event is
 /// pushed and the defender is added to pending_deaths.
 pub fn run_combat(world: &mut World, tick: Tick) {
@@ -32,10 +72,20 @@ pub fn run_combat(world: &mut World, tick: Tick) {
 
         // Gate on intention if present, else legacy fallback
         if let Some(intention) = world.intentions.get(&attacker) {
-            if intention.action != ActionId::Attack && intention.action != ActionId::Charge {
+            if intention.action != ActionId::Attack {
                 continue;
             }
         } else if aggression <= 0.5 {
+            continue;
+        }
+
+        // Unconscious entities cannot attack
+        let attacker_fatigue = world
+            .fatigues
+            .get(&attacker)
+            .map(|f| f.current)
+            .unwrap_or(0.0);
+        if attacker_fatigue >= UNCONSCIOUS_THRESHOLD {
             continue;
         }
 
@@ -56,17 +106,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
             && ax == dx
             && ay == dy
         {
-            let atk = world
-                .combat_stats
-                .get(&attacker)
-                .map(|cs| cs.attack)
-                .unwrap_or(0.0);
-            let def = world
-                .combat_stats
-                .get(&defender)
-                .map(|cs| cs.defense)
-                .unwrap_or(0.0);
-            let damage = (atk - def).max(1.0);
+            let damage = compute_fatigue_damage(world, attacker, defender);
             attacks.push((attacker, defender, damage));
             found_target = true;
         }
@@ -77,17 +117,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
                     continue;
                 }
                 if ax == dx && ay == dy {
-                    let atk = world
-                        .combat_stats
-                        .get(&attacker)
-                        .map(|cs| cs.attack)
-                        .unwrap_or(0.0);
-                    let def = world
-                        .combat_stats
-                        .get(&defender)
-                        .map(|cs| cs.defense)
-                        .unwrap_or(0.0);
-                    let damage = (atk - def).max(1.0);
+                    let damage = compute_fatigue_damage(world, attacker, defender);
                     attacks.push((attacker, defender, damage));
                     break; // one attack per attacker per tick
                 }
@@ -97,6 +127,11 @@ pub fn run_combat(world: &mut World, tick: Tick) {
 
     // Apply attacks
     for (attacker, defender, damage) in attacks {
+        // Attacker gains fatigue from attacking
+        if let Some(f) = world.fatigues.get_mut(&attacker) {
+            f.current += ATTACK_FATIGUE_COST;
+        }
+
         if let Some(health) = world.healths.get_mut(&defender) {
             health.current -= damage;
             health.current = health.current.clamp(0.0, health.max);
