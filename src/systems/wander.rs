@@ -25,9 +25,10 @@ pub fn run_wander(world: &mut World, tick: Tick) {
 
     // Collect entities that have both position and gait profile, sorted for determinism
     let mut candidates: Vec<Entity> = world
+        .body
         .positions
         .keys()
-        .filter(|e| world.gait_profiles.contains_key(e))
+        .filter(|e| world.body.gait_profiles.contains_key(e))
         .filter(|e| !world.pending_deaths.contains(e))
         .copied()
         .collect();
@@ -40,6 +41,7 @@ pub fn run_wander(world: &mut World, tick: Tick) {
 
     for e in candidates {
         let remaining = world
+            .body
             .move_cooldowns
             .get(&e)
             .map(|cd| cd.remaining)
@@ -51,16 +53,21 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             continue;
         }
 
-        let Some(pos) = world.positions.get(&e) else {
+        let Some(pos) = world.body.positions.get(&e) else {
             continue;
         };
-        let Some(profile) = world.gait_profiles.get(&e) else {
+        let Some(profile) = world.body.gait_profiles.get(&e) else {
             continue;
         };
-        let gait = world.current_gaits.get(&e).copied().unwrap_or(Gait::Walk);
+        let gait = world
+            .body
+            .current_gaits
+            .get(&e)
+            .copied()
+            .unwrap_or(Gait::Walk);
         let base_cooldown = profile.cooldown(gait);
 
-        let intention = world.intentions.get(&e);
+        let intention = world.mind.intentions.get(&e);
         let action = intention.map(|i| i.action);
 
         // Idle: skip movement but set cooldown (walk rate, no actual movement)
@@ -75,18 +82,20 @@ pub fn run_wander(world: &mut World, tick: Tick) {
                 // Pathfind to target entity's position
                 intention
                     .and_then(|i| i.target)
-                    .and_then(|t| world.positions.get(&t))
+                    .and_then(|t| world.body.positions.get(&t))
                     .map(|p| (p.x, p.y))
             }
             _ => {
                 // Wander or no intention: use cached wander target or pick new
                 let at_goal = world
+                    .mind
                     .wander_targets
                     .get(&e)
                     .is_some_and(|wt| wt.goal_x == pos.x && wt.goal_y == pos.y);
 
                 if !at_goal {
                     world
+                        .mind
                         .wander_targets
                         .get(&e)
                         .map(|wt| (wt.goal_x, wt.goal_y))
@@ -186,21 +195,24 @@ pub fn run_wander(world: &mut World, tick: Tick) {
 
     // Apply cooldown updates
     for (e, remaining) in cooldown_updates {
-        world.move_cooldowns.insert(e, MoveCooldown { remaining });
+        world
+            .body
+            .move_cooldowns
+            .insert(e, MoveCooldown { remaining });
     }
 
     // Apply wander target updates
     for (e, target) in wander_target_updates {
         if let Some(wt) = target {
-            world.wander_targets.insert(e, wt);
+            world.mind.wander_targets.insert(e, wt);
         } else {
-            world.wander_targets.remove(&e);
+            world.mind.wander_targets.remove(&e);
         }
     }
 
     // Apply moves
     for (e, new_pos) in moves {
-        if let Some(pos) = world.positions.get_mut(&e) {
+        if let Some(pos) = world.body.positions.get_mut(&e) {
             *pos = new_pos;
             world.events.push(Event::Moved {
                 entity: e,
@@ -223,11 +235,11 @@ mod tests {
         // No MoveCooldown → entity moves immediately (remaining defaults to 0)
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 10, y: 10 });
-        world.gait_profiles.insert(e, GaitProfile::biped());
-        let old_pos = world.positions[&e];
+        world.body.positions.insert(e, Position { x: 10, y: 10 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
+        let old_pos = world.body.positions[&e];
         run_wander(&mut world, Tick(0));
-        let new_pos = world.positions[&e];
+        let new_pos = world.body.positions[&e];
         let dx = (new_pos.x - old_pos.x).abs();
         let dy = (new_pos.y - old_pos.y).abs();
         // Entity moved exactly one step (Chebyshev distance 1)
@@ -238,22 +250,23 @@ mod tests {
     fn test_wander_respects_cooldown() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 10, y: 10 });
-        world.gait_profiles.insert(e, GaitProfile::biped());
+        world.body.positions.insert(e, Position { x: 10, y: 10 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
         world
+            .body
             .move_cooldowns
             .insert(e, MoveCooldown { remaining: 3 });
 
         // Ticks 0-2: still cooling down, no movement
         for t in 0..3 {
             run_wander(&mut world, Tick(t));
-            assert_eq!(world.positions[&e].x, 10);
-            assert_eq!(world.positions[&e].y, 10);
+            assert_eq!(world.body.positions[&e].x, 10);
+            assert_eq!(world.body.positions[&e].y, 10);
         }
 
         // Tick 3: cooldown reached 0, entity moves
         run_wander(&mut world, Tick(3));
-        let pos = world.positions[&e];
+        let pos = world.body.positions[&e];
         let dx = (pos.x - 10).abs();
         let dy = (pos.y - 10).abs();
         assert_eq!(dx.max(dy), 1);
@@ -263,12 +276,12 @@ mod tests {
     fn test_wander_resets_cooldown_after_move() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 10, y: 10 });
-        world.gait_profiles.insert(e, GaitProfile::biped());
+        world.body.positions.insert(e, Position { x: 10, y: 10 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
         // Move on first tick (no cooldown)
         run_wander(&mut world, Tick(0));
         // Walk cooldown: cardinal=9, diagonal=9*141/100=12
-        let cd = world.move_cooldowns[&e].remaining;
+        let cd = world.body.move_cooldowns[&e].remaining;
         assert!(
             cd == 9 || cd == 12,
             "cooldown {cd} should be 9 (cardinal) or 12 (diagonal)"
@@ -279,22 +292,22 @@ mod tests {
     fn test_wander_skips_entities_without_speed() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 5, y: 5 });
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
         run_wander(&mut world, Tick(0));
-        assert_eq!(world.positions[&e].x, 5);
-        assert_eq!(world.positions[&e].y, 5);
+        assert_eq!(world.body.positions[&e].x, 5);
+        assert_eq!(world.body.positions[&e].y, 5);
     }
 
     #[test]
     fn test_wander_skips_pending_death() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 5, y: 5 });
-        world.gait_profiles.insert(e, GaitProfile::biped());
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
         world.pending_deaths.push(e);
         run_wander(&mut world, Tick(0));
-        assert_eq!(world.positions[&e].x, 5);
-        assert_eq!(world.positions[&e].y, 5);
+        assert_eq!(world.body.positions[&e].x, 5);
+        assert_eq!(world.body.positions[&e].y, 5);
     }
 
     #[test]
@@ -302,11 +315,11 @@ mod tests {
         // Sprint gait → shorter cooldown than Walk, still 1 tile per action
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 10, y: 10 });
-        world.gait_profiles.insert(e, GaitProfile::biped());
-        world.current_gaits.insert(e, Gait::Sprint);
+        world.body.positions.insert(e, Position { x: 10, y: 10 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
+        world.body.current_gaits.insert(e, Gait::Sprint);
         run_wander(&mut world, Tick(0));
-        let new_pos = world.positions[&e];
+        let new_pos = world.body.positions[&e];
         let dx = (new_pos.x - 10).abs();
         let dy = (new_pos.y - 10).abs();
         // 1 tile per action: Chebyshev distance exactly 1
@@ -318,7 +331,7 @@ mod tests {
             dy
         );
         // Sprint cooldown: cardinal=3, diagonal=3*141/100=4
-        let cd = world.move_cooldowns[&e].remaining;
+        let cd = world.body.move_cooldowns[&e].remaining;
         assert!(
             cd == 3 || cd == 4,
             "cooldown {cd} should be 3 (cardinal) or 4 (diagonal)"
@@ -330,13 +343,13 @@ mod tests {
         let mut world = World::new_with_seed(42);
         world.tiles = crate::tile_map::TileMap::new(10, 10);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 0, y: 0 });
-        world.gait_profiles.insert(e, GaitProfile::biped());
-        world.current_gaits.insert(e, Gait::Sprint);
+        world.body.positions.insert(e, Position { x: 0, y: 0 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
+        world.body.current_gaits.insert(e, Gait::Sprint);
         // Run many ticks — entity must never leave bounds
         for t in 0..200 {
             run_wander(&mut world, Tick(t));
-            let pos = &world.positions[&e];
+            let pos = &world.body.positions[&e];
             assert!(pos.x >= 0 && pos.x < 10, "x={} out of bounds", pos.x);
             assert!(pos.y >= 0 && pos.y < 10, "y={} out of bounds", pos.y);
         }
@@ -346,13 +359,13 @@ mod tests {
     fn test_wander_deterministic_with_seed() {
         let mut world1 = World::new_with_seed(42);
         let e1 = world1.spawn();
-        world1.positions.insert(e1, Position { x: 10, y: 10 });
-        world1.gait_profiles.insert(e1, GaitProfile::biped());
+        world1.body.positions.insert(e1, Position { x: 10, y: 10 });
+        world1.body.gait_profiles.insert(e1, GaitProfile::biped());
 
         let mut world2 = World::new_with_seed(42);
         let e2 = world2.spawn();
-        world2.positions.insert(e2, Position { x: 10, y: 10 });
-        world2.gait_profiles.insert(e2, GaitProfile::biped());
+        world2.body.positions.insert(e2, Position { x: 10, y: 10 });
+        world2.body.gait_profiles.insert(e2, GaitProfile::biped());
 
         // Run several ticks through cooldown cycles
         for t in 0..30 {
@@ -360,8 +373,8 @@ mod tests {
             run_wander(&mut world2, Tick(t));
         }
 
-        assert_eq!(world1.positions[&e1].x, world2.positions[&e2].x);
-        assert_eq!(world1.positions[&e1].y, world2.positions[&e2].y);
+        assert_eq!(world1.body.positions[&e1].x, world2.body.positions[&e2].x);
+        assert_eq!(world1.body.positions[&e1].y, world2.body.positions[&e2].y);
     }
 
     // --- A* pathfinding tests ---
@@ -372,15 +385,24 @@ mod tests {
 
         let mut world = World::new_with_seed(42);
         let creature = world.spawn();
-        world.positions.insert(creature, Position { x: 5, y: 5 });
-        world.gait_profiles.insert(creature, GaitProfile::biped());
+        world
+            .body
+            .positions
+            .insert(creature, Position { x: 5, y: 5 });
+        world
+            .body
+            .gait_profiles
+            .insert(creature, GaitProfile::biped());
 
         let food = world.spawn();
-        world.positions.insert(food, Position { x: 8, y: 5 });
-        world.nutritions.insert(food, Nutrition { value: 30.0 });
+        world.body.positions.insert(food, Position { x: 8, y: 5 });
+        world
+            .mind
+            .nutritions
+            .insert(food, Nutrition { value: 30.0 });
 
         // Set Eat intention targeting the food
-        world.intentions.insert(
+        world.mind.intentions.insert(
             creature,
             Intention {
                 action: ActionId::Eat,
@@ -391,7 +413,7 @@ mod tests {
         run_wander(&mut world, Tick(0));
 
         // Should move toward food (east)
-        let pos = world.positions[&creature];
+        let pos = world.body.positions[&creature];
         assert!(
             pos.x > 5,
             "entity should move toward food at x=8, got x={}",
@@ -413,20 +435,26 @@ mod tests {
         }
 
         let creature = world.spawn();
-        world.positions.insert(creature, Position { x: 4, y: 5 });
-        world.gait_profiles.insert(creature, GaitProfile::biped());
+        world
+            .body
+            .positions
+            .insert(creature, Position { x: 4, y: 5 });
+        world
+            .body
+            .gait_profiles
+            .insert(creature, GaitProfile::biped());
 
         let target = world.spawn();
-        world.positions.insert(target, Position { x: 6, y: 5 });
+        world.body.positions.insert(target, Position { x: 6, y: 5 });
 
-        world.intentions.insert(
+        world.mind.intentions.insert(
             creature,
             Intention {
                 action: ActionId::Attack,
                 target: Some(target),
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             target,
             crate::components::CombatStats {
                 attack: 5.0,
@@ -437,7 +465,7 @@ mod tests {
 
         run_wander(&mut world, Tick(0));
 
-        let pos = world.positions[&creature];
+        let pos = world.body.positions[&creature];
         // Should NOT be on the wall
         assert_ne!(pos.x, 5, "entity should path around the wall");
         // Should have moved from starting position
@@ -450,10 +478,10 @@ mod tests {
 
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 5, y: 5 });
-        world.gait_profiles.insert(e, GaitProfile::biped());
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
 
-        world.intentions.insert(
+        world.mind.intentions.insert(
             e,
             Intention {
                 action: ActionId::Idle,
@@ -462,8 +490,8 @@ mod tests {
         );
 
         run_wander(&mut world, Tick(0));
-        assert_eq!(world.positions[&e].x, 5);
-        assert_eq!(world.positions[&e].y, 5);
+        assert_eq!(world.body.positions[&e].x, 5);
+        assert_eq!(world.body.positions[&e].y, 5);
     }
 
     #[test]
@@ -472,16 +500,25 @@ mod tests {
 
         let mut world = World::new_with_seed(42);
         let creature = world.spawn();
-        world.positions.insert(creature, Position { x: 5, y: 5 });
-        world.gait_profiles.insert(creature, GaitProfile::biped());
+        world
+            .body
+            .positions
+            .insert(creature, Position { x: 5, y: 5 });
+        world
+            .body
+            .gait_profiles
+            .insert(creature, GaitProfile::biped());
 
         let food = world.spawn();
-        world.positions.insert(food, Position { x: 7, y: 5 });
-        world.nutritions.insert(food, Nutrition { value: 30.0 });
+        world.body.positions.insert(food, Position { x: 7, y: 5 });
+        world
+            .mind
+            .nutritions
+            .insert(food, Nutrition { value: 30.0 });
 
         // Run enough ticks to cover distance 2 (cooldown=10 per step at speed 1)
         for t in 0..250 {
-            world.intentions.insert(
+            world.mind.intentions.insert(
                 creature,
                 Intention {
                     action: ActionId::Eat,
@@ -491,7 +528,7 @@ mod tests {
             run_wander(&mut world, Tick(t));
         }
 
-        let pos = world.positions[&creature];
+        let pos = world.body.positions[&creature];
         assert_eq!(
             (pos.x, pos.y),
             (7, 5),

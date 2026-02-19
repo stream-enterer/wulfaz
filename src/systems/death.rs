@@ -20,8 +20,8 @@ mod tests {
     fn test_death_despawns_entities() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 5, y: 5 });
-        world.hungers.insert(
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 50.0,
@@ -33,8 +33,8 @@ mod tests {
         run_death(&mut world, Tick(0));
 
         assert!(!world.alive.contains(&e));
-        assert!(!world.positions.contains_key(&e));
-        assert!(!world.hungers.contains_key(&e));
+        assert!(!world.body.positions.contains_key(&e));
+        assert!(!world.mind.hungers.contains_key(&e));
         assert!(world.pending_deaths.is_empty());
     }
 
@@ -57,7 +57,7 @@ mod tests {
     fn test_death_validates_clean() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 0, y: 0 });
+        world.body.positions.insert(e, Position { x: 0, y: 0 });
         world.pending_deaths.push(e);
 
         run_death(&mut world, Tick(0));
@@ -68,11 +68,11 @@ mod tests {
     fn test_no_pending_deaths_is_noop() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 5, y: 5 });
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
 
         run_death(&mut world, Tick(0));
 
         assert!(world.alive.contains(&e)); // still alive
-        assert!(world.positions.contains_key(&e)); // still has position
+        assert!(world.body.positions.contains_key(&e)); // still has position
     }
 }

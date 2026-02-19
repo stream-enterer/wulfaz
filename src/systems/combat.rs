@@ -12,21 +12,25 @@ const ATTACK_FATIGUE_COST: f32 = 1.0;
 /// Unconscious defenders (fatigue >= 100) have 0 effective defense.
 fn compute_fatigue_damage(world: &World, attacker: Entity, defender: Entity) -> f32 {
     let base_atk = world
+        .body
         .combat_stats
         .get(&attacker)
         .map(|cs| cs.attack)
         .unwrap_or(0.0);
     let base_def = world
+        .body
         .combat_stats
         .get(&defender)
         .map(|cs| cs.defense)
         .unwrap_or(0.0);
     let fatigue_a = world
+        .body
         .fatigues
         .get(&attacker)
         .map(|f| f.current)
         .unwrap_or(0.0);
     let fatigue_d = world
+        .body
         .fatigues
         .get(&defender)
         .map(|f| f.current)
@@ -53,12 +57,13 @@ fn compute_fatigue_damage(world: &World, attacker: Entity, defender: Entity) -> 
 pub fn run_combat(world: &mut World, tick: Tick) {
     // Collect combatants with position, health, and combat_stats, sorted for determinism
     let mut combatants: Vec<(Entity, i32, i32, f32)> = world
+        .body
         .combat_stats
         .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
         .filter_map(|(&e, cs)| {
-            let pos = world.positions.get(&e)?;
-            let _health = world.healths.get(&e)?;
+            let pos = world.body.positions.get(&e)?;
+            let _health = world.body.healths.get(&e)?;
             Some((e, pos.x, pos.y, cs.aggression))
         })
         .collect();
@@ -71,7 +76,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
         let (attacker, ax, ay, aggression) = combatants[i];
 
         // Gate on intention if present, else legacy fallback
-        if let Some(intention) = world.intentions.get(&attacker) {
+        if let Some(intention) = world.mind.intentions.get(&attacker) {
             if intention.action != ActionId::Attack {
                 continue;
             }
@@ -81,6 +86,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
 
         // Unconscious entities cannot attack
         let attacker_fatigue = world
+            .body
             .fatigues
             .get(&attacker)
             .map(|f| f.current)
@@ -96,7 +102,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
         }
 
         // Prefer intention target if set and valid (same tile, alive)
-        let preferred_target = world.intentions.get(&attacker).and_then(|i| i.target);
+        let preferred_target = world.mind.intentions.get(&attacker).and_then(|i| i.target);
 
         let mut found_target = false;
         if let Some(target) = preferred_target
@@ -128,11 +134,11 @@ pub fn run_combat(world: &mut World, tick: Tick) {
     // Apply attacks
     for (attacker, defender, damage) in attacks {
         // Attacker gains fatigue from attacking
-        if let Some(f) = world.fatigues.get_mut(&attacker) {
+        if let Some(f) = world.body.fatigues.get_mut(&attacker) {
             f.current += ATTACK_FATIGUE_COST;
         }
 
-        if let Some(health) = world.healths.get_mut(&defender) {
+        if let Some(health) = world.body.healths.get_mut(&defender) {
             health.current -= damage;
             health.current = health.current.clamp(0.0, health.max);
 
@@ -166,15 +172,18 @@ mod tests {
         let mut world = World::new_with_seed(42);
 
         let attacker = world.spawn();
-        world.positions.insert(attacker, Position { x: 5, y: 5 });
-        world.healths.insert(
+        world
+            .body
+            .positions
+            .insert(attacker, Position { x: 5, y: 5 });
+        world.body.healths.insert(
             attacker,
             Health {
                 current: 100.0,
                 max: 100.0,
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             attacker,
             CombatStats {
                 attack: 15.0,
@@ -184,15 +193,18 @@ mod tests {
         );
 
         let defender = world.spawn();
-        world.positions.insert(defender, Position { x: 5, y: 5 }); // same position
-        world.healths.insert(
+        world
+            .body
+            .positions
+            .insert(defender, Position { x: 5, y: 5 }); // same position
+        world.body.healths.insert(
             defender,
             Health {
                 current: 100.0,
                 max: 100.0,
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             defender,
             CombatStats {
                 attack: 5.0,
@@ -204,7 +216,7 @@ mod tests {
         run_combat(&mut world, Tick(0));
 
         // Attacker has aggression 1.0 so always attacks. Damage = 15-3 = 12
-        assert!(world.healths[&defender].current < 100.0);
+        assert!(world.body.healths[&defender].current < 100.0);
     }
 
     #[test]
@@ -212,15 +224,18 @@ mod tests {
         let mut world = World::new_with_seed(42);
 
         let attacker = world.spawn();
-        world.positions.insert(attacker, Position { x: 5, y: 5 });
-        world.healths.insert(
+        world
+            .body
+            .positions
+            .insert(attacker, Position { x: 5, y: 5 });
+        world.body.healths.insert(
             attacker,
             Health {
                 current: 100.0,
                 max: 100.0,
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             attacker,
             CombatStats {
                 attack: 50.0,
@@ -230,15 +245,18 @@ mod tests {
         );
 
         let defender = world.spawn();
-        world.positions.insert(defender, Position { x: 5, y: 5 });
-        world.healths.insert(
+        world
+            .body
+            .positions
+            .insert(defender, Position { x: 5, y: 5 });
+        world.body.healths.insert(
             defender,
             Health {
                 current: 5.0,
                 max: 100.0,
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             defender,
             CombatStats {
                 attack: 5.0,
@@ -257,15 +275,18 @@ mod tests {
         let mut world = World::new_with_seed(42);
 
         let attacker = world.spawn();
-        world.positions.insert(attacker, Position { x: 5, y: 5 });
-        world.healths.insert(
+        world
+            .body
+            .positions
+            .insert(attacker, Position { x: 5, y: 5 });
+        world.body.healths.insert(
             attacker,
             Health {
                 current: 100.0,
                 max: 100.0,
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             attacker,
             CombatStats {
                 attack: 200.0,
@@ -275,15 +296,18 @@ mod tests {
         );
 
         let defender = world.spawn();
-        world.positions.insert(defender, Position { x: 5, y: 5 });
-        world.healths.insert(
+        world
+            .body
+            .positions
+            .insert(defender, Position { x: 5, y: 5 });
+        world.body.healths.insert(
             defender,
             Health {
                 current: 3.0,
                 max: 50.0,
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             defender,
             CombatStats {
                 attack: 5.0,
@@ -295,7 +319,7 @@ mod tests {
         run_combat(&mut world, Tick(0));
 
         // Health should be clamped to 0.0, not negative
-        assert_eq!(world.healths[&defender].current, 0.0);
+        assert_eq!(world.body.healths[&defender].current, 0.0);
     }
 
     #[test]
@@ -303,15 +327,18 @@ mod tests {
         let mut world = World::new_with_seed(42);
 
         let attacker = world.spawn();
-        world.positions.insert(attacker, Position { x: 5, y: 5 });
-        world.healths.insert(
+        world
+            .body
+            .positions
+            .insert(attacker, Position { x: 5, y: 5 });
+        world.body.healths.insert(
             attacker,
             Health {
                 current: 100.0,
                 max: 100.0,
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             attacker,
             CombatStats {
                 attack: 15.0,
@@ -322,15 +349,18 @@ mod tests {
         world.pending_deaths.push(attacker); // already dying
 
         let defender = world.spawn();
-        world.positions.insert(defender, Position { x: 5, y: 5 });
-        world.healths.insert(
+        world
+            .body
+            .positions
+            .insert(defender, Position { x: 5, y: 5 });
+        world.body.healths.insert(
             defender,
             Health {
                 current: 100.0,
                 max: 100.0,
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             defender,
             CombatStats {
                 attack: 5.0,
@@ -341,7 +371,7 @@ mod tests {
 
         run_combat(&mut world, Tick(0));
 
-        assert_eq!(world.healths[&defender].current, 100.0); // undamaged
+        assert_eq!(world.body.healths[&defender].current, 100.0); // undamaged
     }
 
     #[test]
@@ -349,15 +379,18 @@ mod tests {
         let mut world = World::new_with_seed(42);
 
         let attacker = world.spawn();
-        world.positions.insert(attacker, Position { x: 5, y: 5 });
-        world.healths.insert(
+        world
+            .body
+            .positions
+            .insert(attacker, Position { x: 5, y: 5 });
+        world.body.healths.insert(
             attacker,
             Health {
                 current: 100.0,
                 max: 100.0,
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             attacker,
             CombatStats {
                 attack: 15.0,
@@ -367,15 +400,18 @@ mod tests {
         );
 
         let defender = world.spawn();
-        world.positions.insert(defender, Position { x: 10, y: 10 }); // different position
-        world.healths.insert(
+        world
+            .body
+            .positions
+            .insert(defender, Position { x: 10, y: 10 }); // different position
+        world.body.healths.insert(
             defender,
             Health {
                 current: 100.0,
                 max: 100.0,
             },
         );
-        world.combat_stats.insert(
+        world.body.combat_stats.insert(
             defender,
             CombatStats {
                 attack: 5.0,
@@ -386,6 +422,6 @@ mod tests {
 
         run_combat(&mut world, Tick(0));
 
-        assert_eq!(world.healths[&defender].current, 100.0); // undamaged
+        assert_eq!(world.body.healths[&defender].current, 100.0); // undamaged
     }
 }

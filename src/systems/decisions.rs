@@ -91,14 +91,14 @@ fn evaluate_curve(curve: &Curve, x: f32) -> f32 {
 fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
     match axis {
         InputAxis::HungerRatio => {
-            if let Some(h) = world.hungers.get(&entity) {
+            if let Some(h) = world.mind.hungers.get(&entity) {
                 if h.max > 0.0 { h.current / h.max } else { 0.0 }
             } else {
                 0.0
             }
         }
         InputAxis::HealthRatio => {
-            if let Some(h) = world.healths.get(&entity) {
+            if let Some(h) = world.body.healths.get(&entity) {
                 if h.max > 0.0 { h.current / h.max } else { 0.0 }
             } else {
                 0.0
@@ -106,22 +106,23 @@ fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
         }
         InputAxis::FatigueRatio => {
             // 0.0 = fresh, 1.0 = at unconscious threshold (100 fatigue)
-            if let Some(f) = world.fatigues.get(&entity) {
+            if let Some(f) = world.body.fatigues.get(&entity) {
                 (f.current / 100.0).clamp(0.0, 2.0)
             } else {
                 0.0 // no fatigue component = no fatigue
             }
         }
         InputAxis::FoodNearby => {
-            let Some(pos) = world.positions.get(&entity) else {
+            let Some(pos) = world.body.positions.get(&entity) else {
                 return 0.0;
             };
             let count = world
+                .mind
                 .nutritions
                 .iter()
                 .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
                 .filter(|&(&e, _)| {
-                    if let Some(fp) = world.positions.get(&e) {
+                    if let Some(fp) = world.body.positions.get(&e) {
                         let dx = (fp.x - pos.x).abs();
                         let dy = (fp.y - pos.y).abs();
                         dx.max(dy) <= SENSE_RANGE
@@ -133,16 +134,17 @@ fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
             (count.min(3) as f32) / 3.0
         }
         InputAxis::EnemyNearby => {
-            let Some(pos) = world.positions.get(&entity) else {
+            let Some(pos) = world.body.positions.get(&entity) else {
                 return 0.0;
             };
             let count = world
+                .body
                 .combat_stats
                 .iter()
                 .filter(|&(&e, _)| e != entity)
                 .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
                 .filter(|&(&e, _)| {
-                    if let Some(ep) = world.positions.get(&e) {
+                    if let Some(ep) = world.body.positions.get(&e) {
                         let dx = (ep.x - pos.x).abs();
                         let dy = (ep.y - pos.y).abs();
                         dx.max(dy) <= SENSE_RANGE
@@ -154,7 +156,7 @@ fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
             (count.min(3) as f32) / 3.0
         }
         InputAxis::Aggression => {
-            if let Some(cs) = world.combat_stats.get(&entity) {
+            if let Some(cs) = world.body.combat_stats.get(&entity) {
                 cs.aggression
             } else {
                 0.0
@@ -169,13 +171,14 @@ fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
 // ---------------------------------------------------------------------------
 
 fn select_eat_target(world: &World, entity: Entity) -> Option<Entity> {
-    let pos = world.positions.get(&entity)?;
+    let pos = world.body.positions.get(&entity)?;
     world
+        .mind
         .nutritions
         .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
         .filter_map(|(&e, n)| {
-            let fp = world.positions.get(&e)?;
+            let fp = world.body.positions.get(&e)?;
             let dist = (fp.x - pos.x).abs().max((fp.y - pos.y).abs());
             Some((e, dist, n.value))
         })
@@ -189,15 +192,16 @@ fn select_eat_target(world: &World, entity: Entity) -> Option<Entity> {
 }
 
 fn select_attack_target(world: &World, entity: Entity) -> Option<Entity> {
-    let pos = world.positions.get(&entity)?;
+    let pos = world.body.positions.get(&entity)?;
     world
+        .body
         .combat_stats
         .iter()
         .filter(|&(&e, _)| e != entity)
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
         .filter_map(|(&e, _)| {
-            let ep = world.positions.get(&e)?;
-            let health = world.healths.get(&e)?;
+            let ep = world.body.positions.get(&e)?;
+            let health = world.body.healths.get(&e)?;
             let dist = (ep.x - pos.x).abs().max((ep.y - pos.y).abs());
             Some((e, dist, health.current))
         })
@@ -216,14 +220,15 @@ fn select_attack_target(world: &World, entity: Entity) -> Option<Entity> {
 
 pub fn run_decisions(world: &mut World, _tick: Tick) {
     // Wipe stale intentions
-    world.intentions.clear();
+    world.mind.intentions.clear();
 
-    if world.utility_config.actions.is_empty() {
+    if world.mind.utility_config.actions.is_empty() {
         return;
     }
 
     // Collect entities with ActionState, sorted by entity ID for determinism
     let mut entities: Vec<Entity> = world
+        .mind
         .action_states
         .keys()
         .filter(|e| !world.pending_deaths.contains(e))
@@ -236,7 +241,7 @@ pub fn run_decisions(world: &mut World, _tick: Tick) {
     let cooldown_decrements: Vec<(Entity, Vec<(ActionId, u64)>)> = entities
         .iter()
         .filter_map(|&e| {
-            let state = world.action_states.get(&e)?;
+            let state = world.mind.action_states.get(&e)?;
             let updates: Vec<(ActionId, u64)> = state
                 .cooldowns
                 .iter()
@@ -252,7 +257,7 @@ pub fn run_decisions(world: &mut World, _tick: Tick) {
         .collect();
 
     for (e, updates) in cooldown_decrements {
-        if let Some(state) = world.action_states.get_mut(&e) {
+        if let Some(state) = world.mind.action_states.get_mut(&e) {
             for (action, new_cd) in updates {
                 state.cooldowns.insert(action, new_cd);
             }
@@ -260,11 +265,12 @@ pub fn run_decisions(world: &mut World, _tick: Tick) {
     }
 
     // Score and decide for each entity
-    let config = world.utility_config.clone();
+    let config = world.mind.utility_config.clone();
     let mut results: Vec<(Entity, ActionId, Option<Entity>)> = Vec::new();
 
     for &entity in &entities {
         let current_action = world
+            .mind
             .action_states
             .get(&entity)
             .and_then(|s| s.current_action);
@@ -275,6 +281,7 @@ pub fn run_decisions(world: &mut World, _tick: Tick) {
         for (&action_id, action_def) in &config.actions {
             // Check cooldown
             let on_cooldown = world
+                .mind
                 .action_states
                 .get(&entity)
                 .and_then(|s| s.cooldowns.get(&action_id))
@@ -327,17 +334,19 @@ pub fn run_decisions(world: &mut World, _tick: Tick) {
     // Apply results
     for (entity, action, target) in results {
         let old_action = world
+            .mind
             .action_states
             .get(&entity)
             .and_then(|s| s.current_action);
 
         // Write intention
         world
+            .mind
             .intentions
             .insert(entity, Intention { action, target });
 
         // Update action state
-        if let Some(state) = world.action_states.get_mut(&entity) {
+        if let Some(state) = world.mind.action_states.get_mut(&entity) {
             if Some(action) == old_action {
                 state.ticks_in_action += 1;
             } else {
@@ -488,7 +497,7 @@ mod tests {
 
     fn spawn_with_action_state(world: &mut World) -> Entity {
         let e = world.spawn();
-        world.action_states.insert(
+        world.mind.action_states.insert(
             e,
             ActionState {
                 current_action: None,
@@ -574,7 +583,7 @@ mod tests {
     fn test_hunger_ratio_input() {
         let mut world = World::new_with_seed(42);
         let e = spawn_with_action_state(&mut world);
-        world.hungers.insert(
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 60.0,
@@ -599,15 +608,15 @@ mod tests {
     fn test_food_nearby_input() {
         let mut world = World::new_with_seed(42);
         let e = spawn_with_action_state(&mut world);
-        world.positions.insert(e, Position { x: 5, y: 5 });
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
 
         // Add 2 food items within sense range
         let f1 = world.spawn();
-        world.positions.insert(f1, Position { x: 5, y: 5 });
-        world.nutritions.insert(f1, Nutrition { value: 10.0 });
+        world.body.positions.insert(f1, Position { x: 5, y: 5 });
+        world.mind.nutritions.insert(f1, Nutrition { value: 10.0 });
         let f2 = world.spawn();
-        world.positions.insert(f2, Position { x: 10, y: 10 }); // within SENSE_RANGE
-        world.nutritions.insert(f2, Nutrition { value: 20.0 });
+        world.body.positions.insert(f2, Position { x: 10, y: 10 }); // within SENSE_RANGE
+        world.mind.nutritions.insert(f2, Nutrition { value: 20.0 });
 
         let val = read_input(&InputAxis::FoodNearby, &world, e);
         assert!((val - 2.0 / 3.0).abs() < 0.001);
@@ -636,18 +645,18 @@ mod tests {
     #[test]
     fn test_inertia_keeps_current_action() {
         let mut world = World::new_with_seed(42);
-        world.utility_config = default_config();
+        world.mind.utility_config = default_config();
 
         let e = spawn_with_action_state(&mut world);
-        world.positions.insert(e, Position { x: 5, y: 5 });
-        world.hungers.insert(
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 0.0,
                 max: 100.0,
             },
         );
-        world.healths.insert(
+        world.body.healths.insert(
             e,
             Health {
                 current: 100.0,
@@ -657,12 +666,20 @@ mod tests {
 
         // First tick: should pick Wander (healthy, not hungry, no food/enemies)
         run_decisions(&mut world, Tick(0));
-        let intention = world.intentions.get(&e).expect("should have intention");
+        let intention = world
+            .mind
+            .intentions
+            .get(&e)
+            .expect("should have intention");
         assert_eq!(intention.action, ActionId::Wander);
 
         // Second tick: inertia should help Wander stay chosen
         run_decisions(&mut world, Tick(1));
-        let intention = world.intentions.get(&e).expect("should have intention");
+        let intention = world
+            .mind
+            .intentions
+            .get(&e)
+            .expect("should have intention");
         assert_eq!(intention.action, ActionId::Wander);
     }
 
@@ -671,18 +688,18 @@ mod tests {
     #[test]
     fn test_cooldown_skips_action() {
         let mut world = World::new_with_seed(42);
-        world.utility_config = default_config();
+        world.mind.utility_config = default_config();
 
         let e = spawn_with_action_state(&mut world);
-        world.positions.insert(e, Position { x: 5, y: 5 });
-        world.hungers.insert(
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 80.0,
                 max: 100.0,
             },
         );
-        world.healths.insert(
+        world.body.healths.insert(
             e,
             Health {
                 current: 100.0,
@@ -692,16 +709,23 @@ mod tests {
 
         // Add food at same position
         let food = world.spawn();
-        world.positions.insert(food, Position { x: 5, y: 5 });
-        world.nutritions.insert(food, Nutrition { value: 30.0 });
+        world.body.positions.insert(food, Position { x: 5, y: 5 });
+        world
+            .mind
+            .nutritions
+            .insert(food, Nutrition { value: 30.0 });
 
         // Set Eat on cooldown
-        if let Some(state) = world.action_states.get_mut(&e) {
+        if let Some(state) = world.mind.action_states.get_mut(&e) {
             state.cooldowns.insert(ActionId::Eat, 5);
         }
 
         run_decisions(&mut world, Tick(0));
-        let intention = world.intentions.get(&e).expect("should have intention");
+        let intention = world
+            .mind
+            .intentions
+            .get(&e)
+            .expect("should have intention");
         // Eat is on cooldown, so entity picks something else
         assert_ne!(intention.action, ActionId::Eat);
     }
@@ -709,18 +733,18 @@ mod tests {
     #[test]
     fn test_cooldown_expires() {
         let mut world = World::new_with_seed(42);
-        world.utility_config = default_config();
+        world.mind.utility_config = default_config();
 
         let e = spawn_with_action_state(&mut world);
-        world.positions.insert(e, Position { x: 5, y: 5 });
-        world.hungers.insert(
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 90.0,
                 max: 100.0,
             },
         );
-        world.healths.insert(
+        world.body.healths.insert(
             e,
             Health {
                 current: 100.0,
@@ -729,11 +753,14 @@ mod tests {
         );
 
         let food = world.spawn();
-        world.positions.insert(food, Position { x: 5, y: 5 });
-        world.nutritions.insert(food, Nutrition { value: 30.0 });
+        world.body.positions.insert(food, Position { x: 5, y: 5 });
+        world
+            .mind
+            .nutritions
+            .insert(food, Nutrition { value: 30.0 });
 
         // Set Eat on cooldown of 1 — will be decremented to 0 on first tick
-        if let Some(state) = world.action_states.get_mut(&e) {
+        if let Some(state) = world.mind.action_states.get_mut(&e) {
             state.cooldowns.insert(ActionId::Eat, 1);
         }
 
@@ -742,25 +769,29 @@ mod tests {
 
         // Tick 1: cooldown is now 0, Eat should be available
         run_decisions(&mut world, Tick(1));
-        let intention = world.intentions.get(&e).expect("should have intention");
+        let intention = world
+            .mind
+            .intentions
+            .get(&e)
+            .expect("should have intention");
         assert_eq!(intention.action, ActionId::Eat);
     }
 
     #[test]
     fn test_all_on_cooldown_picks_idle() {
         let mut world = World::new_with_seed(42);
-        world.utility_config = default_config();
+        world.mind.utility_config = default_config();
 
         let e = spawn_with_action_state(&mut world);
-        world.positions.insert(e, Position { x: 5, y: 5 });
-        world.hungers.insert(
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 0.0,
                 max: 100.0,
             },
         );
-        world.healths.insert(
+        world.body.healths.insert(
             e,
             Health {
                 current: 100.0,
@@ -769,14 +800,18 @@ mod tests {
         );
 
         // Put Wander, Eat, Attack all on cooldown (Idle has no cooldown in config)
-        if let Some(state) = world.action_states.get_mut(&e) {
+        if let Some(state) = world.mind.action_states.get_mut(&e) {
             state.cooldowns.insert(ActionId::Wander, 10);
             state.cooldowns.insert(ActionId::Eat, 10);
             state.cooldowns.insert(ActionId::Attack, 10);
         }
 
         run_decisions(&mut world, Tick(0));
-        let intention = world.intentions.get(&e).expect("should have intention");
+        let intention = world
+            .mind
+            .intentions
+            .get(&e)
+            .expect("should have intention");
         assert_eq!(intention.action, ActionId::Idle);
     }
 
@@ -785,10 +820,10 @@ mod tests {
     #[test]
     fn test_empty_world_no_panic() {
         let mut world = World::new_with_seed(42);
-        world.utility_config = default_config();
+        world.mind.utility_config = default_config();
 
         run_decisions(&mut world, Tick(0));
-        assert!(world.intentions.is_empty());
+        assert!(world.mind.intentions.is_empty());
     }
 
     // --- No stale intentions ---
@@ -796,18 +831,18 @@ mod tests {
     #[test]
     fn test_intentions_cleared_each_tick() {
         let mut world = World::new_with_seed(42);
-        world.utility_config = default_config();
+        world.mind.utility_config = default_config();
 
         let e = spawn_with_action_state(&mut world);
-        world.positions.insert(e, Position { x: 5, y: 5 });
-        world.hungers.insert(
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 0.0,
                 max: 100.0,
             },
         );
-        world.healths.insert(
+        world.body.healths.insert(
             e,
             Health {
                 current: 100.0,
@@ -816,13 +851,13 @@ mod tests {
         );
 
         run_decisions(&mut world, Tick(0));
-        assert!(world.intentions.contains_key(&e));
+        assert!(world.mind.intentions.contains_key(&e));
 
         // Kill entity
         world.pending_deaths.push(e);
         run_decisions(&mut world, Tick(1));
         // Intentions should be cleared (dead entity skipped)
-        assert!(!world.intentions.contains_key(&e));
+        assert!(!world.mind.intentions.contains_key(&e));
     }
 
     // --- Determinism ---
@@ -830,25 +865,25 @@ mod tests {
     #[test]
     fn test_deterministic_same_seed() {
         let setup = |world: &mut World| {
-            world.utility_config = default_config();
+            world.mind.utility_config = default_config();
             for i in 0..5 {
                 let e = spawn_with_action_state(world);
-                world.positions.insert(e, Position { x: i, y: 0 });
-                world.hungers.insert(
+                world.body.positions.insert(e, Position { x: i, y: 0 });
+                world.mind.hungers.insert(
                     e,
                     Hunger {
                         current: (i as f32) * 20.0,
                         max: 100.0,
                     },
                 );
-                world.healths.insert(
+                world.body.healths.insert(
                     e,
                     Health {
                         current: 100.0,
                         max: 100.0,
                     },
                 );
-                world.combat_stats.insert(
+                world.body.combat_stats.insert(
                     e,
                     CombatStats {
                         attack: 10.0,
@@ -869,9 +904,9 @@ mod tests {
             run_decisions(&mut world1, Tick(t));
             run_decisions(&mut world2, Tick(t));
 
-            for e in world1.intentions.keys() {
-                let i1 = &world1.intentions[e];
-                let i2 = &world2.intentions[e];
+            for e in world1.mind.intentions.keys() {
+                let i1 = &world1.mind.intentions[e];
+                let i2 = &world2.mind.intentions[e];
                 assert_eq!(
                     i1.action, i2.action,
                     "action mismatch at tick {t} entity {:?}",
@@ -887,17 +922,17 @@ mod tests {
     fn test_eat_selects_nearest_target() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 5, y: 5 });
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
 
         // Far food with high nutrition
         let f1 = world.spawn();
-        world.positions.insert(f1, Position { x: 15, y: 15 });
-        world.nutritions.insert(f1, Nutrition { value: 30.0 });
+        world.body.positions.insert(f1, Position { x: 15, y: 15 });
+        world.mind.nutritions.insert(f1, Nutrition { value: 30.0 });
 
         // Near food with low nutrition
         let f2 = world.spawn();
-        world.positions.insert(f2, Position { x: 6, y: 5 });
-        world.nutritions.insert(f2, Nutrition { value: 10.0 });
+        world.body.positions.insert(f2, Position { x: 6, y: 5 });
+        world.mind.nutritions.insert(f2, Nutrition { value: 10.0 });
 
         // Nearest wins (distance 1 vs 10)
         let target = select_eat_target(&world, e);
@@ -908,15 +943,15 @@ mod tests {
     fn test_eat_selects_highest_nutrition_at_same_distance() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 5, y: 5 });
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
 
         let f1 = world.spawn();
-        world.positions.insert(f1, Position { x: 5, y: 5 });
-        world.nutritions.insert(f1, Nutrition { value: 10.0 });
+        world.body.positions.insert(f1, Position { x: 5, y: 5 });
+        world.mind.nutritions.insert(f1, Nutrition { value: 10.0 });
 
         let f2 = world.spawn();
-        world.positions.insert(f2, Position { x: 5, y: 5 });
-        world.nutritions.insert(f2, Nutrition { value: 30.0 });
+        world.body.positions.insert(f2, Position { x: 5, y: 5 });
+        world.mind.nutritions.insert(f2, Nutrition { value: 30.0 });
 
         // Same distance → highest nutrition wins
         let target = select_eat_target(&world, e);
@@ -927,8 +962,8 @@ mod tests {
     fn test_attack_selects_nearest_target() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 5, y: 5 });
-        world.combat_stats.insert(
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.body.combat_stats.insert(
             e,
             CombatStats {
                 attack: 10.0,
@@ -939,8 +974,8 @@ mod tests {
 
         // Near enemy with high health
         let t1 = world.spawn();
-        world.positions.insert(t1, Position { x: 6, y: 5 });
-        world.combat_stats.insert(
+        world.body.positions.insert(t1, Position { x: 6, y: 5 });
+        world.body.combat_stats.insert(
             t1,
             CombatStats {
                 attack: 5.0,
@@ -948,7 +983,7 @@ mod tests {
                 aggression: 0.0,
             },
         );
-        world.healths.insert(
+        world.body.healths.insert(
             t1,
             Health {
                 current: 80.0,
@@ -958,8 +993,8 @@ mod tests {
 
         // Far enemy with low health
         let t2 = world.spawn();
-        world.positions.insert(t2, Position { x: 15, y: 15 });
-        world.combat_stats.insert(
+        world.body.positions.insert(t2, Position { x: 15, y: 15 });
+        world.body.combat_stats.insert(
             t2,
             CombatStats {
                 attack: 5.0,
@@ -967,7 +1002,7 @@ mod tests {
                 aggression: 0.0,
             },
         );
-        world.healths.insert(
+        world.body.healths.insert(
             t2,
             Health {
                 current: 30.0,
@@ -984,8 +1019,8 @@ mod tests {
     fn test_attack_selects_lowest_health_at_same_distance() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 5, y: 5 });
-        world.combat_stats.insert(
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.body.combat_stats.insert(
             e,
             CombatStats {
                 attack: 10.0,
@@ -995,8 +1030,8 @@ mod tests {
         );
 
         let t1 = world.spawn();
-        world.positions.insert(t1, Position { x: 5, y: 5 });
-        world.combat_stats.insert(
+        world.body.positions.insert(t1, Position { x: 5, y: 5 });
+        world.body.combat_stats.insert(
             t1,
             CombatStats {
                 attack: 5.0,
@@ -1004,7 +1039,7 @@ mod tests {
                 aggression: 0.0,
             },
         );
-        world.healths.insert(
+        world.body.healths.insert(
             t1,
             Health {
                 current: 80.0,
@@ -1013,8 +1048,8 @@ mod tests {
         );
 
         let t2 = world.spawn();
-        world.positions.insert(t2, Position { x: 5, y: 5 });
-        world.combat_stats.insert(
+        world.body.positions.insert(t2, Position { x: 5, y: 5 });
+        world.body.combat_stats.insert(
             t2,
             CombatStats {
                 attack: 5.0,
@@ -1022,7 +1057,7 @@ mod tests {
                 aggression: 0.0,
             },
         );
-        world.healths.insert(
+        world.body.healths.insert(
             t2,
             Health {
                 current: 30.0,

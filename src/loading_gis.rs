@@ -1067,9 +1067,9 @@ pub fn rasterize_paris(
 pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
     let (tiles, buildings, blocks, quartier_names) = rasterize_paris(&data);
     world.tiles = tiles;
-    world.buildings = buildings;
-    world.blocks = blocks;
-    world.quartier_names = quartier_names;
+    world.gis.buildings = buildings;
+    world.gis.blocks = blocks;
+    world.gis.quartier_names = quartier_names;
 }
 
 // --- Address + Occupant loading (A07) ---
@@ -1601,7 +1601,7 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
         metadata.quartier_names.len()
     );
 
-    world.quartier_names = metadata.quartier_names;
+    world.gis.quartier_names = metadata.quartier_names;
 
     // Reconstruct building tile lists by scanning the tile array.
     // BuildingId is 1-based; allocate per-building tile vecs indexed by id-1.
@@ -1629,16 +1629,19 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
     // Populate registry (Vec-backed, preserves insertion order)
     for (i, mut bdata) in metadata.buildings.into_iter().enumerate() {
         bdata.tiles = std::mem::take(&mut building_tiles[i]);
-        world.buildings.insert(bdata);
+        world.gis.buildings.insert(bdata);
     }
     for bdata in metadata.blocks {
-        world.blocks.insert(bdata);
+        world.gis.blocks.insert(bdata);
     }
 
     // Reconstruct street registry from building address data
-    world.streets = StreetRegistry::build_from_buildings(&world.buildings);
-    world.active_year = 1839;
-    log::info!("  {} streets reconstructed", world.streets.streets.len());
+    world.gis.streets = StreetRegistry::build_from_buildings(&world.gis.buildings);
+    world.gis.active_year = 1839;
+    log::info!(
+        "  {} streets reconstructed",
+        world.gis.streets.streets.len()
+    );
 
     log::info!(
         "Paris binary loaded in {:.1}s",

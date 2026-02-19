@@ -346,12 +346,13 @@ impl ApplicationHandler for App {
                                 let tile_y = self.camera.y + vy as i32;
                                 let mut candidates: Vec<components::Entity> = self
                                     .world
+                                    .body
                                     .positions
                                     .iter()
                                     .filter(|(e, p)| {
                                         p.x == tile_x
                                             && p.y == tile_y
-                                            && self.world.combat_stats.contains_key(e)
+                                            && self.world.body.combat_stats.contains_key(e)
                                             && self.world.alive.contains(e)
                                     })
                                     .map(|(e, _)| *e)
@@ -364,8 +365,8 @@ impl ApplicationHandler for App {
                                         self.tick_accumulator = 0.0;
                                     } else {
                                         self.world.player = Some(e);
-                                        self.world.move_cooldowns.remove(&e);
-                                        self.world.wander_targets.remove(&e);
+                                        self.world.body.move_cooldowns.remove(&e);
+                                        self.world.mind.wander_targets.remove(&e);
                                     }
                                 }
                             }
@@ -379,35 +380,37 @@ impl ApplicationHandler for App {
                                 let player = self.world.player.expect("player entity");
                                 match action {
                                     PlayerAction::Move(dx, dy) => {
-                                        let can_move =
-                                            if let Some(pos) = self.world.positions.get(&player) {
-                                                let mw = self.world.tiles.width() as i32;
-                                                let mh = self.world.tiles.height() as i32;
-                                                let tx = (pos.x + dx).clamp(0, (mw - 1).max(0));
-                                                let ty = (pos.y + dy).clamp(0, (mh - 1).max(0));
-                                                if self
-                                                    .world
-                                                    .tiles
-                                                    .is_walkable(tx as usize, ty as usize)
-                                                {
-                                                    self.world.wander_targets.insert(
-                                                        player,
-                                                        components::WanderTarget {
-                                                            goal_x: tx,
-                                                            goal_y: ty,
-                                                        },
-                                                    );
-                                                    true
-                                                } else {
-                                                    false
-                                                }
+                                        let can_move = if let Some(pos) =
+                                            self.world.body.positions.get(&player)
+                                        {
+                                            let mw = self.world.tiles.width() as i32;
+                                            let mh = self.world.tiles.height() as i32;
+                                            let tx = (pos.x + dx).clamp(0, (mw - 1).max(0));
+                                            let ty = (pos.y + dy).clamp(0, (mh - 1).max(0));
+                                            if self
+                                                .world
+                                                .tiles
+                                                .is_walkable(tx as usize, ty as usize)
+                                            {
+                                                self.world.mind.wander_targets.insert(
+                                                    player,
+                                                    components::WanderTarget {
+                                                        goal_x: tx,
+                                                        goal_y: ty,
+                                                    },
+                                                );
+                                                true
                                             } else {
                                                 false
-                                            };
+                                            }
+                                        } else {
+                                            false
+                                        };
                                         if can_move {
                                             run_one_tick(&mut self.world);
                                             let cooldown = self
                                                 .world
+                                                .body
                                                 .move_cooldowns
                                                 .get(&player)
                                                 .map(|cd| cd.remaining)
@@ -420,17 +423,19 @@ impl ApplicationHandler for App {
                                     PlayerAction::Wait => {
                                         let gait = self
                                             .world
+                                            .body
                                             .current_gaits
                                             .get(&player)
                                             .copied()
                                             .unwrap_or(components::Gait::Walk);
                                         let base = self
                                             .world
+                                            .body
                                             .gait_profiles
                                             .get(&player)
                                             .map(|p| p.cooldown(gait))
                                             .unwrap_or(9);
-                                        self.world.move_cooldowns.insert(
+                                        self.world.body.move_cooldowns.insert(
                                             player,
                                             components::MoveCooldown { remaining: base },
                                         );
@@ -485,7 +490,7 @@ impl ApplicationHandler for App {
 
                             // Camera: follow player in roguelike mode
                             if let Some(player) = self.world.player
-                                && let Some(pos) = self.world.positions.get(&player)
+                                && let Some(pos) = self.world.body.positions.get(&player)
                             {
                                 self.camera.x = pos.x - viewport_cols as i32 / 2;
                                 self.camera.y = pos.y - viewport_rows as i32 / 2;

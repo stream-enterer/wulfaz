@@ -38,23 +38,23 @@ fn test_world(seed: u64) -> World {
 /// Placed at the given grid position.
 fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
     let e = world.spawn();
-    world.positions.insert(e, Position { x, y });
-    world.hungers.insert(
+    world.body.positions.insert(e, Position { x, y });
+    world.mind.hungers.insert(
         e,
         Hunger {
             current: 20.0,
             max: 100.0,
         },
     );
-    world.healths.insert(
+    world.body.healths.insert(
         e,
         Health {
             current: 100.0,
             max: 100.0,
         },
     );
-    world.fatigues.insert(e, Fatigue { current: 0.0 });
-    world.combat_stats.insert(
+    world.body.fatigues.insert(e, Fatigue { current: 0.0 });
+    world.body.combat_stats.insert(
         e,
         CombatStats {
             attack: 10.0,
@@ -62,10 +62,10 @@ fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
             aggression: 0.6,
         },
     );
-    world.gait_profiles.insert(e, GaitProfile::biped());
-    world.current_gaits.insert(e, Gait::Walk);
-    world.icons.insert(e, Icon { ch: 'c' });
-    world.names.insert(
+    world.body.gait_profiles.insert(e, GaitProfile::biped());
+    world.body.current_gaits.insert(e, Gait::Walk);
+    world.body.icons.insert(e, Icon { ch: 'c' });
+    world.body.names.insert(
         e,
         Name {
             value: "Creature".to_string(),
@@ -77,10 +77,10 @@ fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
 /// Spawn a food item at the given grid position.
 fn spawn_food(world: &mut World, x: i32, y: i32) -> Entity {
     let e = world.spawn();
-    world.positions.insert(e, Position { x, y });
-    world.nutritions.insert(e, Nutrition { value: 30.0 });
-    world.icons.insert(e, Icon { ch: 'f' });
-    world.names.insert(
+    world.body.positions.insert(e, Position { x, y });
+    world.mind.nutritions.insert(e, Nutrition { value: 30.0 });
+    world.body.icons.insert(e, Icon { ch: 'f' });
+    world.body.names.insert(
         e,
         Name {
             value: "Food".to_string(),
@@ -275,39 +275,39 @@ fn dead_entities_removed_from_all_tables() {
     for &e in &entities[..5] {
         assert!(!world.alive.contains(&e), "entity should not be alive");
         assert!(
-            !world.positions.contains_key(&e),
+            !world.body.positions.contains_key(&e),
             "entity should not be in positions"
         );
         assert!(
-            !world.hungers.contains_key(&e),
+            !world.mind.hungers.contains_key(&e),
             "entity should not be in hungers"
         );
         assert!(
-            !world.healths.contains_key(&e),
+            !world.body.healths.contains_key(&e),
             "entity should not be in healths"
         );
         assert!(
-            !world.fatigues.contains_key(&e),
+            !world.body.fatigues.contains_key(&e),
             "entity should not be in fatigues"
         );
         assert!(
-            !world.combat_stats.contains_key(&e),
+            !world.body.combat_stats.contains_key(&e),
             "entity should not be in combat_stats"
         );
         assert!(
-            !world.gait_profiles.contains_key(&e),
+            !world.body.gait_profiles.contains_key(&e),
             "entity should not be in gait_profiles"
         );
         assert!(
-            !world.current_gaits.contains_key(&e),
+            !world.body.current_gaits.contains_key(&e),
             "entity should not be in current_gaits"
         );
         assert!(
-            !world.icons.contains_key(&e),
+            !world.body.icons.contains_key(&e),
             "entity should not be in icons"
         );
         assert!(
-            !world.names.contains_key(&e),
+            !world.body.names.contains_key(&e),
             "entity should not be in names"
         );
     }
@@ -316,7 +316,7 @@ fn dead_entities_removed_from_all_tables() {
     for &e in &entities[5..] {
         assert!(world.alive.contains(&e), "entity should still be alive");
         assert!(
-            world.positions.contains_key(&e),
+            world.body.positions.contains_key(&e),
             "entity should still be in positions"
         );
     }

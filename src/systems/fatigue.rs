@@ -20,6 +20,7 @@ const HP_DAMAGE_THRESHOLD: f32 = 200.0;
 pub fn run_fatigue(world: &mut World, tick: Tick) {
     // Collect recovery updates (can't borrow world.rng while iterating fatigues)
     let updates: Vec<(Entity, f32)> = world
+        .body
         .fatigues
         .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
@@ -36,7 +37,7 @@ pub fn run_fatigue(world: &mut World, tick: Tick) {
 
     // Apply recovery and check for HP damage from excess fatigue
     for (e, new_fatigue) in updates {
-        if let Some(f) = world.fatigues.get_mut(&e) {
+        if let Some(f) = world.body.fatigues.get_mut(&e) {
             f.current = new_fatigue;
         }
 
@@ -51,7 +52,7 @@ pub fn run_fatigue(world: &mut World, tick: Tick) {
             let total_damage = guaranteed + bonus;
 
             if total_damage > 0.0
-                && let Some(health) = world.healths.get_mut(&e)
+                && let Some(health) = world.body.healths.get_mut(&e)
             {
                 health.current = (health.current - total_damage).max(0.0);
                 if health.current <= 0.0 {
@@ -73,30 +74,30 @@ mod tests {
     fn test_fatigue_recovers_naturally() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.fatigues.insert(e, Fatigue { current: 10.0 });
+        world.body.fatigues.insert(e, Fatigue { current: 10.0 });
 
         run_fatigue(&mut world, Tick(0));
-        assert!((world.fatigues[&e].current - 9.8).abs() < 0.001);
+        assert!((world.body.fatigues[&e].current - 9.8).abs() < 0.001);
     }
 
     #[test]
     fn test_fatigue_clamps_to_zero() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.fatigues.insert(e, Fatigue { current: 0.1 });
+        world.body.fatigues.insert(e, Fatigue { current: 0.1 });
 
         run_fatigue(&mut world, Tick(0));
-        assert_eq!(world.fatigues[&e].current, 0.0);
+        assert_eq!(world.body.fatigues[&e].current, 0.0);
     }
 
     #[test]
     fn test_fast_recovery_when_unconscious() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.fatigues.insert(e, Fatigue { current: 105.0 });
+        world.body.fatigues.insert(e, Fatigue { current: 105.0 });
 
         run_fatigue(&mut world, Tick(0));
-        assert!((world.fatigues[&e].current - 104.0).abs() < 0.001);
+        assert!((world.body.fatigues[&e].current - 104.0).abs() < 0.001);
     }
 
     #[test]
@@ -104,8 +105,8 @@ mod tests {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
         // 260 fatigue → excess 60 → guaranteed 1 HP damage (60/50 = 1.2 → floor 1)
-        world.fatigues.insert(e, Fatigue { current: 260.0 });
-        world.healths.insert(
+        world.body.fatigues.insert(e, Fatigue { current: 260.0 });
+        world.body.healths.insert(
             e,
             Health {
                 current: 100.0,
@@ -115,7 +116,7 @@ mod tests {
 
         run_fatigue(&mut world, Tick(0));
         // Should have taken at least 1 HP damage
-        assert!(world.healths[&e].current < 100.0);
+        assert!(world.body.healths[&e].current < 100.0);
     }
 
     #[test]
@@ -123,8 +124,8 @@ mod tests {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
         // Very high fatigue with very low health
-        world.fatigues.insert(e, Fatigue { current: 500.0 });
-        world.healths.insert(
+        world.body.fatigues.insert(e, Fatigue { current: 500.0 });
+        world.body.healths.insert(
             e,
             Health {
                 current: 1.0,
@@ -140,8 +141,8 @@ mod tests {
     fn test_no_hp_damage_below_threshold() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.fatigues.insert(e, Fatigue { current: 150.0 });
-        world.healths.insert(
+        world.body.fatigues.insert(e, Fatigue { current: 150.0 });
+        world.body.healths.insert(
             e,
             Health {
                 current: 100.0,
@@ -150,27 +151,27 @@ mod tests {
         );
 
         run_fatigue(&mut world, Tick(0));
-        assert_eq!(world.healths[&e].current, 100.0);
+        assert_eq!(world.body.healths[&e].current, 100.0);
     }
 
     #[test]
     fn test_skips_pending_death() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.fatigues.insert(e, Fatigue { current: 50.0 });
+        world.body.fatigues.insert(e, Fatigue { current: 50.0 });
         world.pending_deaths.push(e);
 
         run_fatigue(&mut world, Tick(0));
-        assert_eq!(world.fatigues[&e].current, 50.0);
+        assert_eq!(world.body.fatigues[&e].current, 50.0);
     }
 
     #[test]
     fn test_zero_fatigue_stays_zero() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.fatigues.insert(e, Fatigue { current: 0.0 });
+        world.body.fatigues.insert(e, Fatigue { current: 0.0 });
 
         run_fatigue(&mut world, Tick(0));
-        assert_eq!(world.fatigues[&e].current, 0.0);
+        assert_eq!(world.body.fatigues[&e].current, 0.0);
     }
 }

@@ -41,23 +41,23 @@ fn test_world(seed: u64) -> World {
 /// Spawn a creature with full components at the given position.
 fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
     let e = world.spawn();
-    world.positions.insert(e, Position { x, y });
-    world.hungers.insert(
+    world.body.positions.insert(e, Position { x, y });
+    world.mind.hungers.insert(
         e,
         Hunger {
             current: 20.0,
             max: 100.0,
         },
     );
-    world.healths.insert(
+    world.body.healths.insert(
         e,
         Health {
             current: 100.0,
             max: 100.0,
         },
     );
-    world.fatigues.insert(e, Fatigue { current: 0.0 });
-    world.combat_stats.insert(
+    world.body.fatigues.insert(e, Fatigue { current: 0.0 });
+    world.body.combat_stats.insert(
         e,
         CombatStats {
             attack: 10.0,
@@ -65,16 +65,16 @@ fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
             aggression: 0.6,
         },
     );
-    world.gait_profiles.insert(e, GaitProfile::biped());
-    world.current_gaits.insert(e, Gait::Walk);
-    world.icons.insert(e, Icon { ch: 'c' });
-    world.names.insert(
+    world.body.gait_profiles.insert(e, GaitProfile::biped());
+    world.body.current_gaits.insert(e, Gait::Walk);
+    world.body.icons.insert(e, Icon { ch: 'c' });
+    world.body.names.insert(
         e,
         Name {
             value: "Creature".to_string(),
         },
     );
-    world.action_states.insert(
+    world.mind.action_states.insert(
         e,
         ActionState {
             current_action: None,
@@ -88,10 +88,10 @@ fn spawn_creature(world: &mut World, x: i32, y: i32) -> Entity {
 /// Spawn a food item at the given position.
 fn spawn_food(world: &mut World, x: i32, y: i32) -> Entity {
     let e = world.spawn();
-    world.positions.insert(e, Position { x, y });
-    world.nutritions.insert(e, Nutrition { value: 30.0 });
-    world.icons.insert(e, Icon { ch: 'f' });
-    world.names.insert(
+    world.body.positions.insert(e, Position { x, y });
+    world.mind.nutritions.insert(e, Nutrition { value: 30.0 });
+    world.body.icons.insert(e, Icon { ch: 'f' });
+    world.body.names.insert(
         e,
         Name {
             value: "Food".to_string(),
@@ -167,6 +167,7 @@ impl WorldSnapshot {
         alive_ids.sort();
 
         let mut positions: Vec<(u64, i32, i32)> = world
+            .body
             .positions
             .iter()
             .map(|(&e, p)| (e.0, p.x, p.y))
@@ -174,6 +175,7 @@ impl WorldSnapshot {
         positions.sort_by_key(|&(id, _, _)| id);
 
         let mut hungers: Vec<(u64, u32)> = world
+            .mind
             .hungers
             .iter()
             .map(|(&e, h)| (e.0, h.current.to_bits()))
@@ -181,6 +183,7 @@ impl WorldSnapshot {
         hungers.sort_by_key(|&(id, _)| id);
 
         let mut healths: Vec<(u64, u32)> = world
+            .body
             .healths
             .iter()
             .map(|(&e, h)| (e.0, h.current.to_bits()))
@@ -188,6 +191,7 @@ impl WorldSnapshot {
         healths.sort_by_key(|&(id, _)| id);
 
         let mut fatigues: Vec<(u64, u32)> = world
+            .body
             .fatigues
             .iter()
             .map(|(&e, f)| (e.0, f.current.to_bits()))
@@ -195,6 +199,7 @@ impl WorldSnapshot {
         fatigues.sort_by_key(|&(id, _)| id);
 
         let mut intentions: Vec<(u64, u8)> = world
+            .mind
             .intentions
             .iter()
             .map(|(&e, i)| (e.0, i.action as u8))

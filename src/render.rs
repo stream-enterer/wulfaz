@@ -28,14 +28,14 @@ pub fn render_hover_info(world: &World, tile_x: i32, tile_y: i32) -> String {
     // Quartier
     if let Some(qid) = world.tiles.get_quartier_id(ux, uy)
         && qid > 0
-        && let Some(name) = world.quartier_names.get((qid - 1) as usize)
+        && let Some(name) = world.gis.quartier_names.get((qid - 1) as usize)
     {
         parts.push(name.clone());
     }
 
     // Building
     if let Some(bid) = world.tiles.get_building_id(ux, uy)
-        && let Some(building) = world.buildings.get(bid)
+        && let Some(building) = world.gis.buildings.get(bid)
     {
         // Address
         let addr = if let Some(a) = building.addresses.first() {
@@ -53,23 +53,24 @@ pub fn render_hover_info(world: &World, tile_x: i32, tile_y: i32) -> String {
         parts.push(addr_part);
 
         // Occupants: nearest year within ±20 of active_year
-        let occ_part =
-            if let Some((year, occupants)) = building.occupants_nearest(world.active_year, 20) {
-                let first = &occupants[0];
-                let label = format!("{} ({})", first.name, first.activity);
-                let count_suffix = if occupants.len() > 1 {
-                    format!(" +{} more", occupants.len() - 1)
-                } else {
-                    String::new()
-                };
-                if year == world.active_year {
-                    format!("{}{}", label, count_suffix)
-                } else {
-                    format!("{}{} [{}]", label, count_suffix, year)
-                }
+        let occ_part = if let Some((year, occupants)) =
+            building.occupants_nearest(world.gis.active_year, 20)
+        {
+            let first = &occupants[0];
+            let label = format!("{} ({})", first.name, first.activity);
+            let count_suffix = if occupants.len() > 1 {
+                format!(" +{} more", occupants.len() - 1)
             } else {
-                "no occupants".to_string()
+                String::new()
             };
+            if year == world.gis.active_year {
+                format!("{}{}", label, count_suffix)
+            } else {
+                format!("{}{} [{}]", label, count_suffix, year)
+            }
+        } else {
+            "no occupants".to_string()
+        };
         parts.push(occ_part);
     }
 
@@ -144,15 +145,15 @@ pub fn render_world_to_string(
     // An entity is a "creature" if it has combat_stats; otherwise it's an item.
     // This ensures creatures are always visible when sharing a tile with items.
     for pass in 0..2 {
-        for (&entity, pos) in &world.positions {
+        for (&entity, pos) in &world.body.positions {
             if !world.alive.contains(&entity) {
                 continue;
             }
-            let is_creature = world.combat_stats.contains_key(&entity);
+            let is_creature = world.body.combat_stats.contains_key(&entity);
             if (pass == 0) == is_creature {
                 continue; // pass 0: items only; pass 1: creatures only
             }
-            if let Some(icon) = world.icons.get(&entity) {
+            if let Some(icon) = world.body.icons.get(&entity) {
                 let vx = pos.x - cam_x;
                 let vy = pos.y - cam_y;
                 if vx >= 0 && vy >= 0 {
@@ -189,7 +190,7 @@ pub fn render_status(world: &World) -> String {
     let mut status = format!("Tick: {} | Entities: {}", world.tick.0, world.alive.len());
 
     let mut name_counts: BTreeMap<&str, usize> = BTreeMap::new();
-    for (&entity, Name { value }) in &world.names {
+    for (&entity, Name { value }) in &world.body.names {
         if world.alive.contains(&entity) {
             *name_counts.entry(value.as_str()).or_insert(0) += 1;
         }
@@ -204,7 +205,7 @@ pub fn render_status(world: &World) -> String {
     }
 
     if let Some(player) = world.player
-        && let Some(name) = world.names.get(&player)
+        && let Some(name) = world.body.names.get(&player)
     {
         status.push_str(&format!(" | @{}", name.value));
     }
@@ -226,6 +227,7 @@ pub fn render_recent_events(world: &World, count: usize) -> String {
 
     let resolve = |e: &crate::components::Entity| -> String {
         world
+            .body
             .names
             .get(e)
             .map(|n| n.value.clone())
@@ -323,8 +325,8 @@ mod tests {
         world.tiles = crate::tile_map::TileMap::new(5, 5);
 
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 2, y: 3 });
-        world.icons.insert(e, Icon { ch: 'g' });
+        world.body.positions.insert(e, Position { x: 2, y: 3 });
+        world.body.icons.insert(e, Icon { ch: 'g' });
 
         let output = render_full(&world);
         let lines: Vec<&str> = output.lines().collect();
@@ -339,8 +341,8 @@ mod tests {
         world.tiles = crate::tile_map::TileMap::new(5, 5);
 
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 1, y: 1 });
-        world.icons.insert(e, Icon { ch: 'T' });
+        world.body.positions.insert(e, Position { x: 1, y: 1 });
+        world.body.icons.insert(e, Icon { ch: 'T' });
         world.alive.remove(&e); // Entity is dead.
 
         let output = render_full(&world);
@@ -355,7 +357,7 @@ mod tests {
         world.tiles = crate::tile_map::TileMap::new(5, 5);
 
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 2, y: 2 });
+        world.body.positions.insert(e, Position { x: 2, y: 2 });
         // No icon inserted.
 
         let output = render_full(&world);
@@ -369,8 +371,8 @@ mod tests {
         world.tiles = crate::tile_map::TileMap::new(5, 5);
 
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 10, y: 10 });
-        world.icons.insert(e, Icon { ch: 'X' });
+        world.body.positions.insert(e, Position { x: 10, y: 10 });
+        world.body.icons.insert(e, Icon { ch: 'X' });
 
         // Should not panic, entity is just off-grid.
         let output = render_full(&world);
@@ -384,8 +386,8 @@ mod tests {
         world.tiles = crate::tile_map::TileMap::new(5, 5);
 
         let e = world.spawn();
-        world.positions.insert(e, Position { x: -1, y: -3 });
-        world.icons.insert(e, Icon { ch: 'N' });
+        world.body.positions.insert(e, Position { x: -1, y: -3 });
+        world.body.icons.insert(e, Icon { ch: 'N' });
 
         // Should not panic.
         let output = render_full(&world);
@@ -407,14 +409,17 @@ mod tests {
 
         // Item (no combat_stats) — drawn first
         let item = world.spawn();
-        world.positions.insert(item, Position { x: 2, y: 2 });
-        world.icons.insert(item, Icon { ch: '/' });
+        world.body.positions.insert(item, Position { x: 2, y: 2 });
+        world.body.icons.insert(item, Icon { ch: '/' });
 
         // Creature (has combat_stats) — drawn on top
         let creature = world.spawn();
-        world.positions.insert(creature, Position { x: 2, y: 2 });
-        world.icons.insert(creature, Icon { ch: 'g' });
-        world.combat_stats.insert(
+        world
+            .body
+            .positions
+            .insert(creature, Position { x: 2, y: 2 });
+        world.body.icons.insert(creature, Icon { ch: 'g' });
+        world.body.combat_stats.insert(
             creature,
             CombatStats {
                 attack: 10.0,
@@ -435,8 +440,8 @@ mod tests {
         world.tiles = crate::tile_map::TileMap::new(5, 5);
 
         let item = world.spawn();
-        world.positions.insert(item, Position { x: 2, y: 2 });
-        world.icons.insert(item, Icon { ch: '/' });
+        world.body.positions.insert(item, Position { x: 2, y: 2 });
+        world.body.icons.insert(item, Icon { ch: '/' });
 
         let output = render_full(&world);
         let lines: Vec<&str> = output.lines().collect();
@@ -450,8 +455,8 @@ mod tests {
         world.tiles.set_terrain(5, 5, Terrain::Water);
 
         let e = world.spawn();
-        world.positions.insert(e, Position { x: 6, y: 6 });
-        world.icons.insert(e, Icon { ch: 'g' });
+        world.body.positions.insert(e, Position { x: 6, y: 6 });
+        world.body.icons.insert(e, Icon { ch: 'g' });
 
         // Camera at (3,3), viewport 5x5 => shows world (3..8, 3..8)
         let output = render_world_to_string(&world, 3, 3, 5, 5);
@@ -505,21 +510,21 @@ mod tests {
         let mut world = World::new_with_seed(42);
         world.tick = Tick(5);
         let e1 = world.spawn();
-        world.names.insert(
+        world.body.names.insert(
             e1,
             Name {
                 value: "Goblin".to_string(),
             },
         );
         let e2 = world.spawn();
-        world.names.insert(
+        world.body.names.insert(
             e2,
             Name {
                 value: "Goblin".to_string(),
             },
         );
         let e3 = world.spawn();
-        world.names.insert(
+        world.body.names.insert(
             e3,
             Name {
                 value: "Troll".to_string(),
@@ -534,14 +539,14 @@ mod tests {
     fn recent_events_renders_attack() {
         let mut world = World::new_with_seed(42);
         let a = world.spawn();
-        world.names.insert(
+        world.body.names.insert(
             a,
             Name {
                 value: "Goblin".to_string(),
             },
         );
         let d = world.spawn();
-        world.names.insert(
+        world.body.names.insert(
             d,
             Name {
                 value: "Troll".to_string(),
@@ -591,7 +596,7 @@ mod tests {
         let mut world = World::new_with_seed(42);
         world.tiles = crate::tile_map::TileMap::new(5, 5);
         world.tiles.set_quartier_id(1, 1, 2);
-        world.quartier_names = vec!["Arcis".into(), "Marais".into()];
+        world.gis.quartier_names = vec!["Arcis".into(), "Marais".into()];
 
         let info = render_hover_info(&world, 1, 1);
         assert_eq!(info, "(1, 1) Road | Marais");
@@ -606,7 +611,7 @@ mod tests {
         world.tiles = crate::tile_map::TileMap::new(5, 5);
         world.tiles.set_terrain(2, 2, Terrain::Floor);
         world.tiles.set_building_id(2, 2, BuildingId(1));
-        world.active_year = 1845;
+        world.gis.active_year = 1845;
 
         let mut occ_map = HashMap::new();
         occ_map.insert(
@@ -625,7 +630,7 @@ mod tests {
             ],
         );
 
-        world.buildings.insert(BuildingData {
+        world.gis.buildings.insert(BuildingData {
             id: BuildingId(1),
             identif: 42,
             quartier: "Arcis".into(),
@@ -662,7 +667,7 @@ mod tests {
         world.tiles = crate::tile_map::TileMap::new(5, 5);
         world.tiles.set_terrain(1, 1, Terrain::Floor);
         world.tiles.set_building_id(1, 1, BuildingId(1));
-        world.active_year = 1839; // no 1839 data — should fall back to 1842
+        world.gis.active_year = 1839; // no 1839 data — should fall back to 1842
 
         let mut occ_map = HashMap::new();
         occ_map.insert(
@@ -674,7 +679,7 @@ mod tests {
             }],
         );
 
-        world.buildings.insert(BuildingData {
+        world.gis.buildings.insert(BuildingData {
             id: BuildingId(1),
             identif: 7,
             quartier: "Arcis".into(),

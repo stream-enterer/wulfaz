@@ -8,6 +8,7 @@ use crate::world::World;
 /// clamped to hunger.max. Entities in pending_deaths are skipped.
 pub fn run_hunger(world: &mut World, tick: Tick) {
     let mut changes: Vec<(crate::components::Entity, f32, f32)> = world
+        .mind
         .hungers
         .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
@@ -19,7 +20,7 @@ pub fn run_hunger(world: &mut World, tick: Tick) {
     changes.sort_by_key(|(e, _, _)| e.0);
 
     for (e, old, new_val) in changes {
-        if let Some(h) = world.hungers.get_mut(&e) {
+        if let Some(h) = world.mind.hungers.get_mut(&e) {
             h.current = new_val;
             world.events.push(Event::HungerChanged {
                 entity: e,
@@ -41,7 +42,7 @@ mod tests {
     fn test_hunger_increases() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.hungers.insert(
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 0.0,
@@ -49,14 +50,14 @@ mod tests {
             },
         );
         run_hunger(&mut world, Tick(0));
-        assert!(world.hungers[&e].current > 0.0);
+        assert!(world.mind.hungers[&e].current > 0.0);
     }
 
     #[test]
     fn test_hunger_clamped_at_max() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.hungers.insert(
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 99.5,
@@ -64,14 +65,14 @@ mod tests {
             },
         );
         run_hunger(&mut world, Tick(0));
-        assert_eq!(world.hungers[&e].current, 100.0);
+        assert_eq!(world.mind.hungers[&e].current, 100.0);
     }
 
     #[test]
     fn test_hunger_skips_pending_death() {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
-        world.hungers.insert(
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 50.0,
@@ -80,6 +81,6 @@ mod tests {
         );
         world.pending_deaths.push(e);
         run_hunger(&mut world, Tick(0));
-        assert_eq!(world.hungers[&e].current, 50.0); // unchanged
+        assert_eq!(world.mind.hungers[&e].current, 50.0); // unchanged
     }
 }

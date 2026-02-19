@@ -118,10 +118,8 @@ Developable on test map or integrated after Phase B.
 Design decisions needed before implementation.
 
 - **S06** — BATI=3 minor features (199 polygons: fountains, wells, kiosks). Currently skipped and logged. No terrain type exists for them. Decide: new terrain variant? Point-of-interest overlay? Ignore permanently?
-- **S08** — Garden/courtyard polygons have no registry entry. Given a Garden tile, there's no way to look up which garden it is, its name, or metadata. Data is preserved in `paris.ron`. Decide: new GardenRegistry? Extend BuildingRegistry to BATI=2? Only needed if gameplay references named green spaces.
 
 ## Pending (threshold not yet met)
 
-- **GROW-001** — Sub-struct grouping. Trigger: >25 World fields.
 - **GROW-002** — Phase function grouping. Trigger: >30 system calls.
 - **GROW-003** — System dependency analyzer. Trigger: >15 system files.

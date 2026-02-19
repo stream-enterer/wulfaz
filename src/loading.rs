@@ -51,7 +51,7 @@ pub fn load_utility_config(world: &mut World, path: &str) {
         }
     };
     match ron::from_str::<UtilityConfig>(&content) {
-        Ok(config) => world.utility_config = config,
+        Ok(config) => world.mind.utility_config = config,
         Err(e) => {
             log::warn!("failed to parse RON {}: {}, using default config", path, e);
         }
@@ -103,25 +103,25 @@ pub fn load_creatures(world: &mut World, path: &str) {
             0
         };
 
-        world.names.insert(e, Name { value: name });
-        world.icons.insert(e, Icon { ch: icon_ch });
-        world.positions.insert(e, Position { x, y });
-        world.hungers.insert(
+        world.body.names.insert(e, Name { value: name });
+        world.body.icons.insert(e, Icon { ch: icon_ch });
+        world.body.positions.insert(e, Position { x, y });
+        world.mind.hungers.insert(
             e,
             Hunger {
                 current: 0.0,
                 max: max_hunger,
             },
         );
-        world.healths.insert(
+        world.body.healths.insert(
             e,
             Health {
                 current: 100.0,
                 max: 100.0,
             },
         );
-        world.fatigues.insert(e, Fatigue { current: 0.0 });
-        world.combat_stats.insert(
+        world.body.fatigues.insert(e, Fatigue { current: 0.0 });
+        world.body.combat_stats.insert(
             e,
             CombatStats {
                 attack: 10.0,
@@ -133,9 +133,9 @@ pub fn load_creatures(world: &mut World, path: &str) {
             "quadruped" => GaitProfile::quadruped(),
             _ => GaitProfile::biped(),
         };
-        world.gait_profiles.insert(e, profile);
-        world.current_gaits.insert(e, Gait::Walk);
-        world.action_states.insert(
+        world.body.gait_profiles.insert(e, profile);
+        world.body.current_gaits.insert(e, Gait::Walk);
+        world.mind.action_states.insert(
             e,
             ActionState {
                 current_action: None,
@@ -192,10 +192,13 @@ pub fn load_items(world: &mut World, path: &str) {
             0
         };
 
-        world.names.insert(e, Name { value: name });
-        world.icons.insert(e, Icon { ch: icon_ch });
-        world.positions.insert(e, Position { x, y });
-        world.nutritions.insert(e, Nutrition { value: nutrition });
+        world.body.names.insert(e, Name { value: name });
+        world.body.icons.insert(e, Icon { ch: icon_ch });
+        world.body.positions.insert(e, Position { x, y });
+        world
+            .mind
+            .nutritions
+            .insert(e, Nutrition { value: nutrition });
 
         world.events.push(Event::Spawned {
             entity: e,
@@ -255,13 +258,13 @@ mod tests {
         // 4 creatures in the file
         assert_eq!(world.alive.len(), 4);
         // All should have positions, icons, hungers, healths, combat_stats, gait_profiles, names
-        assert_eq!(world.positions.len(), 4);
-        assert_eq!(world.icons.len(), 4);
-        assert_eq!(world.hungers.len(), 4);
-        assert_eq!(world.healths.len(), 4);
-        assert_eq!(world.combat_stats.len(), 4);
-        assert_eq!(world.gait_profiles.len(), 4);
-        assert_eq!(world.names.len(), 4);
+        assert_eq!(world.body.positions.len(), 4);
+        assert_eq!(world.body.icons.len(), 4);
+        assert_eq!(world.mind.hungers.len(), 4);
+        assert_eq!(world.body.healths.len(), 4);
+        assert_eq!(world.body.combat_stats.len(), 4);
+        assert_eq!(world.body.gait_profiles.len(), 4);
+        assert_eq!(world.body.names.len(), 4);
     }
 
     #[test]
@@ -270,8 +273,8 @@ mod tests {
         load_items(&mut world, "data/items.kdl");
         // 4 items in the file
         assert_eq!(world.alive.len(), 4);
-        assert_eq!(world.nutritions.len(), 4);
-        assert_eq!(world.icons.len(), 4);
+        assert_eq!(world.mind.nutritions.len(), 4);
+        assert_eq!(world.body.icons.len(), 4);
     }
 
     #[test]
@@ -306,24 +309,25 @@ mod tests {
 
         // Find the goblin by name
         let goblin = world
+            .body
             .names
             .iter()
             .find(|(_, n)| n.value == "Goblin")
             .map(|(&e, _)| e);
 
         if let Some(e) = goblin {
-            if let Some(icon) = world.icons.get(&e) {
+            if let Some(icon) = world.body.icons.get(&e) {
                 assert_eq!(icon.ch, 'g');
             }
-            if let Some(hunger) = world.hungers.get(&e) {
+            if let Some(hunger) = world.mind.hungers.get(&e) {
                 assert_eq!(hunger.max, 100.0);
                 assert_eq!(hunger.current, 0.0);
             }
-            if let Some(cs) = world.combat_stats.get(&e) {
+            if let Some(cs) = world.body.combat_stats.get(&e) {
                 assert!((cs.aggression - 0.8).abs() < f32::EPSILON);
             }
-            assert!(world.gait_profiles.contains_key(&e));
-            assert_eq!(world.current_gaits.get(&e), Some(&Gait::Walk));
+            assert!(world.body.gait_profiles.contains_key(&e));
+            assert_eq!(world.body.current_gaits.get(&e), Some(&Gait::Walk));
         }
     }
 }
