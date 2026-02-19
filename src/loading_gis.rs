@@ -293,6 +293,48 @@ fn get_integer_field(record: &shapefile::dbase::Record, name: &str) -> i32 {
     }
 }
 
+/// Fix U+FFFD mojibake in Nom_Bati field.
+///
+/// The shapefile author's tool replaced accented Latin-1 bytes with UTF-8
+/// U+FFFD (EF BF BD). The yore crate then decodes those bytes as CP1252,
+/// producing the literal string "ï¿½". The 3-byte replacement also truncated
+/// trailing characters in the fixed-width DBF field (e.g. "Blés" → "Blï¿½").
+fn normalize_nom_bati(raw: &str) -> String {
+    // Only allocate when there's actually mojibake to fix.
+    if !raw.contains("ï¿½") {
+        return raw.to_string();
+    }
+    match raw {
+        "Halle aux Blï¿½" => "Halle aux Blés".into(),
+        "Cour commune ï¿½ trois maisons" => "Cour commune à trois maisons".into(),
+        "Marchï¿½ au Poisson, Carreau de la Halle" => {
+            "Marché au Poisson, Carreau de la Halle".into()
+        }
+        "Halle ï¿½ la Viande" => "Halle à la Viande".into(),
+        "Barriï¿½re du Roule" => "Barrière du Roule".into(),
+        "Barriï¿½re de Courcelles" => "Barrière de Courcelles".into(),
+        "Barriï¿½re de Monceau" => "Barrière de Monceau".into(),
+        "Barriï¿½re de Clichy" => "Barrière de Clichy".into(),
+        "Fontaine du marchï¿½ des Innocents" => "Fontaine du marché des Innocents".into(),
+        "Marchï¿½ aux Pommes de terre" => "Marché aux Pommes de terre".into(),
+        "A attribuer ï¿½ parcelle voisine" => "À attribuer à parcelle voisine".into(),
+        "Eglise des Petits Pï¿½res" => "Église des Petits Pères".into(),
+        "Marchï¿½ Saint Joseph" => "Marché Saint Joseph".into(),
+        "Marchï¿½ des Quinze-Vingts" => "Marché des Quinze-Vingts".into(),
+        "Hï¿½tel d'Elboeuf" => "Hôtel d'Elboeuf".into(),
+        "Hï¿½tel des Pages" => "Hôtel des Pages".into(),
+        "Place Saint Germain des Prï¿½" => "Place Saint-Germain-des-Prés".into(),
+        "La Vallï¿½" => "La Vallée".into(),
+        "Revoir le contour d'ï¿½lot, parcelle...erreur d'interprï¿½tation" => {
+            "Revoir le contour d'îlot, parcelle...erreur d'interprétation".into()
+        }
+        other => {
+            log::warn!("Unknown mojibake in Nom_Bati: {:?}", other);
+            other.to_string()
+        }
+    }
+}
+
 fn normalize_quartier_name(raw: &str) -> String {
     match raw {
         "Cite" => "Cité".into(),
@@ -436,7 +478,7 @@ fn extract_buildings_from_shapefile(
         let nom_bati = if nom_bati_raw.is_empty() {
             None
         } else {
-            Some(nom_bati_raw)
+            Some(normalize_nom_bati(&nom_bati_raw))
         };
         let num_ilot = get_string_field(&record, "NUM_ILOT");
         let perimetre = get_numeric_field(&record, "PERIMETRE") as f32;
@@ -2048,5 +2090,73 @@ mod tests {
         assert_eq!(normalize_quartier_name("Arcis"), "Arcis");
         assert_eq!(normalize_quartier_name("Louvre"), "Louvre");
         assert_eq!(normalize_quartier_name(""), "");
+    }
+
+    #[test]
+    fn test_normalize_nom_bati_accents() {
+        assert_eq!(normalize_nom_bati("Halle aux Blï¿½"), "Halle aux Blés");
+        assert_eq!(
+            normalize_nom_bati("Barriï¿½re du Roule"),
+            "Barrière du Roule"
+        );
+        assert_eq!(
+            normalize_nom_bati("Barriï¿½re de Courcelles"),
+            "Barrière de Courcelles"
+        );
+        assert_eq!(
+            normalize_nom_bati("Barriï¿½re de Monceau"),
+            "Barrière de Monceau"
+        );
+        assert_eq!(
+            normalize_nom_bati("Barriï¿½re de Clichy"),
+            "Barrière de Clichy"
+        );
+        assert_eq!(normalize_nom_bati("Hï¿½tel d'Elboeuf"), "Hôtel d'Elboeuf");
+        assert_eq!(normalize_nom_bati("Hï¿½tel des Pages"), "Hôtel des Pages");
+        assert_eq!(
+            normalize_nom_bati("Marchï¿½ au Poisson, Carreau de la Halle"),
+            "Marché au Poisson, Carreau de la Halle",
+        );
+        assert_eq!(
+            normalize_nom_bati("Marchï¿½ Saint Joseph"),
+            "Marché Saint Joseph"
+        );
+        assert_eq!(
+            normalize_nom_bati("Eglise des Petits Pï¿½res"),
+            "Église des Petits Pères"
+        );
+    }
+
+    #[test]
+    fn test_normalize_nom_bati_preposition() {
+        assert_eq!(
+            normalize_nom_bati("Cour commune ï¿½ trois maisons"),
+            "Cour commune à trois maisons"
+        );
+        assert_eq!(
+            normalize_nom_bati("Halle ï¿½ la Viande"),
+            "Halle à la Viande"
+        );
+        assert_eq!(
+            normalize_nom_bati("A attribuer ï¿½ parcelle voisine"),
+            "À attribuer à parcelle voisine"
+        );
+    }
+
+    #[test]
+    fn test_normalize_nom_bati_truncated() {
+        // U+FFFD (3 bytes) replaced 1-byte Latin-1 char, pushing trailing chars off the field
+        assert_eq!(
+            normalize_nom_bati("Place Saint Germain des Prï¿½"),
+            "Place Saint-Germain-des-Prés"
+        );
+        assert_eq!(normalize_nom_bati("La Vallï¿½"), "La Vallée");
+    }
+
+    #[test]
+    fn test_normalize_nom_bati_passthrough() {
+        assert_eq!(normalize_nom_bati("Halle aux draps"), "Halle aux draps");
+        assert_eq!(normalize_nom_bati("Palais-Royal"), "Palais-Royal");
+        assert_eq!(normalize_nom_bati(""), "");
     }
 }
