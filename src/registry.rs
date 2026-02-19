@@ -63,6 +63,29 @@ pub struct BuildingData {
     pub occupants_by_year: HashMap<u16, Vec<Occupant>>,
 }
 
+impl BuildingData {
+    /// Return occupants from the nearest available year within `max_distance` of `target`.
+    /// Prefers exact match, then spirals outward (±1, ±2, …). Ties broken toward later year.
+    pub fn occupants_nearest(&self, target: u16, max_distance: u16) -> Option<(u16, &[Occupant])> {
+        for delta in 0..=max_distance {
+            // Try target + delta first (later year), then target - delta (earlier year).
+            // For delta == 0 this just checks target once.
+            if let Some(occ) = self.occupants_by_year.get(&(target.saturating_add(delta)))
+                && !occ.is_empty()
+            {
+                return Some((target.saturating_add(delta), occ));
+            }
+            if delta > 0
+                && let Some(occ) = self.occupants_by_year.get(&(target.saturating_sub(delta)))
+                && !occ.is_empty()
+            {
+                return Some((target.saturating_sub(delta), occ));
+            }
+        }
+        None
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct BlockData {
@@ -439,5 +462,73 @@ mod tests {
         assert_eq!(estimate_floor_count(399.9), 4);
         assert_eq!(estimate_floor_count(400.0), 5);
         assert_eq!(estimate_floor_count(1000.0), 5);
+    }
+
+    fn make_building_with_years(years: &[u16]) -> BuildingData {
+        let mut occ = HashMap::new();
+        for &y in years {
+            occ.insert(
+                y,
+                vec![Occupant {
+                    name: format!("person_{y}"),
+                    activity: "test".into(),
+                    naics: "".into(),
+                }],
+            );
+        }
+        BuildingData {
+            id: BuildingId(1),
+            identif: 1,
+            quartier: String::new(),
+            superficie: 100.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: String::new(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 3,
+            tiles: Vec::new(),
+            addresses: Vec::new(),
+            occupants_by_year: occ,
+        }
+    }
+
+    #[test]
+    fn test_occupants_nearest_exact_match() {
+        let b = make_building_with_years(&[1839, 1845]);
+        let (year, occ) = b.occupants_nearest(1839, 20).unwrap();
+        assert_eq!(year, 1839);
+        assert_eq!(occ[0].name, "person_1839");
+    }
+
+    #[test]
+    fn test_occupants_nearest_fallback_later() {
+        // Target 1839, no exact match — nearest is 1842 (delta +3)
+        let b = make_building_with_years(&[1833, 1842]);
+        let (year, _) = b.occupants_nearest(1839, 20).unwrap();
+        // 1842 is +3, 1833 is -6 → 1842 wins
+        assert_eq!(year, 1842);
+    }
+
+    #[test]
+    fn test_occupants_nearest_fallback_earlier() {
+        // Target 1839, nearest is 1833 (delta -6), 1850 is +11
+        let b = make_building_with_years(&[1833, 1850]);
+        let (year, _) = b.occupants_nearest(1839, 20).unwrap();
+        assert_eq!(year, 1833);
+    }
+
+    #[test]
+    fn test_occupants_nearest_beyond_max_distance() {
+        let b = make_building_with_years(&[1900]);
+        assert!(b.occupants_nearest(1839, 20).is_none());
+    }
+
+    #[test]
+    fn test_occupants_nearest_empty_building() {
+        let b = make_building_with_years(&[]);
+        assert!(b.occupants_nearest(1839, 20).is_none());
     }
 }

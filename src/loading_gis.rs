@@ -1268,7 +1268,7 @@ pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
 
         // Extract year from publication date (f64 → u16)
         let year: u16 = pub_date.round() as u16;
-        if !(1845..=1855).contains(&year) {
+        if !(1800..=1950).contains(&year) {
             continue;
         }
         let year_stats = per_year.entry(year).or_insert((0, 0));
@@ -1521,7 +1521,7 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
 
     // Reconstruct street registry from building address data
     world.streets = StreetRegistry::build_from_buildings(&world.buildings);
-    world.active_year = 1845;
+    world.active_year = 1839;
     log::info!("  {} streets reconstructed", world.streets.streets.len());
 
     log::info!(

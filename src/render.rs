@@ -52,22 +52,24 @@ pub fn render_hover_info(world: &World, tile_x: i32, tile_y: i32) -> String {
         };
         parts.push(addr_part);
 
-        // Occupants for active year
-        let occ_part = if let Some(occupants) = building.occupants_by_year.get(&world.active_year) {
-            if occupants.is_empty() {
-                "no occupants".to_string()
-            } else {
+        // Occupants: nearest year within ±20 of active_year
+        let occ_part =
+            if let Some((year, occupants)) = building.occupants_nearest(world.active_year, 20) {
                 let first = &occupants[0];
                 let label = format!("{} ({})", first.name, first.activity);
-                if occupants.len() > 1 {
-                    format!("{} +{} more", label, occupants.len() - 1)
+                let count_suffix = if occupants.len() > 1 {
+                    format!(" +{} more", occupants.len() - 1)
                 } else {
-                    label
+                    String::new()
+                };
+                if year == world.active_year {
+                    format!("{}{}", label, count_suffix)
+                } else {
+                    format!("{}{} [{}]", label, count_suffix, year)
                 }
-            }
-        } else {
-            "no occupants".to_string()
-        };
+            } else {
+                "no occupants".to_string()
+            };
         parts.push(occ_part);
     }
 
@@ -646,6 +648,56 @@ mod tests {
         assert_eq!(
             info,
             "(2, 2) Floor | 42 Rue de Rivoli \u{2014} Boulangerie | Jean Dupont (flour merchant) +1 more"
+        );
+    }
+
+    #[test]
+    fn hover_info_occupant_nearest_year_fallback() {
+        use crate::registry::{Address, BuildingData, BuildingId, Occupant};
+        use std::collections::HashMap;
+
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(5, 5);
+        world.tiles.set_terrain(1, 1, Terrain::Floor);
+        world.tiles.set_building_id(1, 1, BuildingId(1));
+        world.active_year = 1839; // no 1839 data — should fall back to 1842
+
+        let mut occ_map = HashMap::new();
+        occ_map.insert(
+            1842u16,
+            vec![Occupant {
+                name: "Pierre Martin".into(),
+                activity: "cordonnier".into(),
+                naics: "".into(),
+            }],
+        );
+
+        world.buildings.insert(BuildingData {
+            id: BuildingId(1),
+            identif: 7,
+            quartier: "Arcis".into(),
+            superficie: 60.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T2".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 3,
+            tiles: vec![(1, 1)],
+            addresses: vec![Address {
+                street_name: "Rue du Temple".into(),
+                house_number: "8".into(),
+            }],
+            occupants_by_year: occ_map,
+        });
+
+        let info = render_hover_info(&world, 1, 1);
+        assert!(info.contains("Pierre Martin (cordonnier)"), "got: {info}");
+        assert!(
+            info.contains("[1842]"),
+            "fallback year should be shown, got: {info}"
         );
     }
 }

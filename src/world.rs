@@ -88,7 +88,7 @@ impl World {
             blocks: BlockRegistry::new(),
             quartier_names: Vec::new(),
             streets: StreetRegistry::new(),
-            active_year: 1845,
+            active_year: 1839,
         }
     }
 
