@@ -1242,7 +1242,8 @@ pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
 
     let rows = stmt
         .query_map([], |row| {
-            let persons = normalize_to_atlas(&row.get::<_, String>(0).unwrap_or_default());
+            let persons_raw = normalize_to_atlas(&row.get::<_, String>(0).unwrap_or_default());
+            let persons = persons_raw.replace(",,", ",").replace("..", ".");
             let activities_raw = normalize_to_atlas(&row.get::<_, String>(1).unwrap_or_default());
             let activities_trimmed = activities_raw
                 .strip_prefix(", ")
