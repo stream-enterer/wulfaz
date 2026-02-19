@@ -1248,7 +1248,9 @@ pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
                 .strip_prefix(", ")
                 .or(activities_raw.strip_prefix(","))
                 .unwrap_or(&activities_raw);
-            let activities = fix_linebreak_hyphens(activities_trimmed);
+            let activities_dehyph = fix_linebreak_hyphens(activities_trimmed);
+            // Collapse doubled punctuation artifacts: ",," → "," and ".." → "."
+            let activities = activities_dehyph.replace(",,", ",").replace("..", ".");
             let addr_name = normalize_to_atlas(&row.get::<_, String>(2).unwrap_or_default());
             let addr_number: String = row.get::<_, String>(3).unwrap_or_default();
             let pub_date: f64 = row.get::<_, f64>(4).unwrap_or(0.0);
