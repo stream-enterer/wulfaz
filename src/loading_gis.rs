@@ -293,6 +293,26 @@ fn get_integer_field(record: &shapefile::dbase::Record, name: &str) -> i32 {
     }
 }
 
+fn normalize_quartier_name(raw: &str) -> String {
+    match raw {
+        "Cite" => "Cité".into(),
+        "Mont de Piete" => "Mont de Piété".into(),
+        "Place Vendome" => "Place Vendôme".into(),
+        "Ecole de Medecine" => "École de Médecine".into(),
+        "Ile Saint-Louis" => "Île Saint-Louis".into(),
+        "Hotel de Ville" => "Hôtel de Ville".into(),
+        "Marche Saint-Jean" => "Marché Saint-Jean".into(),
+        "Saint-Honore" => "Saint-Honoré".into(),
+        "Marches" => "Marchés".into(),
+        "Faubourg Poissonniere" => "Faubourg Poissonnière".into(),
+        "Chaussee d'Antin" => "Chaussée d'Antin".into(),
+        "Champs-Elysees" => "Champs-Élysées".into(),
+        "Vendome" => "Place Vendôme".into(),
+        "Marais_Arsenal" => "Marais-Arsenal".into(),
+        other => other.to_string(),
+    }
+}
+
 // --- Preprocess pipeline: extract RON from shapefiles ---
 
 #[allow(dead_code)]
@@ -337,7 +357,7 @@ fn extract_blocks_from_shapefile(
         }
 
         let id_ilots = get_string_field(&record, "ID_ILOTS");
-        let quartier = get_string_field(&record, "QUARTIER");
+        let quartier = normalize_quartier_name(&get_string_field(&record, "QUARTIER"));
         let aire = get_numeric_field(&record, "AIRE") as f32;
         let ilots_vass = get_string_field(&record, "ILOTS_VASS");
 
@@ -409,7 +429,7 @@ fn extract_buildings_from_shapefile(
         }
 
         let identif = get_integer_field(&record, "Identif") as u32;
-        let quartier = get_string_field(&record, "QUARTIER");
+        let quartier = normalize_quartier_name(&get_string_field(&record, "QUARTIER"));
         let superficie = get_numeric_field(&record, "SUPERFICIE") as f32;
         let bati = get_integer_field(&record, "BATI") as u8;
         let nom_bati_raw = get_string_field(&record, "Nom_Bati");
@@ -1979,5 +1999,54 @@ mod tests {
         assert_eq!(back.occupants_by_year[&1860].len(), 2);
         assert_eq!(back.addresses.len(), 1);
         assert_eq!(back.addresses[0].street_name, "Rue du Temple");
+    }
+
+    #[test]
+    fn test_normalize_quartier_accents() {
+        assert_eq!(normalize_quartier_name("Cite"), "Cité");
+        assert_eq!(normalize_quartier_name("Mont de Piete"), "Mont de Piété");
+        assert_eq!(normalize_quartier_name("Place Vendome"), "Place Vendôme");
+        assert_eq!(
+            normalize_quartier_name("Ecole de Medecine"),
+            "École de Médecine"
+        );
+        assert_eq!(
+            normalize_quartier_name("Ile Saint-Louis"),
+            "Île Saint-Louis"
+        );
+        assert_eq!(normalize_quartier_name("Hotel de Ville"), "Hôtel de Ville");
+        assert_eq!(
+            normalize_quartier_name("Marche Saint-Jean"),
+            "Marché Saint-Jean"
+        );
+        assert_eq!(normalize_quartier_name("Saint-Honore"), "Saint-Honoré");
+        assert_eq!(normalize_quartier_name("Marches"), "Marchés");
+        assert_eq!(
+            normalize_quartier_name("Faubourg Poissonniere"),
+            "Faubourg Poissonnière"
+        );
+        assert_eq!(
+            normalize_quartier_name("Chaussee d'Antin"),
+            "Chaussée d'Antin"
+        );
+        assert_eq!(normalize_quartier_name("Champs-Elysees"), "Champs-Élysées");
+    }
+
+    #[test]
+    fn test_normalize_quartier_duplicates() {
+        assert_eq!(normalize_quartier_name("Vendome"), "Place Vendôme");
+        assert_eq!(normalize_quartier_name("Place Vendome"), "Place Vendôme");
+    }
+
+    #[test]
+    fn test_normalize_quartier_artifact() {
+        assert_eq!(normalize_quartier_name("Marais_Arsenal"), "Marais-Arsenal");
+    }
+
+    #[test]
+    fn test_normalize_quartier_passthrough() {
+        assert_eq!(normalize_quartier_name("Arcis"), "Arcis");
+        assert_eq!(normalize_quartier_name("Louvre"), "Louvre");
+        assert_eq!(normalize_quartier_name(""), "");
     }
 }
