@@ -1128,6 +1128,59 @@ pub fn load_addresses(addresses_shp: &str, buildings: &mut BuildingRegistry) {
     );
 }
 
+/// Normalize a house number for matching: trim whitespace, strip trailing dots,
+/// fix common OCR digit misreads, and collapse bis/ter spacing.
+fn normalize_house_number(s: &str) -> String {
+    let trimmed = s.trim().trim_end_matches('.').trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        // OCR digit recovery: common letter↔digit misreads in house numbers
+        let fixed = match ch {
+            'I' | 'l' if looks_numeric_context(trimmed) => '1',
+            'O' if looks_numeric_context(trimmed) => '0',
+            'Z' if looks_numeric_context(trimmed) => '2',
+            'S' if looks_numeric_context(trimmed) => '5',
+            'T' if looks_numeric_context(trimmed) => '7',
+            'D' if looks_numeric_context(trimmed) => '0',
+            _ => ch,
+        };
+        out.push(fixed);
+    }
+
+    // Collapse "5 bis" → "5bis", "10 ter" → "10ter"
+    out = out
+        .replace(" bis", "bis")
+        .replace(" ter", "ter")
+        .replace(" quater", "quater");
+    out
+}
+
+/// Check if a house number string looks like it should be numeric
+/// (all characters are digits or common OCR misreads of digits).
+fn looks_numeric_context(s: &str) -> bool {
+    // If the string is purely letters that are common OCR digit misreads, treat as numeric
+    s.chars()
+        .all(|c| c.is_ascii_digit() || "IlOZSTD".contains(c) || c == '.' || c == ' ')
+}
+
+/// Strip bis/ter/quater suffix from a house number for fallback matching.
+fn strip_bis_ter(s: &str) -> String {
+    let lower = s.to_lowercase();
+    for suffix in &["quater", "bis", "ter"] {
+        if lower.ends_with(suffix) {
+            let base = s[..s.len() - suffix.len()].trim().to_string();
+            if !base.is_empty() {
+                return base;
+            }
+        }
+    }
+    s.to_string()
+}
+
 /// Load occupant data from SoDUCo GeoPackage (SQLite).
 /// Fuzzy-matches street names and house numbers to buildings.
 #[allow(dead_code)]
@@ -1214,24 +1267,40 @@ pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
             }
         };
 
-        // Normalize house number for matching
-        let norm_number = addr_number.trim().trim_end_matches('.').trim().to_string();
+        // Normalize house number: trim, strip trailing dot, fix OCR digit misreads,
+        // and collapse bis/ter spacing
+        let norm_number = normalize_house_number(addr_number);
 
-        // Try exact house number match first
+        if norm_number.is_empty() {
+            unmatched += 1;
+            continue;
+        }
+
+        // Try exact house number match
         let exact_matches: Vec<BuildingId> = candidates
             .iter()
             .filter(|(_, hn)| {
-                let cand_norm = hn.trim().trim_end_matches('.').trim();
-                !norm_number.is_empty() && cand_norm == norm_number
+                let cand_norm = normalize_house_number(hn);
+                cand_norm == norm_number
             })
             .map(|(bid, _)| *bid)
             .collect();
 
+        // If no exact match, try numeric-only match (strip bis/ter suffix)
         let target_ids = if !exact_matches.is_empty() {
             exact_matches
         } else {
-            // Broad match: attach to all buildings on that street
-            candidates.iter().map(|(bid, _)| *bid).collect()
+            let base = strip_bis_ter(&norm_number);
+            if base != norm_number {
+                // Try matching just the base number
+                candidates
+                    .iter()
+                    .filter(|(_, hn)| normalize_house_number(hn) == base)
+                    .map(|(bid, _)| *bid)
+                    .collect()
+            } else {
+                Vec::new()
+            }
         };
 
         if target_ids.is_empty() {
@@ -2367,5 +2436,38 @@ mod tests {
         assert_eq!(fix_linebreak_hyphens("avocat"), "avocat");
         assert_eq!(fix_linebreak_hyphens("eaux-de-vie"), "eaux-de-vie");
         assert_eq!(fix_linebreak_hyphens(""), "");
+    }
+
+    #[test]
+    fn test_normalize_house_number_basic() {
+        assert_eq!(normalize_house_number("5"), "5");
+        assert_eq!(normalize_house_number(" 12. "), "12");
+        assert_eq!(normalize_house_number(""), "");
+    }
+
+    #[test]
+    fn test_normalize_house_number_bis_ter() {
+        assert_eq!(normalize_house_number("5 bis"), "5bis");
+        assert_eq!(normalize_house_number("10 ter"), "10ter");
+        assert_eq!(normalize_house_number("5bis"), "5bis");
+    }
+
+    #[test]
+    fn test_normalize_house_number_ocr_digits() {
+        // Pure OCR digit misreads
+        assert_eq!(normalize_house_number("I"), "1");
+        assert_eq!(normalize_house_number("II"), "11");
+        assert_eq!(normalize_house_number("Z"), "2");
+        assert_eq!(normalize_house_number("S"), "5");
+        // Mixed alpha+digit should NOT trigger OCR recovery
+        assert_eq!(normalize_house_number("5bis"), "5bis");
+    }
+
+    #[test]
+    fn test_strip_bis_ter() {
+        assert_eq!(strip_bis_ter("5bis"), "5");
+        assert_eq!(strip_bis_ter("10ter"), "10");
+        assert_eq!(strip_bis_ter("12"), "12");
+        assert_eq!(strip_bis_ter("3quater"), "3");
     }
 }
