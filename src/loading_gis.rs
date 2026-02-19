@@ -1002,6 +1002,9 @@ pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
 
         // Extract year from publication date (f64 → u16)
         let year: u16 = pub_date.round() as u16;
+        if !(1845..=1855).contains(&year) {
+            continue;
+        }
         let year_stats = per_year.entry(year).or_insert((0, 0));
         year_stats.0 += 1;
 

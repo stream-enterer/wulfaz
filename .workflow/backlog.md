@@ -11,17 +11,6 @@ Goal: See Paris on screen. No entities.
 Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 30m padding).
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
-- **SCALE-A07a** — Occupant normalization improvements. Needs: A07 (done). Blocks: B06, B03, C04, C05.
-  - A07 core pipeline is implemented (de078ba). Current match rates: addresses 65.6% (19,112/29,164), occupants 19.7% (194,892/990,108). Two issues to fix:
-  - **Year extraction broken**: all occupants land in Year 0. The `source.publication_date` column format isn't a "YYYY..." string. Inspect actual values in the GeoPackage, fix parsing to extract the 16 snapshot years.
-  - **Normalization gaps** (from top-10 unmatched streets):
-    - `St-Honoré` (5,608) — GeoPackage uses bare `St-` without "Rue " prefix; address file has full form. Need to normalize both sides identically.
-    - `Faub.-St-Denis` (3,485), `Faub.-St-Honoré` (2,080) — compound abbreviation `Faub.-St-` not expanded. Expand "faub.-" before "st-" or handle compound.
-    - `boul. Voltaire` (2,290) — "boul." abbreviation not handled. Add "boul." → "boulevard".
-    - `Faub.-Poissonnière` (1,825) — "Faub.-" with capital works, but check case handling.
-    - `Charenton` (2,152), `Charonne` (1,796), `Sèvres` (1,723), `Provence` (1,651), `Cherche-Midi` (1,945) — bare street names without type prefix. These may match if address file also lacks prefix, or may need the normalizer to strip prefixes from both sides.
-  - After fixes, re-run preprocessor and compare match rates. Target: >50% occupant match rate.
-
 - **SCALE-A08** — Seine + bridge placement. Needs: A03.
   - **Preprocessor** (extend `preprocess.rs`): runs after block/building rasterization, before writing binary tiles.
   - The Seine is NOT in any GIS dataset. Hardcoded polygon vertices in `loading_gis.rs`.
@@ -96,7 +85,7 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
     - **Vertical stratification**: wealthiest on floor 1 (étage noble), progressively poorer upward, servants in garret.
     - **Floor estimate**: building height not in data. Estimate from SUPERFICIE: <50m² = 2 floors, 50-150m² = 3-4 floors, 150-400m² = 4-5 floors, >400m² = 5-6 floors. Multiply footprint area by floor count for total interior space.
     - **Density target**: ~116 people per 1,000m² of footprint (from census population / total building area). Adjust per quartier.
-  - 16 available time snapshots from SoDUCo: 1829, 1833, 1839, 1842, 1845, 1850, 1855, 1860, 1864, 1871, 1875, 1880, 1885, 1896, 1901, 1907. A07 bakes all years into the metadata; active year selected at runtime via `world.active_year` (default 1845). Note: building geometry is fixed 1810-1836; post-1855 directory data increasingly references demolished buildings.
+  - 3 active time snapshots from SoDUCo (filtered to best Vasserot overlap): 1845, 1850, 1855. Match rates: 40.1%, 37.1%, 38.0% (52,909 total matched occupants). Active year selected at runtime via `world.active_year` (default 1845). Building geometry is fixed 1810-1836.
 
 ## Phase D — Seamless Transitions
 
