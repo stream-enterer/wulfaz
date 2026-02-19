@@ -171,9 +171,10 @@ pub fn scanline_fill_multi(
     let min_row = (min_y.floor() as i32).max(0);
     let max_row = (max_y.ceil() as i32).min(height as i32 - 1);
 
+    let mut intersections = Vec::new();
     for row in min_row..=max_row {
         let y = row as f64 + 0.5;
-        let mut intersections = Vec::new();
+        intersections.clear();
 
         // Collect intersections from ALL rings (outer + inner).
         for ring in &all_rings {
@@ -862,6 +863,9 @@ pub fn rasterize_paris(
         .map(|(i, b)| (b.id.0, i))
         .collect();
 
+    // Collect tiles to carve from BATI=1 buildings, then remove in one pass.
+    let mut tiles_to_carve: HashMap<usize, HashSet<(i32, i32)>> = HashMap::new();
+
     for bldg_ron in &data.buildings {
         match bldg_ron.bati {
             2 => {
@@ -902,13 +906,12 @@ pub fn rasterize_paris(
                     let ux = cx as usize;
                     let uy = cy as usize;
 
-                    // If this tile belongs to a BATI=1 building, remove it
-                    // from that building's tile list (S12 fix).
+                    // If this tile belongs to a BATI=1 building, mark it for removal.
                     if let Some(bid_raw) = tiles.get_building_id(ux, uy)
                         && bid_raw.0 != 0
                         && let Some(&idx) = building_idx.get(&bid_raw.0)
                     {
-                        buildings.buildings[idx].tiles.retain(|&t| t != (cx, cy));
+                        tiles_to_carve.entry(idx).or_default().insert((cx, cy));
                         carved_from_buildings += 1;
                     }
 
@@ -965,13 +968,12 @@ pub fn rasterize_paris(
                     let ux = cx as usize;
                     let uy = cy as usize;
 
-                    // If this tile belongs to a BATI=1 building, remove it
-                    // from that building's tile list.
+                    // If this tile belongs to a BATI=1 building, mark it for removal.
                     if let Some(bid_raw) = tiles.get_building_id(ux, uy)
                         && bid_raw.0 != 0
                         && let Some(&idx) = building_idx.get(&bid_raw.0)
                     {
-                        buildings.buildings[idx].tiles.retain(|&t| t != (cx, cy));
+                        tiles_to_carve.entry(idx).or_default().insert((cx, cy));
                         carved_from_buildings += 1;
                     }
 
@@ -1014,6 +1016,14 @@ pub fn rasterize_paris(
             _ => {} // BATI=1 already handled
         }
     }
+
+    // Batch-remove carved tiles from BATI=1 buildings (single pass per building).
+    for (idx, carved) in &tiles_to_carve {
+        buildings.buildings[*idx]
+            .tiles
+            .retain(|t| !carved.contains(t));
+    }
+
     log::info!(
         "  BATI=2: {} garden ({} tiles), {} courtyard ({} tiles); \
          BATI=3: {} fixtures ({} tiles); {} tiles carved from BATI=1 in {:.1}s",
@@ -1651,16 +1661,20 @@ fn classify_walls_floors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         if bdata.bati != 1 {
             continue;
         }
-        let tile_set: HashSet<(i32, i32)> = bdata.tiles.iter().copied().collect();
+        let bid = bdata.id;
 
         for &(cx, cy) in &bdata.tiles {
-            let mut is_edge = false;
-            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                if !tile_set.contains(&(cx + dx, cy + dy)) {
-                    is_edge = true;
-                    break;
-                }
-            }
+            let ux = cx as usize;
+            let uy = cy as usize;
+
+            // A tile is a wall if any cardinal neighbor belongs to a different building (or none).
+            let is_edge = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                .iter()
+                .any(|&(dx, dy)| {
+                    let nx = cx + dx;
+                    let ny = cy + dy;
+                    tiles.get_building_id(nx as usize, ny as usize) != Some(bid)
+                });
 
             let terrain = if is_edge {
                 wall_count += 1;
@@ -1669,7 +1683,7 @@ fn classify_walls_floors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
                 floor_count += 1;
                 Terrain::Floor
             };
-            tiles.set_terrain(cx as usize, cy as usize, terrain);
+            tiles.set_terrain(ux, uy, terrain);
         }
     }
 
@@ -1678,41 +1692,56 @@ fn classify_walls_floors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
 
 /// Multi-source BFS to assign quartier_id to road tiles.
 /// Expands from all tiles that already have quartier_id != 0.
+/// Uses a flat buffer for cache-friendly access instead of per-tile chunk lookups.
 fn fill_quartier_roads(tiles: &mut TileMap, grid_w: usize, grid_h: usize) {
-    let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
-    let mut assigned = 0usize;
+    let total = grid_w * grid_h;
 
-    // Seed: all tiles with quartier_id already set.
+    // Snapshot quartier_id into a flat buffer for cache-friendly BFS.
+    let mut flat = vec![0u8; total];
+    let mut queue: VecDeque<usize> = VecDeque::new();
+
     for y in 0..grid_h {
         for x in 0..grid_w {
             if let Some(qid) = tiles.get_quartier_id(x, y)
                 && qid != 0
             {
-                queue.push_back((x, y));
+                let idx = y * grid_w + x;
+                flat[idx] = qid;
+                queue.push_back(idx);
             }
         }
     }
 
-    while let Some((x, y)) = queue.pop_front() {
-        let qid = tiles.get_quartier_id(x, y).unwrap_or(0);
-        if qid == 0 {
-            continue;
-        }
+    let mut assigned = 0usize;
+    let w = grid_w as i32;
+    let h = grid_h as i32;
+
+    while let Some(pos) = queue.pop_front() {
+        let qid = flat[pos];
+        let x = (pos % grid_w) as i32;
+        let y = (pos / grid_w) as i32;
 
         for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-            let nx = x as i32 + dx;
-            let ny = y as i32 + dy;
-            if nx < 0 || ny < 0 || nx >= grid_w as i32 || ny >= grid_h as i32 {
+            let nx = x + dx;
+            let ny = y + dy;
+            if nx < 0 || ny < 0 || nx >= w || ny >= h {
                 continue;
             }
-            let nux = nx as usize;
-            let nuy = ny as usize;
-            if let Some(nqid) = tiles.get_quartier_id(nux, nuy)
-                && nqid == 0
-            {
-                tiles.set_quartier_id(nux, nuy, qid);
+            let nidx = ny as usize * grid_w + nx as usize;
+            if flat[nidx] == 0 {
+                flat[nidx] = qid;
                 assigned += 1;
-                queue.push_back((nux, nuy));
+                queue.push_back(nidx);
+            }
+        }
+    }
+
+    // Write back to chunked TileMap.
+    for y in 0..grid_h {
+        for x in 0..grid_w {
+            let qid = flat[y * grid_w + x];
+            if qid != 0 {
+                tiles.set_quartier_id(x, y, qid);
             }
         }
     }
