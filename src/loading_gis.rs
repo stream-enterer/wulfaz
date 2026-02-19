@@ -1203,7 +1203,14 @@ pub fn load_addresses(addresses_shp: &str, buildings: &mut BuildingRegistry) {
             }
         };
 
-        let building_ids: Vec<BuildingId> = buildings.get_by_identif(identif).to_vec();
+        // Only match to BATI=1 (built structures). BATI=2/3 parcels
+        // (courtyards, gardens, fountains) shouldn't receive addresses.
+        let building_ids: Vec<BuildingId> = buildings
+            .get_by_identif(identif)
+            .iter()
+            .copied()
+            .filter(|bid| buildings.get(*bid).is_some_and(|b| b.bati == 1))
+            .collect();
         if building_ids.is_empty() {
             unmatched += 1;
             continue;
