@@ -37,3 +37,8 @@ terrain "Bridge" {
     icon "="
     walkable #true
 }
+
+terrain "Fixture" {
+    icon "o"
+    walkable #true
+}

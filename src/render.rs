@@ -87,6 +87,7 @@ fn terrain_char(terrain: Terrain) -> char {
         Terrain::Garden => '"',
         Terrain::Water => '~',
         Terrain::Bridge => '=',
+        Terrain::Fixture => 'o',
     }
 }
 
@@ -301,7 +302,7 @@ mod tests {
     #[test]
     fn terrain_types_render_correctly() {
         let mut world = World::new_with_seed(42);
-        world.tiles = crate::tile_map::TileMap::new(8, 1);
+        world.tiles = crate::tile_map::TileMap::new(9, 1);
         world.tiles.set_terrain(0, 0, Terrain::Road);
         world.tiles.set_terrain(1, 0, Terrain::Wall);
         world.tiles.set_terrain(2, 0, Terrain::Floor);
@@ -310,9 +311,10 @@ mod tests {
         world.tiles.set_terrain(5, 0, Terrain::Garden);
         world.tiles.set_terrain(6, 0, Terrain::Water);
         world.tiles.set_terrain(7, 0, Terrain::Bridge);
+        world.tiles.set_terrain(8, 0, Terrain::Fixture);
 
         let output = render_full(&world);
-        assert_eq!(output, ".#_+,\"~=");
+        assert_eq!(output, ".#_+,\"~=o");
     }
 
     #[test]

@@ -841,17 +841,18 @@ pub fn rasterize_paris(
         bldg_start.elapsed().as_secs_f64(),
     );
 
-    // --- Pass 2: ALL BATI=2 carve courtyards/gardens into buildings ---
-    // Runs AFTER BATI=1 so BATI=2 polygons overwrite Wall tiles,
-    // clearing building_id and setting terrain to Courtyard or Garden.
-    // Also updates building tile lists in the registry (S12 fix).
+    // --- Pass 2: BATI=2 courtyards/gardens + BATI=3 fixtures ---
+    // Runs AFTER BATI=1 so BATI=2 polygons overwrite Wall tiles.
+    // Both BATI=2 and BATI=3 enter the BuildingRegistry for address matching.
+    // BATI=2 tiles carved from BATI=1 buildings are removed from those buildings' tile lists.
     let carve_start = Instant::now();
     let mut garden_tile_count = 0usize;
     let mut garden_polygon_count = 0usize;
     let mut courtyard_tile_count = 0usize;
     let mut courtyard_polygon_count = 0usize;
+    let mut fixture_tile_count = 0usize;
+    let mut fixture_polygon_count = 0usize;
     let mut carved_from_buildings = 0usize;
-    let mut skipped_bati3 = 0usize;
 
     // Reverse index: BuildingId.0 → registry Vec index, for tile list updates.
     let building_idx: HashMap<u32, usize> = buildings
@@ -892,6 +893,11 @@ pub fn rasterize_paris(
                     Terrain::Courtyard
                 };
 
+                // Register BATI=2 in BuildingRegistry for address/occupant matching.
+                let building_id = buildings.next_id();
+                let floor_count = 0; // open space, no floors
+
+                let mut tile_list = Vec::with_capacity(cells.len());
                 for &(cx, cy) in &cells {
                     let ux = cx as usize;
                     let uy = cy as usize;
@@ -907,24 +913,117 @@ pub fn rasterize_paris(
                     }
 
                     tiles.set_terrain(ux, uy, terrain);
-                    tiles.set_building_id(ux, uy, crate::registry::BuildingId(0));
+                    tiles.set_building_id(ux, uy, building_id);
+                    tile_list.push((cx, cy));
                 }
+
+                // Determine block membership (majority vote).
+                let mut block_votes: HashMap<BlockId, usize> = HashMap::new();
+                for &(cx, cy) in &cells {
+                    if let Some(bid) = tiles.get_block_id(cx as usize, cy as usize) {
+                        *block_votes.entry(bid).or_insert(0) += 1;
+                    }
+                }
+                if let Some((bid, _)) = block_votes.into_iter().max_by_key(|&(_, c)| c)
+                    && let Some(block) = blocks.blocks.get_mut(&bid)
+                {
+                    block.buildings.push(building_id);
+                }
+
+                buildings.insert(BuildingData {
+                    id: building_id,
+                    identif: bldg_ron.identif,
+                    quartier: bldg_ron.quartier.clone(),
+                    superficie: bldg_ron.superficie,
+                    bati: bldg_ron.bati,
+                    nom_bati: bldg_ron.nom_bati.clone(),
+                    num_ilot: bldg_ron.num_ilot.clone(),
+                    perimetre: bldg_ron.perimetre,
+                    geox: bldg_ron.geox,
+                    geoy: bldg_ron.geoy,
+                    date_coyec: bldg_ron.date_coyec.clone(),
+                    floor_count,
+                    tiles: tile_list,
+                    addresses: Vec::new(),
+                    occupants_by_year: HashMap::new(),
+                });
             }
             3 => {
-                skipped_bati3 += 1;
+                let ir = inner_refs(&bldg_ron.inner_rings);
+                let cells = scanline_fill_multi(&[&bldg_ron.polygon], &ir, grid_w, grid_h);
+                if cells.is_empty() {
+                    continue;
+                }
+
+                fixture_tile_count += cells.len();
+                fixture_polygon_count += 1;
+
+                let building_id = buildings.next_id();
+
+                let mut tile_list = Vec::with_capacity(cells.len());
+                for &(cx, cy) in &cells {
+                    let ux = cx as usize;
+                    let uy = cy as usize;
+
+                    // If this tile belongs to a BATI=1 building, remove it
+                    // from that building's tile list.
+                    if let Some(bid_raw) = tiles.get_building_id(ux, uy)
+                        && bid_raw.0 != 0
+                        && let Some(&idx) = building_idx.get(&bid_raw.0)
+                    {
+                        buildings.buildings[idx].tiles.retain(|&t| t != (cx, cy));
+                        carved_from_buildings += 1;
+                    }
+
+                    tiles.set_terrain(ux, uy, Terrain::Fixture);
+                    tiles.set_building_id(ux, uy, building_id);
+                    tile_list.push((cx, cy));
+                }
+
+                // Determine block membership (majority vote).
+                let mut block_votes: HashMap<BlockId, usize> = HashMap::new();
+                for &(cx, cy) in &cells {
+                    if let Some(bid) = tiles.get_block_id(cx as usize, cy as usize) {
+                        *block_votes.entry(bid).or_insert(0) += 1;
+                    }
+                }
+                if let Some((bid, _)) = block_votes.into_iter().max_by_key(|&(_, c)| c)
+                    && let Some(block) = blocks.blocks.get_mut(&bid)
+                {
+                    block.buildings.push(building_id);
+                }
+
+                buildings.insert(BuildingData {
+                    id: building_id,
+                    identif: bldg_ron.identif,
+                    quartier: bldg_ron.quartier.clone(),
+                    superficie: bldg_ron.superficie,
+                    bati: bldg_ron.bati,
+                    nom_bati: bldg_ron.nom_bati.clone(),
+                    num_ilot: bldg_ron.num_ilot.clone(),
+                    perimetre: bldg_ron.perimetre,
+                    geox: bldg_ron.geox,
+                    geoy: bldg_ron.geoy,
+                    date_coyec: bldg_ron.date_coyec.clone(),
+                    floor_count: 0, // minor feature, no floors
+                    tiles: tile_list,
+                    addresses: Vec::new(),
+                    occupants_by_year: HashMap::new(),
+                });
             }
             _ => {} // BATI=1 already handled
         }
     }
     log::info!(
-        "  BATI=2 carving: {} garden ({} tiles), {} courtyard ({} tiles), \
-         {} tiles carved from buildings, {} BATI=3 skipped in {:.1}s",
+        "  BATI=2: {} garden ({} tiles), {} courtyard ({} tiles); \
+         BATI=3: {} fixtures ({} tiles); {} tiles carved from BATI=1 in {:.1}s",
         garden_polygon_count,
         garden_tile_count,
         courtyard_polygon_count,
         courtyard_tile_count,
+        fixture_polygon_count,
+        fixture_tile_count,
         carved_from_buildings,
-        skipped_bati3,
         carve_start.elapsed().as_secs_f64(),
     );
 
@@ -1540,6 +1639,11 @@ fn classify_walls_floors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     let mut floor_count = 0usize;
 
     for bdata in &buildings.buildings {
+        // Only BATI=1 buildings get wall/floor classification.
+        // BATI=2 (courtyard/garden) and BATI=3 (fixture) keep their own terrain.
+        if bdata.bati != 1 {
+            continue;
+        }
         let tile_set: HashSet<(i32, i32)> = bdata.tiles.iter().copied().collect();
 
         for &(cx, cy) in &bdata.tiles {
@@ -1963,11 +2067,15 @@ mod tests {
         let data = make_test_map(vec![bldg]);
         let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
 
-        // BATI=2 with no garden name: tiles are Courtyard, no building_id
-        assert!(buildings.is_empty(), "registry should be empty");
+        // BATI=2 with no garden name: tiles are Courtyard, has building_id
+        assert_eq!(buildings.len(), 1, "BATI=2 should be in registry");
+        assert_eq!(buildings.buildings[0].bati, 2);
         let t = tiles.get_terrain(13, 13).expect("tile");
         assert_eq!(t, Terrain::Courtyard);
-        assert!(tiles.get_building_id(13, 13).is_none());
+        let bid = tiles
+            .get_building_id(13, 13)
+            .expect("should have building_id");
+        assert_ne!(bid.0, 0);
     }
 
     #[test]
@@ -1986,15 +2094,18 @@ mod tests {
         let data = make_test_map(vec![bldg]);
         let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
 
-        // BATI=2 with garden name: tiles become Garden, no building_id
-        assert!(buildings.is_empty(), "registry should be empty");
+        // BATI=2 with garden name: tiles become Garden, has building_id
+        assert_eq!(buildings.len(), 1, "BATI=2 garden should be in registry");
         let t = tiles.get_terrain(13, 13).unwrap();
         assert_eq!(t, Terrain::Garden);
-        assert!(tiles.get_building_id(13, 13).is_none());
+        let bid = tiles
+            .get_building_id(13, 13)
+            .expect("should have building_id");
+        assert_ne!(bid.0, 0);
     }
 
     #[test]
-    fn test_bati3_not_rasterized() {
+    fn test_bati3_rasterized_as_fixture() {
         let bldg = make_bldg(
             3,
             Some("Fontaine"),
@@ -2009,11 +2120,15 @@ mod tests {
         let data = make_test_map(vec![bldg]);
         let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
 
-        // BATI=3: tiles stay Courtyard, no building_id
-        assert!(buildings.is_empty(), "registry should be empty");
+        // BATI=3: rasterized as Fixture terrain with building_id
+        assert_eq!(buildings.len(), 1, "BATI=3 should be in registry");
+        assert_eq!(buildings.buildings[0].bati, 3);
         let t = tiles.get_terrain(13, 13).unwrap();
-        assert_eq!(t, Terrain::Courtyard);
-        assert!(tiles.get_building_id(13, 13).is_none());
+        assert_eq!(t, Terrain::Fixture);
+        let bid = tiles
+            .get_building_id(13, 13)
+            .expect("should have building_id");
+        assert_ne!(bid.0, 0, "building_id should be set for BATI=3");
     }
 
     #[test]
@@ -2045,14 +2160,14 @@ mod tests {
         let (tiles, buildings, _blocks, _) = rasterize_paris(&data);
 
         // BATI=2 garden carves into building: overlap tiles are Garden
-        assert_eq!(buildings.len(), 1);
+        assert_eq!(buildings.len(), 2, "BATI=1 + BATI=2 both in registry");
         let t_inside = tiles.get_terrain(15, 15).expect("inside garden");
         assert_eq!(t_inside, Terrain::Garden, "carved area should be Garden");
-        // Building_id cleared in carved area
+        // Building_id in carved area now points to the BATI=2 garden entry
         let bid = tiles.get_building_id(15, 15);
         assert!(
-            bid.is_none() || bid.expect("bid").0 == 0,
-            "building_id should be cleared in carved area"
+            bid.is_some() && bid.expect("bid").0 != 0,
+            "building_id should point to garden building"
         );
 
         // Non-carved building tiles still Wall/Floor
@@ -2062,16 +2177,16 @@ mod tests {
             "non-carved building tile should be Wall/Floor, got {t_edge:?}"
         );
 
-        // Building tile list should NOT contain carved tiles
-        let bd = &buildings.buildings[0];
+        // BATI=1 building tile list should NOT contain carved tiles
+        let bati1 = buildings.buildings.iter().find(|b| b.bati == 1).unwrap();
         assert!(
-            !bd.tiles.contains(&(15, 15)),
-            "carved tile should be removed from building tile list"
+            !bati1.tiles.contains(&(15, 15)),
+            "carved tile should be removed from BATI=1 building tile list"
         );
     }
 
     #[test]
-    fn test_only_bati1_in_registry() {
+    fn test_all_bati_types_in_registry() {
         let b1 = make_bldg(
             1,
             None,
@@ -2119,9 +2234,12 @@ mod tests {
         let data = make_test_map(vec![b1, b2_court, b2_garden, b3]);
         let (_tiles, buildings, _blocks, _) = rasterize_paris(&data);
 
-        // Only BATI=1 entries in registry
-        assert_eq!(buildings.len(), 1, "only BATI=1 should be in registry");
-        assert_eq!(buildings.buildings[0].bati, 1);
+        // All BATI types in registry: 1 BATI=1, 2 BATI=2, 1 BATI=3 = 4
+        assert_eq!(buildings.len(), 4, "all BATI types should be in registry");
+        let bati_counts: Vec<u8> = buildings.buildings.iter().map(|b| b.bati).collect();
+        assert_eq!(bati_counts.iter().filter(|&&b| b == 1).count(), 1);
+        assert_eq!(bati_counts.iter().filter(|&&b| b == 2).count(), 2);
+        assert_eq!(bati_counts.iter().filter(|&&b| b == 3).count(), 1);
     }
 
     // --- normalize_street_name tests ---

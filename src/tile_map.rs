@@ -21,6 +21,7 @@ pub enum Terrain {
     Garden = 5,    // parks, green space — walkable
     Water = 6,     // river — blocked
     Bridge = 7,    // river crossing — walkable
+    Fixture = 8,   // fountain, well, kiosk (BATI=3 minor feature) — walkable
 }
 
 impl Terrain {
@@ -33,6 +34,7 @@ impl Terrain {
                 | Terrain::Courtyard
                 | Terrain::Garden
                 | Terrain::Bridge
+                | Terrain::Fixture
         )
     }
 
@@ -47,6 +49,7 @@ impl Terrain {
             Terrain::Courtyard => 16.0, // enclosed open space
             Terrain::Door => 17.0,      // building entrance
             Terrain::Floor => 18.0,     // building interior
+            Terrain::Fixture => 16.0,   // outdoor minor feature
         }
     }
 
@@ -64,6 +67,7 @@ impl Terrain {
             5 => Some(Terrain::Garden),
             6 => Some(Terrain::Water),
             7 => Some(Terrain::Bridge),
+            8 => Some(Terrain::Fixture),
             _ => None,
         }
     }
@@ -931,6 +935,7 @@ mod tests {
         assert!(Terrain::Courtyard.is_walkable());
         assert!(Terrain::Garden.is_walkable());
         assert!(Terrain::Bridge.is_walkable());
+        assert!(Terrain::Fixture.is_walkable());
         assert!(!Terrain::Wall.is_walkable());
         assert!(!Terrain::Water.is_walkable());
     }
@@ -959,6 +964,7 @@ mod tests {
             Terrain::Garden,
             Terrain::Water,
             Terrain::Bridge,
+            Terrain::Fixture,
         ];
         for t in variants {
             let u = t.to_u8();
@@ -966,7 +972,7 @@ mod tests {
             assert_eq!(t, back, "roundtrip failed for {t:?} (u8={u})");
         }
         // Invalid values return None
-        assert!(Terrain::from_u8(8).is_none());
+        assert!(Terrain::from_u8(9).is_none());
         assert!(Terrain::from_u8(255).is_none());
     }
 
@@ -1169,6 +1175,7 @@ mod tests {
         assert_eq!(Terrain::Courtyard.target_temperature(), 16.0);
         assert_eq!(Terrain::Door.target_temperature(), 17.0);
         assert_eq!(Terrain::Floor.target_temperature(), 18.0);
+        assert_eq!(Terrain::Fixture.target_temperature(), 16.0);
     }
 
     // --- visible_chunk_range ---
