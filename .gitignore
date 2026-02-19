@@ -8,6 +8,7 @@ source-data/
 data/paris.ron
 data/paris.tiles
 data/paris.meta.ron
+data/.preprocess.stamp
 
 # IDE
 .idea
