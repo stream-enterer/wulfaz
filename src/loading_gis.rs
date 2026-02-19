@@ -294,6 +294,79 @@ fn get_integer_field(record: &shapefile::dbase::Record, name: &str) -> i32 {
     }
 }
 
+include!("linebreak_table.rs");
+
+/// Rejoin words split by OCR linebreak hyphens in activity descriptions.
+///
+/// 19th-century directory columns were narrow, so words were hyphenated across
+/// lines. The OCR preserved these as "word1- word2" (hyphen-space). We use a
+/// dictionary-derived lookup table to decide:
+///   - Fragment in LINEBREAK_JOINS → remove hyphen, use joined form
+///   - Fragment not found → collapse space only (keeps real compounds like
+///     "sage-femme", "peintre-vitrier")
+fn fix_linebreak_hyphens(s: &str) -> String {
+    if !s.contains("- ") {
+        return s.to_string();
+    }
+
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+
+    while i < chars.len() {
+        // Look for '- ' pattern
+        if chars[i] == '-' && i + 1 < chars.len() && chars[i + 1] == ' ' {
+            // Look backward for word1 (contiguous letters)
+            let word1_end = i;
+            let mut word1_start = i;
+            while word1_start > 0 && chars[word1_start - 1].is_alphabetic() {
+                word1_start -= 1;
+            }
+
+            // Look forward for word2 (contiguous lowercase letters after the space)
+            let word2_start = i + 2;
+            let mut word2_end = word2_start;
+            while word2_end < chars.len()
+                && chars[word2_end].is_alphabetic()
+                && (word2_end == word2_start || chars[word2_end].is_lowercase())
+            {
+                word2_end += 1;
+            }
+
+            let word1: String = chars[word1_start..word1_end].iter().collect();
+            let word2: String = chars[word2_start..word2_end].iter().collect();
+
+            if !word1.is_empty() && !word2.is_empty() {
+                let fragment = format!("{}- {}", word1, word2);
+
+                // Binary search the sorted lookup table
+                match LINEBREAK_JOINS.binary_search_by_key(&fragment.as_str(), |&(k, _)| k) {
+                    Ok(idx) => {
+                        // Found: replace word1 in output with the joined form
+                        // Remove word1 chars already written to output
+                        for _ in 0..word1.len() {
+                            out.pop();
+                        }
+                        out.push_str(LINEBREAK_JOINS[idx].1);
+                        i = word2_end;
+                        continue;
+                    }
+                    Err(_) => {
+                        // Not found: collapse space (write hyphen, skip space)
+                        out.push('-');
+                        i += 2; // skip '- ', continue with word2
+                        continue;
+                    }
+                }
+            }
+        }
+
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 /// Normalize characters outside the glyph atlas (ASCII + Latin-1 Supplement)
 /// to renderable equivalents.
 ///
@@ -1098,7 +1171,12 @@ pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
     let rows = stmt
         .query_map([], |row| {
             let persons = normalize_to_atlas(&row.get::<_, String>(0).unwrap_or_default());
-            let activities = normalize_to_atlas(&row.get::<_, String>(1).unwrap_or_default());
+            let activities_raw = normalize_to_atlas(&row.get::<_, String>(1).unwrap_or_default());
+            let activities_trimmed = activities_raw
+                .strip_prefix(", ")
+                .or(activities_raw.strip_prefix(","))
+                .unwrap_or(&activities_raw);
+            let activities = fix_linebreak_hyphens(activities_trimmed);
             let addr_name = normalize_to_atlas(&row.get::<_, String>(2).unwrap_or_default());
             let addr_number: String = row.get::<_, String>(3).unwrap_or_default();
             let pub_date: f64 = row.get::<_, f64>(4).unwrap_or(0.0);
@@ -2252,5 +2330,42 @@ mod tests {
         assert_eq!(normalize_to_atlas("plain ascii"), "plain ascii");
         assert_eq!(normalize_to_atlas("café"), "café");
         assert_eq!(normalize_to_atlas(""), "");
+    }
+
+    #[test]
+    fn test_fix_linebreak_hyphens_joins() {
+        // Known linebreak fragments are joined
+        assert_eq!(
+            fix_linebreak_hyphens("en mar- chandises"),
+            "en marchandises"
+        );
+        assert_eq!(fix_linebreak_hyphens("du com- merce"), "du commerce");
+        assert_eq!(
+            fix_linebreak_hyphens("articles de Pa- ris"),
+            "articles de Paris"
+        );
+    }
+
+    #[test]
+    fn test_fix_linebreak_hyphens_accent_restoration() {
+        // Joins that also restore accents
+        assert_eq!(fix_linebreak_hyphens("sur me- taux"), "sur métaux");
+        assert_eq!(fix_linebreak_hyphens("de ma- connerie"), "de maçonnerie");
+        assert_eq!(fix_linebreak_hyphens("des gar- cons"), "des garçons");
+    }
+
+    #[test]
+    fn test_fix_linebreak_hyphens_collapse() {
+        // Real compounds: space removed, hyphen kept
+        assert_eq!(fix_linebreak_hyphens("sage- femme"), "sage-femme");
+        assert_eq!(fix_linebreak_hyphens("peintre- vitrier"), "peintre-vitrier");
+    }
+
+    #[test]
+    fn test_fix_linebreak_hyphens_passthrough() {
+        // No "- " pattern: unchanged
+        assert_eq!(fix_linebreak_hyphens("avocat"), "avocat");
+        assert_eq!(fix_linebreak_hyphens("eaux-de-vie"), "eaux-de-vie");
+        assert_eq!(fix_linebreak_hyphens(""), "");
     }
 }
