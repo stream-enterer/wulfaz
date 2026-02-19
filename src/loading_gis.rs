@@ -266,11 +266,12 @@ fn extract_rings(shape: &shapefile::Polygon) -> (Ring, Vec<Ring>) {
 
 #[allow(dead_code)]
 fn get_string_field(record: &shapefile::dbase::Record, name: &str) -> String {
-    match record.get(name) {
+    let raw = match record.get(name) {
         Some(FieldValue::Character(Some(s))) => s.trim().to_string(),
         Some(FieldValue::Memo(s)) => s.trim().to_string(),
-        _ => String::new(),
-    }
+        _ => return String::new(),
+    };
+    normalize_to_atlas(&raw)
 }
 
 #[allow(dead_code)]
@@ -291,6 +292,56 @@ fn get_integer_field(record: &shapefile::dbase::Record, name: &str) -> i32 {
         Some(FieldValue::Numeric(Some(v))) => *v as i32,
         _ => 0,
     }
+}
+
+/// Normalize characters outside the glyph atlas (ASCII + Latin-1 Supplement)
+/// to renderable equivalents.
+///
+/// The GeoPackage text comes from OCR of 19th-century directories. The OCR
+/// engine misreads characters as Latin Extended-A (Č→C, š→s), Cyrillic
+/// lookalikes (С→C, В→B), or typographic Unicode (smart quotes, em-dashes).
+/// The long s (ſ) is legitimate period typography but normalizes to 's'.
+fn normalize_to_atlas(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            // Typographic punctuation → ASCII
+            '\u{2018}' | '\u{2019}' => out.push('\''),
+            '\u{201C}' | '\u{201D}' | '\u{201E}' => out.push('"'),
+            '\u{2013}' | '\u{2014}' => out.push('-'),
+            // Latin Extended-A: OCR misreads of plain Latin
+            '\u{010C}' => out.push('C'), // Č → C
+            '\u{010D}' => out.push('c'), // č → c
+            '\u{011B}' => out.push('e'), // ě → e
+            '\u{0144}' => out.push('n'), // ń → n
+            '\u{0148}' => out.push('n'), // ň → n
+            '\u{0158}' => out.push('R'), // Ř → R
+            '\u{0159}' => out.push('r'), // ř → r
+            '\u{015B}' => out.push('s'), // ś → s
+            '\u{015F}' => out.push('s'), // ş → s
+            '\u{0160}' => out.push('S'), // Š → S
+            '\u{0161}' => out.push('s'), // š → s
+            '\u{0165}' => out.push('t'), // ť → t
+            '\u{016F}' => out.push('u'), // ů → u
+            '\u{017E}' => out.push('z'), // ž → z
+            '\u{017F}' => out.push('s'), // ſ (long s) → s
+            // Cyrillic lookalikes: OCR misreads
+            '\u{0410}' => out.push('A'), // А → A
+            '\u{0411}' => out.push('B'), // Б → B
+            '\u{0412}' => out.push('B'), // В → B
+            '\u{0421}' => out.push('C'), // С → C
+            '\u{0430}' => out.push('a'), // а → a
+            '\u{0432}' => out.push('B'), // в → B (uppercase in OCR context)
+            '\u{0435}' => out.push('e'), // е → e
+            '\u{043E}' => out.push('o'), // о → o
+            '\u{0442}' => out.push('T'), // т → T
+            // Misc OCR artifacts
+            '\u{20AC}' => out.push('E'), // € → E (OCR misread)
+            '\u{FFFD}' => out.push('?'), // replacement char
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Fix U+FFFD mojibake in Nom_Bati field.
@@ -1046,9 +1097,9 @@ pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
 
     let rows = stmt
         .query_map([], |row| {
-            let persons: String = row.get::<_, String>(0).unwrap_or_default();
-            let activities: String = row.get::<_, String>(1).unwrap_or_default();
-            let addr_name: String = row.get::<_, String>(2).unwrap_or_default();
+            let persons = normalize_to_atlas(&row.get::<_, String>(0).unwrap_or_default());
+            let activities = normalize_to_atlas(&row.get::<_, String>(1).unwrap_or_default());
+            let addr_name = normalize_to_atlas(&row.get::<_, String>(2).unwrap_or_default());
             let addr_number: String = row.get::<_, String>(3).unwrap_or_default();
             let pub_date: f64 = row.get::<_, f64>(4).unwrap_or(0.0);
             let naics: String = row.get::<_, String>(5).unwrap_or_default();
@@ -2158,5 +2209,48 @@ mod tests {
         assert_eq!(normalize_nom_bati("Halle aux draps"), "Halle aux draps");
         assert_eq!(normalize_nom_bati("Palais-Royal"), "Palais-Royal");
         assert_eq!(normalize_nom_bati(""), "");
+    }
+
+    #[test]
+    fn test_normalize_to_atlas_smart_quotes() {
+        assert_eq!(normalize_to_atlas("l\u{2019}achat"), "l'achat");
+        assert_eq!(normalize_to_atlas("\u{2018}test\u{2019}"), "'test'");
+        assert_eq!(normalize_to_atlas("\u{201C}test\u{201D}"), "\"test\"");
+        assert_eq!(normalize_to_atlas("\u{201E}test\u{201C}"), "\"test\"");
+    }
+
+    #[test]
+    fn test_normalize_to_atlas_dashes() {
+        assert_eq!(normalize_to_atlas("a\u{2013}b"), "a-b");
+        assert_eq!(normalize_to_atlas("a\u{2014}b"), "a-b");
+    }
+
+    #[test]
+    fn test_normalize_to_atlas_ocr_latin_extended() {
+        // OCR misreads plain Latin as Latin Extended-A
+        assert_eq!(normalize_to_atlas("\u{010C}osse"), "Cosse");
+        assert_eq!(normalize_to_atlas("taba\u{010D}"), "tabac");
+        assert_eq!(normalize_to_atlas("\u{0160}alme"), "Salme");
+        assert_eq!(normalize_to_atlas("ca\u{015B}sation"), "cassation");
+        assert_eq!(normalize_to_atlas("\u{0158}ené"), "René");
+        assert_eq!(normalize_to_atlas("minis\u{0165}."), "minist.");
+    }
+
+    #[test]
+    fn test_normalize_to_atlas_long_s() {
+        assert_eq!(normalize_to_atlas("La\u{017F}on"), "Lason");
+    }
+
+    #[test]
+    fn test_normalize_to_atlas_cyrillic_lookalikes() {
+        assert_eq!(normalize_to_atlas("Schultz (\u{0421}.)"), "Schultz (C.)");
+        assert_eq!(normalize_to_atlas("J.-\u{0412}.-\u{0410}."), "J.-B.-A.");
+    }
+
+    #[test]
+    fn test_normalize_to_atlas_passthrough() {
+        assert_eq!(normalize_to_atlas("plain ascii"), "plain ascii");
+        assert_eq!(normalize_to_atlas("café"), "café");
+        assert_eq!(normalize_to_atlas(""), "");
     }
 }
