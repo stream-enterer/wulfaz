@@ -1086,7 +1086,9 @@ pub fn load_addresses(addresses_shp: &str, buildings: &mut BuildingRegistry) {
 
         let id_parc = get_string_field(&record, "ID_PARC");
         let street_name = get_string_field(&record, "NOM_ENTIER");
-        let house_number = get_string_field(&record, "NUM_VOIES");
+        let house_number_raw = get_string_field(&record, "NUM_VOIES");
+        // Insert space before bis/ter/quater if missing (e.g. "33bis" → "33 bis")
+        let house_number = insert_bis_space(&house_number_raw);
 
         if street_name.is_empty() {
             no_street += 1;
@@ -1165,6 +1167,23 @@ fn looks_numeric_context(s: &str) -> bool {
     // If the string is purely letters that are common OCR digit misreads, treat as numeric
     s.chars()
         .all(|c| c.is_ascii_digit() || "IlOZSTD".contains(c) || c == '.' || c == ' ')
+}
+
+/// Insert space before bis/ter/quater suffix for display (e.g. "33bis" → "33 bis").
+fn insert_bis_space(s: &str) -> String {
+    let lower = s.to_lowercase();
+    for suffix in &["quater", "bis", "ter"] {
+        if let Some(pos) = lower.rfind(suffix)
+            && pos > 0
+            && s.as_bytes()[pos - 1] != b' '
+        {
+            let mut out = s[..pos].to_string();
+            out.push(' ');
+            out.push_str(&s[pos..]);
+            return out;
+        }
+    }
+    s.to_string()
 }
 
 /// Strip bis/ter/quater suffix from a house number for fallback matching.
