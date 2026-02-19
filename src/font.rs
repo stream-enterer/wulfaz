@@ -561,7 +561,7 @@ fn find_font_with_hinting() -> (String, LoadFlag) {
     panic!("no monospace font found");
 }
 
-/// Rasterize ASCII 32-126 and pack into a glyph atlas.
+/// Rasterize glyphs for ASCII + Latin-1 Supplement + extras and pack into a glyph atlas.
 /// Returns (glyphs, metrics, atlas_pixels, atlas_width, atlas_height).
 fn rasterize_glyphs(
     font_size_pts: f32,
@@ -615,41 +615,55 @@ fn rasterize_glyphs(
 
     let mut raw_glyphs: Vec<RawGlyph> = Vec::new();
 
-    for cp in 32u32..=126 {
-        if face.load_char(cp as usize, load_flags).is_err() {
-            continue;
-        }
-        let glyph = face.glyph();
-        let bitmap = glyph.bitmap();
-        let w = bitmap.width() as u32;
-        let h = bitmap.rows() as u32;
-        let pitch = bitmap.pitch();
+    // Codepoint ranges to rasterize:
+    // - ASCII printable: U+0020..U+007E
+    // - Latin-1 Supplement: U+00A0..U+00FF (é, è, ê, ë, à, â, ç, ô, ù, û, ü, etc.)
+    // - Latin Extended-A subset: U+0152..U+0153 (Œ, œ)
+    // - General Punctuation: U+2013..U+2014 (en-dash, em-dash)
+    let codepoint_ranges: &[(u32, u32)] = &[
+        (0x0020, 0x007E),
+        (0x00A0, 0x00FF),
+        (0x0152, 0x0153),
+        (0x2013, 0x2014),
+    ];
 
-        let mut pixels = Vec::new();
-        if w > 0 && h > 0 {
-            let buf = bitmap.buffer();
-            let abs_pitch = pitch.unsigned_abs() as usize;
-            // Copy row by row, handling pitch != width and negative pitch (bottom-up)
-            for row in 0..h {
-                let src_row = if pitch >= 0 {
-                    row as usize
-                } else {
-                    (h - 1 - row) as usize
-                };
-                let start = src_row * abs_pitch;
-                let end = start + w as usize;
-                pixels.extend_from_slice(&buf[start..end]);
+    for &(range_start, range_end) in codepoint_ranges {
+        for cp in range_start..=range_end {
+            if face.load_char(cp as usize, load_flags).is_err() {
+                continue;
             }
-        }
+            let glyph = face.glyph();
+            let bitmap = glyph.bitmap();
+            let w = bitmap.width() as u32;
+            let h = bitmap.rows() as u32;
+            let pitch = bitmap.pitch();
 
-        raw_glyphs.push(RawGlyph {
-            cp,
-            width: w,
-            height: h,
-            bearing_x: glyph.bitmap_left(),
-            bearing_y: glyph.bitmap_top(),
-            pixels,
-        });
+            let mut pixels = Vec::new();
+            if w > 0 && h > 0 {
+                let buf = bitmap.buffer();
+                let abs_pitch = pitch.unsigned_abs() as usize;
+                // Copy row by row, handling pitch != width and negative pitch (bottom-up)
+                for row in 0..h {
+                    let src_row = if pitch >= 0 {
+                        row as usize
+                    } else {
+                        (h - 1 - row) as usize
+                    };
+                    let start = src_row * abs_pitch;
+                    let end = start + w as usize;
+                    pixels.extend_from_slice(&buf[start..end]);
+                }
+            }
+
+            raw_glyphs.push(RawGlyph {
+                cp,
+                width: w,
+                height: h,
+                bearing_x: glyph.bitmap_left(),
+                bearing_y: glyph.bitmap_top(),
+                pixels,
+            });
+        }
     }
 
     // Shelf-pack atlas: sort by height descending for better packing

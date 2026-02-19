@@ -17,7 +17,7 @@ kdl = "6.5.0"
 rand = "0.10.0"
 serde = { version = "1", features = ["derive"] }
 ron = "0.9"
-shapefile = "0.7"
+shapefile = { version = "0.7", features = ["yore"] }
 rusqlite = { version = "0.33", features = ["bundled"] }
 
 [lints.clippy]
