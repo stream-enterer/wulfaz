@@ -36,7 +36,7 @@ struct TileMap {
 }
 ```
 
-Tile accessors keep same signatures, route through flat Vec indexing internally (no hashing). Binary serialization: WULF header (32 bytes) + chunks in row-major order. Temperature not serialized — `initialize_temperatures()` sets each tile to its `terrain.target_temperature()` after load and marks all chunks `at_equilibrium`. See "Chunk (full definition)" section for per-tile ID layers.
+Tile accessors keep same signatures, route through flat Vec indexing internally (no hashing). Binary serialization: WULF v2 header (40 bytes: magic, version, dimensions, generation UUID) + zstd-compressed chunks in row-major order. Temperature not serialized — `initialize_temperatures()` sets each tile to its `terrain.target_temperature()` after load and marks all chunks `at_equilibrium`. See "Chunk (full definition)" section for per-tile ID layers.
 
 Chunk access methods: `chunk_at(cx, cy)` / `chunk_at_mut(cx, cy)` for O(1) indexed access, `visible_chunk_range(cam_x, cam_y, vp_w, vp_h) -> ChunkRange` for viewport culling.
 
@@ -215,9 +215,10 @@ data/
   creatures.kdl          # creature definitions (KDL)
   items.kdl              # item definitions (KDL)
   terrain.kdl            # terrain definitions (KDL)
-  paris.ron              # intermediate GIS data (shapefile → RON)
-  paris.meta.ron         # building/block registries, serialized
-  paris.tiles            # binary tile data (WULF format, chunked)
+  paris.tiles            # binary tile data (WULF v2, zstd-compressed chunks, generation UUID)
+  paris.meta.bin         # building/block registries (bincode+zstd, WULM v1 header, generation UUID)
+  paris.meta.ron         # same as above in human-readable RON (debug artifact, not loaded at runtime)
+  paris.ron.zst          # intermediate GIS polygon data (zstd-compressed RON, fallback rasterization)
   utility.ron            # preprocessor utility data
 src/
   main.rs                # phased main loop + wgpu renderer
@@ -225,7 +226,7 @@ src/
   world.rs               # World struct, spawn, despawn, validate
   events.rs              # Event enum + EventLog ring buffer
   components.rs          # property structs (Position, Hunger, etc.)
-  tile_map.rs            # TileMap — chunked storage, accessors, binary ser/de
+  tile_map.rs            # TileMap — chunked storage, accessors, WULF v2 binary ser/de (zstd+UUID)
   registry.rs            # BuildingRegistry, BlockRegistry, BuildingData, Address, Occupant
   loading.rs             # KDL parsing, entity spawning (small test map)
   loading_gis.rs         # GIS shapefile parsing, rasterization, binary load
@@ -233,7 +234,8 @@ src/
   font.rs                # FreeType glyph rasterization + atlas
   rng.rs                 # deterministic seeded RNG wrapper
   bin/
-    preprocess.rs        # offline GIS → binary pipeline
+    preprocess.rs        # offline GIS → binary pipeline (generates tiles + bincode meta + RON debug)
+    water_diag.rs        # diagnostic tool for water rasterization + bridge detection
   systems/
     mod.rs
     hunger.rs            # Phase 2: hunger increase
