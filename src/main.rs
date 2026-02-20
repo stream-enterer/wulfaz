@@ -221,7 +221,8 @@ struct App {
     pending_player_action: Option<PlayerAction>,
     // Map layout for click hit-testing (set during render)
     map_origin: (f32, f32),
-    map_cell_size: f32,
+    map_cell_w: f32,
+    map_cell_h: f32,
 }
 
 impl ApplicationHandler for App {
@@ -336,11 +337,11 @@ impl ApplicationHandler for App {
                         button: MouseButton::Left,
                         ..
                     } if self.modifiers.shift_key() => {
-                        if self.map_cell_size > 0.0 {
+                        if self.map_cell_w > 0.0 {
                             let px = self.cursor_pos.x as f32;
                             let py = self.cursor_pos.y as f32;
-                            let vx = (px - self.map_origin.0) / self.map_cell_size;
-                            let vy = (py - self.map_origin.1) / self.map_cell_size;
+                            let vx = (px - self.map_origin.0) / self.map_cell_w;
+                            let vy = (py - self.map_origin.1) / self.map_cell_h;
                             if vx >= 0.0 && vy >= 0.0 {
                                 let tile_x = self.camera.x + vx as i32;
                                 let tile_y = self.camera.y + vy as i32;
@@ -475,18 +476,19 @@ impl ApplicationHandler for App {
                             let status_h = status_lines as f32 * m.line_height;
                             let event_h = event_lines as f32 * m.line_height;
                             let hover_h = hover_lines as f32 * m.line_height;
-                            let map_cell = m.line_height;
+                            let (mcw, mch) = font.map_cell();
                             let map_pixel_h =
                                 screen_h as f32 - status_h - event_h - hover_h - padding * 4.0;
                             let map_pixel_w = screen_w as f32 - padding * 2.0;
 
-                            let viewport_cols = (map_pixel_w / map_cell).floor().max(1.0) as usize;
-                            let viewport_rows = (map_pixel_h / map_cell).floor().max(1.0) as usize;
+                            let viewport_cols = (map_pixel_w / mcw).floor().max(1.0) as usize;
+                            let viewport_rows = (map_pixel_h / mch).floor().max(1.0) as usize;
 
                             // Store layout for click hit-testing
                             let map_y = padding * 2.0 + status_h;
                             self.map_origin = (padding, map_y);
-                            self.map_cell_size = map_cell;
+                            self.map_cell_w = mcw;
+                            self.map_cell_h = mch;
 
                             // Camera: follow player in roguelike mode
                             if let Some(player) = self.world.player
@@ -507,8 +509,8 @@ impl ApplicationHandler for App {
                             let hover_text = {
                                 let px = self.cursor_pos.x as f32;
                                 let py = self.cursor_pos.y as f32;
-                                let vx = (px - self.map_origin.0) / self.map_cell_size;
-                                let vy = (py - self.map_origin.1) / self.map_cell_size;
+                                let vx = (px - self.map_origin.0) / self.map_cell_w;
+                                let vy = (py - self.map_origin.1) / self.map_cell_h;
                                 if vx >= 0.0
                                     && vy >= 0.0
                                     && (vx as usize) < viewport_cols
@@ -535,7 +537,7 @@ impl ApplicationHandler for App {
                             font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
                             font.prepare_text(&status, padding, padding);
                             font.prepare_map(&map_text, padding, map_y);
-                            let hover_y = map_y + viewport_rows as f32 * map_cell;
+                            let hover_y = map_y + viewport_rows as f32 * mch;
                             font.prepare_text(&hover_text, padding, hover_y);
                             let event_y = screen_h as f32 - event_h - padding;
                             font.prepare_text(&events, padding, event_y);
@@ -593,7 +595,8 @@ fn main() {
         modifiers: ModifiersState::empty(),
         pending_player_action: None,
         map_origin: (0.0, 0.0),
-        map_cell_size: 0.0,
+        map_cell_w: 0.0,
+        map_cell_h: 0.0,
     };
     event_loop.run_app(&mut app).expect("run event loop");
 }

@@ -294,12 +294,16 @@ impl FontRenderer {
         );
     }
 
-    /// Append text vertices using square cells (line_height x line_height) for the map.
-    /// Glyphs are centered horizontally within the square cell.
+    /// Map cell dimensions (width, height). Adjust here to change map grid.
+    pub fn map_cell(&self) -> (f32, f32) {
+        (self.metrics.cell_width, self.metrics.line_height)
+    }
+
+    /// Append text vertices for the map grid.
     pub fn prepare_map(&mut self, text: &str, x: f32, y: f32) {
-        let cell_size = self.metrics.line_height;
-        let h_offset = ((cell_size - self.metrics.cell_width) / 2.0).floor();
-        self.build_vertices(text, x, y, cell_size, h_offset, cell_size);
+        let (w, h) = self.map_cell();
+        let h_offset = ((w - self.metrics.cell_width) / 2.0).floor();
+        self.build_vertices(text, x, y, w, h_offset, h);
     }
 
     /// Upload accumulated vertices to the GPU. Returns vertex count for render().
