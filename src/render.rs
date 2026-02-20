@@ -46,7 +46,7 @@ pub fn render_hover_info(world: &World, tile_x: i32, tile_y: i32) -> String {
 
         // Append nom_bati if present
         let addr_part = if let Some(ref nom) = building.nom_bati {
-            format!("{} - {}", addr, nom)
+            format!("{} — {}", addr, nom)
         } else {
             addr
         };
@@ -654,7 +654,7 @@ mod tests {
         let info = render_hover_info(&world, 2, 2);
         assert_eq!(
             info,
-            "(2, 2) Floor | 42 Rue de Rivoli - Boulangerie | Jean Dupont (flour merchant) +1 more"
+            "(2, 2) Floor | 42 Rue de Rivoli \u{2014} Boulangerie | Jean Dupont (flour merchant) +1 more"
         );
     }
 

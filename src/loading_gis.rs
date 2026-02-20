@@ -382,7 +382,6 @@ fn normalize_to_atlas(s: &str) -> String {
             // Typographic punctuation → ASCII
             '\u{2018}' | '\u{2019}' => out.push('\''),
             '\u{201C}' | '\u{201D}' | '\u{201E}' => out.push('"'),
-            '\u{2013}' | '\u{2014}' => out.push('-'),
             // Latin Extended-A: OCR misreads of plain Latin
             '\u{010C}' => out.push('C'), // Č → C
             '\u{010D}' => out.push('c'), // č → c
@@ -399,15 +398,9 @@ fn normalize_to_atlas(s: &str) -> String {
             '\u{016F}' => out.push('u'), // ů → u
             '\u{017E}' => out.push('z'), // ž → z
             '\u{017F}' => out.push('s'), // ſ (long s) → s
-            // Latin-1 Supplement not in font
-            '\u{00DF}' => out.push_str("ss"), // ß → ss
-            '\u{00E6}' => out.push_str("ae"), // æ → ae
-            '\u{00C6}' => out.push_str("AE"), // Æ → AE
-            // Latin Extended-A: ligatures and OCR misreads
-            '\u{010F}' => out.push('d'),      // ď → d
-            '\u{0142}' => out.push('l'),      // ł → l
-            '\u{0152}' => out.push_str("OE"), // Œ → OE
-            '\u{0153}' => out.push_str("oe"), // œ → oe
+            // Latin Extended-A: OCR misreads (continued)
+            '\u{010F}' => out.push('d'), // ď → d
+            '\u{0142}' => out.push('l'), // ł → l
             // Latin Extended-B
             '\u{0192}' => out.push('f'), // ƒ → f (OCR misread of f)
             // Cyrillic lookalikes: OCR misreads
@@ -3013,12 +3006,6 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_to_atlas_dashes() {
-        assert_eq!(normalize_to_atlas("a\u{2013}b"), "a-b");
-        assert_eq!(normalize_to_atlas("a\u{2014}b"), "a-b");
-    }
-
-    #[test]
     fn test_normalize_to_atlas_ocr_latin_extended() {
         // OCR misreads plain Latin as Latin Extended-A
         assert_eq!(normalize_to_atlas("\u{010C}osse"), "Cosse");
@@ -3046,22 +3033,6 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_to_atlas_oe_ligature() {
-        assert_eq!(normalize_to_atlas("b\u{0153}uf"), "boeuf");
-        assert_eq!(normalize_to_atlas("s\u{0153}urs"), "soeurs");
-        assert_eq!(normalize_to_atlas("\u{0153}ufs"), "oeufs");
-        assert_eq!(normalize_to_atlas("Sch\u{0153}newerk"), "Schoenewerk");
-        assert_eq!(normalize_to_atlas("\u{0152}uvre"), "OEuvre");
-    }
-
-    #[test]
-    fn test_normalize_to_atlas_latin1_not_in_font() {
-        assert_eq!(normalize_to_atlas("Sch\u{00E6}ffer"), "Schaeffer");
-        assert_eq!(normalize_to_atlas("\u{00C6}sculape"), "AEsculape");
-        assert_eq!(normalize_to_atlas("Stra\u{00DF}e"), "Strasse");
-    }
-
-    #[test]
     fn test_normalize_to_atlas_misc_ocr() {
         assert_eq!(normalize_to_atlas("\u{0192}.fleurs"), "f.fleurs");
         assert_eq!(normalize_to_atlas("C\u{0142}usel"), "Clusel");
@@ -3074,6 +3045,11 @@ mod tests {
         assert_eq!(normalize_to_atlas("plain ascii"), "plain ascii");
         assert_eq!(normalize_to_atlas("café"), "café");
         assert_eq!(normalize_to_atlas(""), "");
+        // Legitimate French/Latin characters preserved (rendered by font)
+        assert_eq!(normalize_to_atlas("b\u{0153}uf"), "b\u{0153}uf");
+        assert_eq!(normalize_to_atlas("\u{0152}uvre"), "\u{0152}uvre");
+        assert_eq!(normalize_to_atlas("Sch\u{00E6}ffer"), "Sch\u{00E6}ffer");
+        assert_eq!(normalize_to_atlas("a\u{2014}b"), "a\u{2014}b");
     }
 
     #[test]
