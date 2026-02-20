@@ -522,7 +522,7 @@ fn hinting_load_flags(config: &HintingConfig) -> LoadFlag {
 }
 
 /// Bundled font path relative to the project root.
-const BUNDLED_FONT: &str = "fonts/NewHeterodoxMono/NewHeterodoxMono-Book.otf";
+const BUNDLED_FONT: &str = "fonts/libertinus/LibertinusMono-Regular.otf";
 
 /// Find font path and hinting config. Uses the bundled font with system hinting preferences.
 fn find_font_with_hinting() -> (String, LoadFlag) {
@@ -602,9 +602,15 @@ fn rasterize_glyphs(
 
     // Codepoint ranges to rasterize:
     // - ASCII printable: U+0020..U+007E
-    // - Latin-1 Supplement: U+00A0..U+00FF (é, è, ê, ë, à, â, ç, ô, ù, û, ü, etc.)
+    // - Latin-1 Supplement: U+00A0..U+00FF (é, è, ê, ë, à, â, ç, ô, ù, û, ü, æ, Æ, etc.)
     // - Latin Extended-A subset: U+0152..U+0153 (Œ, œ)
-    let codepoint_ranges: &[(u32, u32)] = &[(0x0020, 0x007E), (0x00A0, 0x00FF), (0x0152, 0x0153)];
+    // - General Punctuation: U+2010..U+2027 (dashes, smart quotes, daggers, bullet, ellipsis)
+    let codepoint_ranges: &[(u32, u32)] = &[
+        (0x0020, 0x007E),
+        (0x00A0, 0x00FF),
+        (0x0152, 0x0153),
+        (0x2010, 0x2027),
+    ];
 
     for &(range_start, range_end) in codepoint_ranges {
         for cp in range_start..=range_end {
