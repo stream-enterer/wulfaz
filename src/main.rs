@@ -559,10 +559,10 @@ fn main() {
 
     let mut world = World::new_with_seed(42);
 
-    // Load map: prefer binary tiles → fallback RON → fallback default terrain.
+    // Load map: prefer binary tiles+bincode meta → fallback RON → fallback default terrain.
     let paris_tiles = std::path::Path::new("data/paris.tiles");
-    let paris_meta = std::path::Path::new("data/paris.meta.ron");
-    let paris_ron = std::path::Path::new("data/paris.ron");
+    let paris_meta = std::path::Path::new("data/paris.meta.bin");
+    let paris_ron = std::path::Path::new("data/paris.ron.zst");
     if paris_tiles.exists() && paris_meta.exists() {
         loading_gis::load_paris_binary(
             &mut world,

@@ -244,7 +244,7 @@ fn main() {
     };
 
     println!("Loading {tiles_path}...");
-    let tiles = TileMap::read_binary(tiles_path).unwrap_or_else(|e| {
+    let (tiles, _uuid) = TileMap::read_binary(tiles_path).unwrap_or_else(|e| {
         eprintln!("Failed to read {tiles_path}: {e}");
         std::process::exit(1);
     });

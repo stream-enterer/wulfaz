@@ -4,13 +4,25 @@
 None
 
 ## Completed
-SCALE-A09 — Water/bridge polish — COMPLETE (including diagnostic refinement)
+Tier 1 preprocessor optimization — COMPLETE
 
-- Decomposed `rasterize_water()` into 3 sub-functions
-- 10,963 bridge tiles in 13 validated components, 8/8 diagnostic checks pass
-- Fixed `water_diag.rs` reference coordinates: 7 matches use component centers (dist 2-6), 5 western bridges marked NO DATA
-- Match rate: 3/20 (15%) → 7/15 (47%). Remaining 8 misses are north-arm or small bridges without separate components.
-- Component identification: #1-5 = Pont Neuf fragments, #6 = Saint-Michel, #7 = Marie, #8 = Saint-Louis, #9 = Tournelle, #10 = Ile Saint-Louis tip (artifact), #11 = Austerlitz, #12-13 = data gap artifacts
+- Added zstd compression to all 3 data files (paris.tiles, paris.meta.bin, paris.ron.zst)
+- Switched metadata from RON to bincode+zstd (new WULM header format)
+- Added generation UUID (16 bytes) to both tiles (WULF v2) and metadata (WULM v1)
+- UUID mismatch at load time produces clear panic with instructions
+- Disk: 360MB -> 16MB (tiles 4.0MB + meta 3.9MB + ron.zst 7.7MB) + 76MB debug RON
+- paris.meta.ron kept as debug artifact (uncompressed, human-readable)
+- Old paris.ron deleted, replaced by paris.ron.zst
+- Zero warnings, 439 tests pass, water_diag 8/8 checks pass
+
+## Files Modified
+- Cargo.toml (bincode, zstd deps)
+- src/tile_map.rs (v2 format, UUID, zstd chunks)
+- src/loading_gis.rs (bincode meta, UUID gen/verify, zstd RON)
+- src/bin/preprocess.rs (7-arg save, new file paths)
+- src/bin/water_diag.rs (destructure read_binary tuple)
+- src/main.rs (paris.meta.bin, paris.ron.zst paths)
+- .gitignore (updated data file names)
 
 ## Next Action
 Pick next task from backlog.

@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::Write;
+use std::io::{self, Read, Write};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
@@ -70,22 +70,30 @@ pub struct ParisMetadataRon {
 
 // --- RON serialization ---
 
-/// Write ParisMapRon to a RON file. Used by preprocess binary.
+/// Write ParisMapRon to a zstd-compressed RON file. Used by preprocess binary.
 #[allow(dead_code)]
 pub fn save_paris_ron(data: &ParisMapRon, path: &str) {
     let pretty = ron::ser::PrettyConfig::default();
     let ron_str = ron::ser::to_string_pretty(data, pretty)
         .unwrap_or_else(|e| panic!("Failed to serialize RON: {e}"));
-    let mut file =
+    let file =
         std::fs::File::create(path).unwrap_or_else(|e| panic!("Failed to create {path}: {e}"));
-    file.write_all(ron_str.as_bytes())
+    let mut enc = zstd::Encoder::new(file, 1)
+        .unwrap_or_else(|e| panic!("Failed to create zstd encoder: {e}"));
+    enc.write_all(ron_str.as_bytes())
         .unwrap_or_else(|e| panic!("Failed to write {path}: {e}"));
+    enc.finish()
+        .unwrap_or_else(|e| panic!("Failed to finish zstd: {e}"));
 }
 
-/// Read ParisMapRon from a RON file.
+/// Read ParisMapRon from a zstd-compressed RON file.
 pub fn load_paris_ron(path: &str) -> ParisMapRon {
-    let ron_str =
-        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
+    let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("Failed to open {path}: {e}"));
+    let mut dec = zstd::Decoder::new(file)
+        .unwrap_or_else(|e| panic!("Failed to create zstd decoder for {path}: {e}"));
+    let mut ron_str = String::new();
+    dec.read_to_string(&mut ron_str)
+        .unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
     ron::from_str(&ron_str).unwrap_or_else(|e| panic!("Failed to parse RON from {path}: {e}"))
 }
 
@@ -1530,8 +1538,14 @@ pub fn load_occupants(gpkg_path: &str, buildings: &mut BuildingRegistry) {
 
 // --- Binary save/load ---
 
+/// Magic bytes for the bincode metadata file.
+const META_MAGIC: &[u8; 4] = b"WULM";
+/// Format version for the bincode metadata file.
+const META_VERSION: u32 = 1;
+
 /// Save rasterized tile data + metadata for fast game loading.
-/// Tile arrays go to `tiles_path` (binary), registry data to `meta_path` (RON).
+/// Tile arrays go to `tiles_path` (zstd-compressed binary with UUID).
+/// Registry data to `meta_bin_path` (bincode+zstd) and `meta_ron_path` (RON debug artifact).
 /// BuildingData.tiles is stripped from metadata (reconstructed from binary on load).
 #[allow(dead_code)]
 pub fn save_paris_binary(
@@ -1540,12 +1554,16 @@ pub fn save_paris_binary(
     blocks: &BlockRegistry,
     quartier_names: &[String],
     tiles_path: &str,
-    meta_path: &str,
+    meta_bin_path: &str,
+    meta_ron_path: &str,
 ) {
-    // Write binary tiles
+    // Generate a shared UUID for this preprocessing run.
+    let uuid: [u8; 16] = rand::random();
+
+    // Write binary tiles (zstd-compressed, with UUID)
     let tile_start = Instant::now();
     tiles
-        .write_binary(tiles_path)
+        .write_binary(tiles_path, &uuid)
         .unwrap_or_else(|e| panic!("Failed to write {tiles_path}: {e}"));
     let tile_size = std::fs::metadata(tiles_path).map(|m| m.len()).unwrap_or(0);
     log::info!(
@@ -1554,8 +1572,7 @@ pub fn save_paris_binary(
         tile_start.elapsed().as_secs_f64()
     );
 
-    // Write metadata RON (strip tile lists from BuildingData)
-    let meta_start = Instant::now();
+    // Build metadata struct (strip tile lists from BuildingData)
     let meta_buildings: Vec<BuildingData> = buildings
         .buildings
         .iter()
@@ -1565,7 +1582,6 @@ pub fn save_paris_binary(
             b
         })
         .collect();
-    // Vec is already in insertion order (sequential by BuildingId)
 
     let mut meta_blocks: Vec<BlockData> = blocks.blocks.values().cloned().collect();
     meta_blocks.sort_by_key(|b| b.id.0);
@@ -1576,31 +1592,134 @@ pub fn save_paris_binary(
         blocks: meta_blocks,
     };
 
+    // Write metadata as bincode+zstd (primary, loaded by engine)
+    let meta_start = Instant::now();
+    save_meta_bincode(&metadata, &uuid, meta_bin_path);
+    let bin_size = std::fs::metadata(meta_bin_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    log::info!(
+        "  Metadata bincode: {:.1}MB in {:.1}s",
+        bin_size as f64 / (1024.0 * 1024.0),
+        meta_start.elapsed().as_secs_f64()
+    );
+
+    // Write metadata as RON (debug artifact, not loaded at runtime)
+    let ron_start = Instant::now();
     let pretty = ron::ser::PrettyConfig::default();
     let ron_str = ron::ser::to_string_pretty(&metadata, pretty)
         .unwrap_or_else(|e| panic!("Failed to serialize metadata RON: {e}"));
-    let mut file = std::fs::File::create(meta_path)
-        .unwrap_or_else(|e| panic!("Failed to create {meta_path}: {e}"));
+    let mut file = std::fs::File::create(meta_ron_path)
+        .unwrap_or_else(|e| panic!("Failed to create {meta_ron_path}: {e}"));
     file.write_all(ron_str.as_bytes())
-        .unwrap_or_else(|e| panic!("Failed to write {meta_path}: {e}"));
-
-    let meta_size = std::fs::metadata(meta_path).map(|m| m.len()).unwrap_or(0);
+        .unwrap_or_else(|e| panic!("Failed to write {meta_ron_path}: {e}"));
+    let ron_size = std::fs::metadata(meta_ron_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
     log::info!(
-        "  Metadata RON: {:.1}MB in {:.1}s",
-        meta_size as f64 / (1024.0 * 1024.0),
-        meta_start.elapsed().as_secs_f64()
+        "  Metadata RON (debug): {:.1}MB in {:.1}s",
+        ron_size as f64 / (1024.0 * 1024.0),
+        ron_start.elapsed().as_secs_f64()
+    );
+
+    log::info!(
+        "  Generation UUID: {:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        uuid[0],
+        uuid[1],
+        uuid[2],
+        uuid[3],
+        uuid[4],
+        uuid[5],
+        uuid[6],
+        uuid[7],
+        uuid[8],
+        uuid[9],
+        uuid[10],
+        uuid[11],
+        uuid[12],
+        uuid[13],
+        uuid[14],
+        uuid[15]
     );
 }
 
-/// Load pre-rasterized binary tiles + metadata into World.
+/// Write metadata to a bincode+zstd file with UUID header.
+/// Format: META_MAGIC[4] + META_VERSION:u32 + uuid[16] + zstd(bincode(data))
+#[allow(dead_code)]
+fn save_meta_bincode(metadata: &ParisMetadataRon, uuid: &[u8; 16], path: &str) {
+    let file =
+        std::fs::File::create(path).unwrap_or_else(|e| panic!("Failed to create {path}: {e}"));
+    let mut w = std::io::BufWriter::new(file);
+
+    // Header (uncompressed)
+    w.write_all(META_MAGIC)
+        .unwrap_or_else(|e| panic!("Failed to write meta header: {e}"));
+    w.write_all(&META_VERSION.to_le_bytes())
+        .unwrap_or_else(|e| panic!("Failed to write meta version: {e}"));
+    w.write_all(uuid)
+        .unwrap_or_else(|e| panic!("Failed to write meta UUID: {e}"));
+    w.flush()
+        .unwrap_or_else(|e| panic!("Failed to flush meta header: {e}"));
+
+    // Body: zstd-compressed bincode
+    let inner = w
+        .into_inner()
+        .unwrap_or_else(|e| panic!("Failed to flush meta writer: {e}"));
+    let mut enc = zstd::Encoder::new(inner, 1)
+        .unwrap_or_else(|e| panic!("Failed to create zstd encoder: {e}"));
+    bincode::serialize_into(&mut enc, metadata)
+        .unwrap_or_else(|e| panic!("Failed to serialize metadata bincode: {e}"));
+    enc.finish()
+        .unwrap_or_else(|e| panic!("Failed to finish zstd: {e}"));
+}
+
+/// Read metadata from a bincode+zstd file. Returns (metadata, uuid).
+fn load_meta_bincode(path: &str) -> io::Result<(ParisMetadataRon, [u8; 16])> {
+    let file = std::fs::File::open(path)?;
+    let mut r = std::io::BufReader::new(file);
+
+    // Header
+    let mut magic = [0u8; 4];
+    r.read_exact(&mut magic)?;
+    if &magic != META_MAGIC {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("bad meta magic: expected WULM, got {:?}", magic),
+        ));
+    }
+
+    let mut u32_buf = [0u8; 4];
+    r.read_exact(&mut u32_buf)?;
+    let version = u32::from_le_bytes(u32_buf);
+    if version != META_VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported meta version {version} (expected {META_VERSION})"),
+        ));
+    }
+
+    let mut uuid = [0u8; 16];
+    r.read_exact(&mut uuid)?;
+
+    // Body: zstd-compressed bincode
+    let dec = zstd::Decoder::new(r)?;
+    let metadata: ParisMetadataRon = bincode::deserialize_from(dec)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    Ok((metadata, uuid))
+}
+
+/// Load pre-rasterized binary tiles + bincode metadata into World.
 /// Reconstructs BuildingData.tiles by scanning the tile array.
+/// Verifies that tiles and metadata share the same generation UUID.
 pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
     let total_start = Instant::now();
 
-    // Load binary tiles
+    // Load binary tiles (zstd-compressed)
     let tile_start = Instant::now();
-    world.tiles = TileMap::read_binary(tiles_path)
+    let (tilemap, tiles_uuid) = TileMap::read_binary(tiles_path)
         .unwrap_or_else(|e| panic!("Failed to read {tiles_path}: {e}"));
+    world.tiles = tilemap;
     log::info!(
         "  Binary tiles loaded in {:.1}s ({}×{})",
         tile_start.elapsed().as_secs_f64(),
@@ -1608,12 +1727,19 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
         world.tiles.height()
     );
 
-    // Load metadata RON
+    // Load metadata (bincode+zstd)
     let meta_start = Instant::now();
-    let ron_str = std::fs::read_to_string(meta_path)
-        .unwrap_or_else(|e| panic!("Failed to read {meta_path}: {e}"));
-    let metadata: ParisMetadataRon =
-        ron::from_str(&ron_str).unwrap_or_else(|e| panic!("Failed to parse {meta_path}: {e}"));
+    let (metadata, meta_uuid) =
+        load_meta_bincode(meta_path).unwrap_or_else(|e| panic!("Failed to read {meta_path}: {e}"));
+
+    // Verify generation UUIDs match
+    if tiles_uuid != meta_uuid {
+        panic!(
+            "Generation UUID mismatch: tiles and metadata were produced by different \
+             preprocessor runs. Re-run the preprocessor to regenerate both files."
+        );
+    }
+
     log::info!(
         "  Metadata loaded in {:.1}s: {} buildings, {} blocks, {} quartiers",
         meta_start.elapsed().as_secs_f64(),

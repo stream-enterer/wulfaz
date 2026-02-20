@@ -53,6 +53,7 @@ impl Terrain {
         }
     }
 
+    #[allow(dead_code)]
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -188,6 +189,7 @@ impl Chunk {
     /// Write chunk data to binary stream.
     /// Format: terrain[4096 u8] + building_id[4096 u32 LE] + block_id[4096 u16 LE] + quartier_id[4096 u8]
     /// Temperature is NOT serialized (runtime-only, defaults to 16.0).
+    #[allow(dead_code)]
     pub fn write_binary(&self, w: &mut impl Write) -> io::Result<()> {
         // terrain: 4096 bytes
         let mut terrain_buf = [0u8; CHUNK_AREA];
@@ -246,8 +248,8 @@ impl Chunk {
 
 /// Binary file magic bytes.
 const BINARY_MAGIC: &[u8; 4] = b"WULF";
-/// Binary file format version.
-const BINARY_VERSION: u32 = 1;
+/// Binary file format version (2 = zstd-compressed chunks + generation UUID).
+const BINARY_VERSION: u32 = 2;
 
 /// Range of chunk coordinates (exclusive upper bounds).
 #[allow(dead_code)]
@@ -532,13 +534,16 @@ impl TileMap {
     }
 
     /// Write the full tile map to a binary file.
-    /// Header (32 bytes): magic[4] + version:u32 + width:u32 + height:u32 + chunks_x:u32 + chunks_y:u32 + reserved[8]
-    /// Then chunks in row-major order.
-    pub fn write_binary(&self, path: &str) -> io::Result<()> {
+    ///
+    /// Header (40 bytes, uncompressed): magic\[4\], version:u32, width:u32, height:u32,
+    /// chunks_x:u32, chunks_y:u32, uuid\[16\]. Followed by zstd-compressed chunks
+    /// in row-major order.
+    #[allow(dead_code)]
+    pub fn write_binary(&self, path: &str, uuid: &[u8; 16]) -> io::Result<()> {
         let file = std::fs::File::create(path)?;
         let mut w = io::BufWriter::new(file);
 
-        // Header
+        // Header (uncompressed)
         w.write_all(BINARY_MAGIC)?;
         w.write_all(&BINARY_VERSION.to_le_bytes())?;
         w.write_all(&(self.width as u32).to_le_bytes())?;
@@ -546,23 +551,29 @@ impl TileMap {
         w.write_all(&(self.chunks_x as u32).to_le_bytes())?;
         let chunks_y = self.height.div_ceil(CHUNK_SIZE) as u32;
         w.write_all(&chunks_y.to_le_bytes())?;
-        w.write_all(&[0u8; 8])?; // reserved
-
-        // Chunks
-        for chunk in &self.chunks {
-            chunk.write_binary(&mut w)?;
-        }
-
+        w.write_all(uuid)?;
         w.flush()?;
+
+        // Chunks (zstd-compressed)
+        let inner = w
+            .into_inner()
+            .map_err(|e| io::Error::other(format!("flush error: {e}")))?;
+        let mut enc = zstd::Encoder::new(inner, 1)?;
+        for chunk in &self.chunks {
+            chunk.write_binary(&mut enc)?;
+        }
+        enc.finish()?;
+
         Ok(())
     }
 
     /// Read a tile map from a binary file.
-    pub fn read_binary(path: &str) -> io::Result<Self> {
+    /// Returns the TileMap and the generation UUID embedded in the header.
+    pub fn read_binary(path: &str) -> io::Result<(Self, [u8; 16])> {
         let file = std::fs::File::open(path)?;
         let mut r = io::BufReader::new(file);
 
-        // Header
+        // Header (uncompressed)
         let mut magic = [0u8; 4];
         r.read_exact(&mut magic)?;
         if &magic != BINARY_MAGIC {
@@ -578,7 +589,7 @@ impl TileMap {
         if version != BINARY_VERSION {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("unsupported version {version}"),
+                format!("unsupported version {version} (expected {BINARY_VERSION})"),
             ));
         }
 
@@ -591,21 +602,27 @@ impl TileMap {
         r.read_exact(&mut u32_buf)?;
         let chunks_y = u32::from_le_bytes(u32_buf) as usize;
 
-        let mut reserved = [0u8; 8];
-        r.read_exact(&mut reserved)?;
+        let mut uuid = [0u8; 16];
+        r.read_exact(&mut uuid)?;
+
+        // Chunks (zstd-compressed)
+        let mut dec = zstd::Decoder::new(r)?;
 
         let count = chunks_x * chunks_y;
         let mut chunks = Vec::with_capacity(count);
         for _ in 0..count {
-            chunks.push(Chunk::read_binary(&mut r)?);
+            chunks.push(Chunk::read_binary(&mut dec)?);
         }
 
-        Ok(Self {
-            chunks,
-            chunks_x,
-            width,
-            height,
-        })
+        Ok((
+            Self {
+                chunks,
+                chunks_x,
+                width,
+                height,
+            },
+            uuid,
+        ))
     }
 
     /// A* pathfinding from start to goal on the tile grid (8-directional, √2 diagonal cost).
@@ -1020,13 +1037,15 @@ mod tests {
         map.set_terrain(199, 149, Terrain::Bridge);
         map.set_building_id(50, 50, BuildingId(123));
 
+        let test_uuid: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let path = format!(
             "{}/test_tilemap.tiles",
             std::env::var("TMPDIR").unwrap_or("/tmp/claude/claude-1000".into())
         );
-        map.write_binary(&path).unwrap();
+        map.write_binary(&path, &test_uuid).unwrap();
 
-        let back = TileMap::read_binary(&path).unwrap();
+        let (back, back_uuid) = TileMap::read_binary(&path).unwrap();
+        assert_eq!(back_uuid, test_uuid);
         assert_eq!(back.width(), 200);
         assert_eq!(back.height(), 150);
         assert_eq!(back.chunks().count(), 12);

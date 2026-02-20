@@ -5,9 +5,10 @@
 source-data/
 
 # Generated map data (from preprocess binary)
-data/paris.ron
 data/paris.tiles
+data/paris.meta.bin
 data/paris.meta.ron
+data/paris.ron.zst
 data/.preprocess.stamp
 
 # IDE

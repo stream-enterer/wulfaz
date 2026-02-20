@@ -94,7 +94,7 @@ fn save_stamp(stamp: &PreprocessStamp, path: &Path) {
 }
 
 fn outputs_exist(output_dir: &str) -> bool {
-    ["paris.tiles", "paris.meta.ron", "paris.ron"]
+    ["paris.tiles", "paris.meta.bin", "paris.ron.zst"]
         .iter()
         .all(|name| Path::new(output_dir).join(name).exists())
 }
@@ -190,30 +190,38 @@ fn main() {
         println!("GeoPackage not found: {gpkg_path} (skipping)");
     }
 
-    // Save binary tiles + metadata RON
+    // Save binary tiles + bincode metadata + debug RON
     let tiles_path = format!("{output_dir}/paris.tiles");
-    let meta_path = format!("{output_dir}/paris.meta.ron");
-    println!("Saving binary tiles to {tiles_path}...");
+    let meta_bin_path = format!("{output_dir}/paris.meta.bin");
+    let meta_ron_path = format!("{output_dir}/paris.meta.ron");
+    println!("Saving binary tiles + bincode metadata...");
     loading_gis::save_paris_binary(
         &tiles,
         &buildings,
         &blocks,
         &quartier_names,
         &tiles_path,
-        &meta_path,
+        &meta_bin_path,
+        &meta_ron_path,
     );
 
     let tile_size = std::fs::metadata(&tiles_path).map(|m| m.len()).unwrap_or(0);
-    let meta_size = std::fs::metadata(&meta_path).map(|m| m.len()).unwrap_or(0);
+    let meta_size = std::fs::metadata(&meta_bin_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let meta_ron_size = std::fs::metadata(&meta_ron_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
     println!(
-        "Binary: {:.1}MB tiles + {:.1}MB metadata",
+        "Binary: {:.1}MB tiles + {:.1}MB meta (bincode) + {:.1}MB meta (RON debug)",
         tile_size as f64 / (1024.0 * 1024.0),
         meta_size as f64 / (1024.0 * 1024.0),
+        meta_ron_size as f64 / (1024.0 * 1024.0),
     );
 
-    // Save RON (debug/fallback)
-    let ron_path = format!("{output_dir}/paris.ron");
-    println!("Saving RON to {ron_path} (debug fallback)...");
+    // Save compressed RON (debug/fallback)
+    let ron_path = format!("{output_dir}/paris.ron.zst");
+    println!("Saving compressed RON to {ron_path} (debug fallback)...");
     let save_start = Instant::now();
     loading_gis::save_paris_ron(&data, &ron_path);
     let ron_size = std::fs::metadata(&ron_path).map(|m| m.len()).unwrap_or(0);

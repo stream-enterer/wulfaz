@@ -294,9 +294,10 @@ impl FontRenderer {
         );
     }
 
-    /// Map cell dimensions (width, height). Adjust here to change map grid.
+    /// Map cell dimensions (width, height). Square cells for uniform grid.
     pub fn map_cell(&self) -> (f32, f32) {
-        (self.metrics.cell_width, self.metrics.line_height)
+        let s = self.metrics.line_height;
+        (s, s)
     }
 
     /// Append text vertices for the map grid.

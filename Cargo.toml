@@ -17,6 +17,8 @@ kdl = "6.5.0"
 rand = "0.10.0"
 serde = { version = "1", features = ["derive"] }
 ron = "0.9"
+bincode = "1"
+zstd = "0.13"
 shapefile = { version = "0.7", features = ["yore"] }
 rusqlite = { version = "0.33", features = ["bundled"] }
 
