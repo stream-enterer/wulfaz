@@ -12,6 +12,12 @@ Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 3
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
 
+- **SCALE-A09** — Water/bridge polish. Needs: A08. **Remaining known limitations:**
+  - **Eastern coverage gap**: ~150-tile-wide hole in ALPAGE data (tiles ~4950-5100 X, ~3500-3900 Y). Road patch in the Seine near Pont d'Austerlitz. Fix: obtain APUR PLAN D'EAU shapefile, reproject from Lambert-93 (EPSG:2154) to WGS84 via ogr2ogr, feed through `rasterize_water_polygons()`.
+  - **Western bridge coverage**: ALPAGE water polygons don't extend to the far western viewport (Pont des Invalides, Pont de la Concorde, Pont Royal area). Same fix as above — supplemental data needed.
+  - **Canal Saint-Martin**: not in the ALPAGE Vasserot Hydrography layer. Separate historical data source needed.
+  - **Diagnostic reference coordinates**: `water_diag.rs` historical bridge table uses approximate lon/lat. Only 3/20 match within 100 tiles. Coordinates should be refined against actual ALPAGE polygon geometry.
+
 ## Phase B — Entities in One Neighborhood
 
 Goal: ~200 entities with full AI on the real map.
