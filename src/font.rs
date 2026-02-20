@@ -418,7 +418,6 @@ impl FontRenderer {
 struct HintingConfig {
     hinting: bool,
     hintstyle: i32, // 0=none, 1=slight, 2=medium, 3=full
-    font_path: String,
 }
 
 /// Query fontconfig for font path and hinting settings — matches kitty's fontconfig.c approach.
@@ -455,17 +454,10 @@ fn query_fontconfig(families: &[&str]) -> Option<HintingConfig> {
             n: c_int,
             b: *mut c_int,
         ) -> c_int;
-        fn FcPatternGetString(
-            p: *const std::ffi::c_void,
-            object: *const std::ffi::c_char,
-            n: c_int,
-            s: *mut *const u8,
-        ) -> c_int;
         fn FcPatternDestroy(p: *mut std::ffi::c_void);
     }
 
     let fc_family = CString::new("family").expect("CString family");
-    let fc_file = CString::new("file").expect("CString file");
     let fc_hinting = CString::new("hinting").expect("CString hinting");
     let fc_hintstyle = CString::new("hintstyle").expect("CString hintstyle");
 
@@ -491,16 +483,6 @@ fn query_fontconfig(families: &[&str]) -> Option<HintingConfig> {
                 continue;
             }
 
-            // Read font path
-            let mut path_ptr: *const u8 = std::ptr::null();
-            if FcPatternGetString(matched, fc_file.as_ptr(), 0, &mut path_ptr) != 0 {
-                FcPatternDestroy(matched);
-                continue;
-            }
-            let path = std::ffi::CStr::from_ptr(path_ptr as *const std::ffi::c_char)
-                .to_string_lossy()
-                .into_owned();
-
             // Read hinting (bool), default true
             let mut hinting_val: c_int = 1;
             FcPatternGetBool(matched, fc_hinting.as_ptr(), 0, &mut hinting_val);
@@ -514,7 +496,6 @@ fn query_fontconfig(families: &[&str]) -> Option<HintingConfig> {
             return Some(HintingConfig {
                 hinting: hinting_val != 0,
                 hintstyle: hintstyle_val,
-                font_path: path,
             });
         }
     }
@@ -535,30 +516,29 @@ fn hinting_load_flags(config: &HintingConfig) -> LoadFlag {
     }
 }
 
-/// Find system monospace font path and hinting config via fontconfig, with fallbacks.
+/// Bundled font path relative to the project root.
+const BUNDLED_FONT: &str = "fonts/NewHeterodoxMono/NewHeterodoxMono-Book.otf";
+
+/// Find font path and hinting config. Uses the bundled font with system hinting preferences.
 fn find_font_with_hinting() -> (String, LoadFlag) {
-    let families = &[
-        "Noto Sans Mono",
-        "monospace",
-        "DejaVu Sans Mono",
-        "Liberation Mono",
-    ];
+    // Query fontconfig for system hinting preferences (font path is ignored)
+    let hinting_flags = query_fontconfig(&["monospace"])
+        .map(|config| hinting_load_flags(&config))
+        .unwrap_or(LoadFlag::TARGET_LIGHT);
 
-    if let Some(config) = query_fontconfig(families) {
-        let flags = hinting_load_flags(&config);
-        return (config.font_path, flags);
-    }
-
-    // Fallback: no fontconfig, hardcoded paths, default hinting
-    for path in &[
-        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    ] {
-        if std::path::Path::new(path).exists() {
-            return (path.to_string(), LoadFlag::TARGET_LIGHT);
+    // Use bundled font relative to the executable's directory first, then working directory
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let path = dir.join(BUNDLED_FONT);
+        if path.exists() {
+            return (path.to_string_lossy().into_owned(), hinting_flags);
         }
     }
-    panic!("no monospace font found");
+    if std::path::Path::new(BUNDLED_FONT).exists() {
+        return (BUNDLED_FONT.to_string(), hinting_flags);
+    }
+    panic!("bundled font not found: {}", BUNDLED_FONT);
 }
 
 /// Rasterize glyphs for ASCII + Latin-1 Supplement + extras and pack into a glyph atlas.
