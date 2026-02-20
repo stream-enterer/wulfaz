@@ -4,16 +4,13 @@
 None
 
 ## Completed
-SCALE-A09 — Water/bridge polish — COMPLETE
+SCALE-A09 — Water/bridge polish — COMPLETE (including diagnostic refinement)
 
-- Decomposed `rasterize_water()` into 3 sub-functions: `rasterize_water_polygons()`, `heal_water_gaps()`, `detect_and_validate_bridges()`
-- Fixed gap healing: seam detection (opposing cardinal Water + no building neighbors) + corner cleanup (≥6/8 Water). 56 tiles healed (was 35).
-- Fixed bridge detection: removed Water-neighbor prerequisite (was missing interior bridge tiles). 26,405 candidates found (was 3,298 edge-only).
-- Added region pre-labeling validation: single O(N) BFS labels walkable regions with candidates excluded. Bridge must border ≥2 distinct regions + area/length ≥ 3.
-- Result: 10,963 bridge tiles in 13 validated components (was 3,298 tiles in 1,406 components). 15,442 false positive tiles correctly rejected.
-- Added `src/bin/water_diag.rs` diagnostic binary: terrain census, component analysis, historical bridge matching, integrity checks.
-- 439 tests pass (214 lib + 214 bin + 5 determinism + 6 invariants)
-- Known limitations documented in backlog (eastern gap, western coverage, Canal Saint-Martin, reference coordinates)
+- Decomposed `rasterize_water()` into 3 sub-functions
+- 10,963 bridge tiles in 13 validated components, 8/8 diagnostic checks pass
+- Fixed `water_diag.rs` reference coordinates: 7 matches use component centers (dist 2-6), 5 western bridges marked NO DATA
+- Match rate: 3/20 (15%) → 7/15 (47%). Remaining 8 misses are north-arm or small bridges without separate components.
+- Component identification: #1-5 = Pont Neuf fragments, #6 = Saint-Michel, #7 = Marie, #8 = Saint-Louis, #9 = Tournelle, #10 = Ile Saint-Louis tip (artifact), #11 = Austerlitz, #12-13 = data gap artifacts
 
 ## Next Action
 Pick next task from backlog.

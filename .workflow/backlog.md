@@ -13,10 +13,11 @@ That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
 
 - **SCALE-A09** — Water/bridge polish. Needs: A08. **Remaining known limitations:**
-  - **Eastern coverage gap**: ~150-tile-wide hole in ALPAGE data (tiles ~4950-5100 X, ~3500-3900 Y). Road patch in the Seine near Pont d'Austerlitz. Fix: obtain APUR PLAN D'EAU shapefile, reproject from Lambert-93 (EPSG:2154) to WGS84 via ogr2ogr, feed through `rasterize_water_polygons()`.
-  - **Western bridge coverage**: ALPAGE water polygons don't extend to the far western viewport (Pont des Invalides, Pont de la Concorde, Pont Royal area). Same fix as above — supplemental data needed.
+  - **Eastern coverage gap**: ~150-tile-wide hole in ALPAGE data (tiles ~4950-5100 X, ~3500-3900 Y). Road patch in the Seine near Pont d'Austerlitz. Components #12 (2777 tiles) and #13 (424 tiles) are data-gap artifacts, not real bridges. Fix: obtain APUR PLAN D'EAU shapefile, reproject from Lambert-93 (EPSG:2154) to WGS84 via ogr2ogr, feed through `rasterize_water_polygons()`.
+  - **Western bridge coverage**: ALPAGE water polygons don't extend west of ~lon 2.336 (5 bridges: Invalides, Concorde, Royal, Carrousel, Arts). Same fix — supplemental data needed.
+  - **North arm bridge gap**: No detected bridge components in the north arm between Pont Neuf and Ile Saint-Louis (Pont au Change, Notre-Dame, d'Arcole). Either ALPAGE data doesn't fully cover this arm or bridges merged with island road network. Needs investigation.
   - **Canal Saint-Martin**: not in the ALPAGE Vasserot Hydrography layer. Separate historical data source needed.
-  - **Diagnostic reference coordinates**: `water_diag.rs` historical bridge table uses approximate lon/lat. Only 3/20 match within 100 tiles. Coordinates should be refined against actual ALPAGE polygon geometry.
+  - **Diagnostic match rate**: 7/15 in-coverage bridges match (47%). 7 confident matches (dist 2-6 tiles). 8 misses are north-arm bridges or small bridges without separate components.
 
 ## Phase B — Entities in One Neighborhood
 
