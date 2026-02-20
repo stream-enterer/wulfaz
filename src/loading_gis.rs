@@ -1752,6 +1752,258 @@ fn fill_quartier_roads(tiles: &mut TileMap, grid_w: usize, grid_h: usize) {
     log::info!("  {} road tiles assigned quartier via BFS", assigned);
 }
 
+// --- Water rasterization (SCALE-A08) ---
+
+/// Rasterize water polygons from ALPAGE Vasserot Hydrography shapefile.
+/// Sets Road tiles to Water, heals 1-2 tile polygon boundary gaps,
+/// and detects bridges via perpendicular ray-cast.
+///
+/// Must be called AFTER `rasterize_paris()` — buildings/blocks/courtyards
+/// are already set and protected (only Road tiles are overwritten).
+#[allow(dead_code)]
+pub fn rasterize_water(water_shp: &str, tiles: &mut TileMap) {
+    let total_start = Instant::now();
+    let grid_w = tiles.width();
+    let grid_h = tiles.height();
+
+    // --- Step 1: Rasterize water polygons ---
+    let mut reader = shapefile::Reader::from_path(water_shp)
+        .unwrap_or_else(|e| panic!("Failed to open {water_shp}: {e}"));
+
+    let mut water_polygon_count = 0usize;
+    let mut water_tile_count = 0usize;
+    let mut out_of_viewport = 0usize;
+    let mut non_polygon_count = 0usize;
+
+    for result in reader.iter_shapes_and_records() {
+        let (shape, _record) = result.unwrap_or_else(|e| panic!("Error reading water record: {e}"));
+
+        let polygon = match shape {
+            shapefile::Shape::Polygon(p) => p,
+            _ => {
+                non_polygon_count += 1;
+                continue;
+            }
+        };
+
+        let (outer, inners) = extract_rings(&polygon);
+        if outer.is_empty() || !bbox_overlaps(&outer) {
+            out_of_viewport += 1;
+            continue;
+        }
+
+        let ring = polygon_to_meters(&outer);
+        let inner_m: Vec<Vec<(f64, f64)>> = inners.iter().map(|r| polygon_to_meters(r)).collect();
+        let inner_r = inner_refs(&inner_m);
+        let cells = scanline_fill_multi(&[&ring], &inner_r, grid_w, grid_h);
+        if cells.is_empty() {
+            continue;
+        }
+
+        water_polygon_count += 1;
+        for &(cx, cy) in &cells {
+            let ux = cx as usize;
+            let uy = cy as usize;
+            // Only overwrite Road tiles — preserve buildings, blocks, courtyards, gardens, fixtures.
+            if tiles.get_terrain(ux, uy) == Some(Terrain::Road) {
+                tiles.set_terrain(ux, uy, Terrain::Water);
+                tiles.set_quartier_id(ux, uy, 0); // water doesn't belong to a quartier
+                water_tile_count += 1;
+            }
+        }
+    }
+
+    println!(
+        "  {} water polygons, {} water tiles in {:.1}s (skipped: {} out-of-viewport, {} non-polygon)",
+        water_polygon_count,
+        water_tile_count,
+        total_start.elapsed().as_secs_f64(),
+        out_of_viewport,
+        non_polygon_count,
+    );
+
+    // --- Step 2: Gap healing ---
+    // Close 1-2 tile polygon boundary artifacts.
+    // Road tile with >= 6 of 8 neighbors being Water → set to Water.
+    // Single pass only — iterating would erode bridges.
+    let heal_start = Instant::now();
+    let mut gap_tiles: Vec<(usize, usize)> = Vec::new();
+
+    for y in 1..grid_h.saturating_sub(1) {
+        for x in 1..grid_w.saturating_sub(1) {
+            if tiles.get_terrain(x, y) != Some(Terrain::Road) {
+                continue;
+            }
+            let mut water_neighbors = 0u8;
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if tiles.get_terrain(nx, ny) == Some(Terrain::Water) {
+                        water_neighbors += 1;
+                    }
+                }
+            }
+            if water_neighbors >= 6 {
+                gap_tiles.push((x, y));
+            }
+        }
+    }
+
+    let gap_count = gap_tiles.len();
+    for (x, y) in gap_tiles {
+        tiles.set_terrain(x, y, Terrain::Water);
+        tiles.set_quartier_id(x, y, 0);
+    }
+    println!(
+        "  {} gap tiles healed in {:.1}s",
+        gap_count,
+        heal_start.elapsed().as_secs_f64(),
+    );
+
+    // --- Step 3: Bridge detection ---
+    // For each Road tile with at least one cardinal Water neighbor,
+    // cast rays along both cardinal axes. If both rays along a single axis
+    // reach Water (traversing only Road tiles, max 30 tiles), mark as Bridge.
+    let bridge_start = Instant::now();
+    let mut bridge_tiles: Vec<(usize, usize)> = Vec::new();
+    let max_ray = 30i32;
+
+    for y in 0..grid_h {
+        for x in 0..grid_w {
+            if tiles.get_terrain(x, y) != Some(Terrain::Road) {
+                continue;
+            }
+
+            // Check if at least one cardinal neighbor is Water.
+            let has_water_neighbor =
+                [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                    .iter()
+                    .any(|&(dx, dy)| {
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        if nx < 0 || ny < 0 || nx >= grid_w as i32 || ny >= grid_h as i32 {
+                            return false;
+                        }
+                        tiles.get_terrain(nx as usize, ny as usize) == Some(Terrain::Water)
+                    });
+            if !has_water_neighbor {
+                continue;
+            }
+
+            // Cast rays along each axis.
+            let mut is_bridge = false;
+            for &(dx, dy) in &[(1i32, 0i32), (0i32, 1i32)] {
+                let mut pos_hit = false;
+                let mut neg_hit = false;
+
+                // Positive direction
+                for step in 1..=max_ray {
+                    let nx = x as i32 + dx * step;
+                    let ny = y as i32 + dy * step;
+                    if nx < 0 || ny < 0 || nx >= grid_w as i32 || ny >= grid_h as i32 {
+                        break;
+                    }
+                    let t = tiles.get_terrain(nx as usize, ny as usize);
+                    if t == Some(Terrain::Water) {
+                        pos_hit = true;
+                        break;
+                    }
+                    if t != Some(Terrain::Road) {
+                        break; // hit Wall/Floor/Courtyard/etc — stop
+                    }
+                }
+
+                // Negative direction
+                for step in 1..=max_ray {
+                    let nx = x as i32 - dx * step;
+                    let ny = y as i32 - dy * step;
+                    if nx < 0 || ny < 0 || nx >= grid_w as i32 || ny >= grid_h as i32 {
+                        break;
+                    }
+                    let t = tiles.get_terrain(nx as usize, ny as usize);
+                    if t == Some(Terrain::Water) {
+                        neg_hit = true;
+                        break;
+                    }
+                    if t != Some(Terrain::Road) {
+                        break;
+                    }
+                }
+
+                if pos_hit && neg_hit {
+                    is_bridge = true;
+                    break;
+                }
+            }
+
+            if is_bridge {
+                bridge_tiles.push((x, y));
+            }
+        }
+    }
+
+    let bridge_count = bridge_tiles.len();
+    for &(x, y) in &bridge_tiles {
+        tiles.set_terrain(x, y, Terrain::Bridge);
+    }
+
+    // Count bridge crossings (connected components of Bridge tiles).
+    let crossings = count_bridge_crossings(tiles, &bridge_tiles, grid_w, grid_h);
+
+    println!(
+        "  {} bridge tiles detected ({} crossings) in {:.1}s",
+        bridge_count,
+        crossings,
+        bridge_start.elapsed().as_secs_f64(),
+    );
+}
+
+/// Count connected components of Bridge tiles via flood fill.
+fn count_bridge_crossings(
+    _tiles: &TileMap,
+    bridge_tiles: &[(usize, usize)],
+    grid_w: usize,
+    grid_h: usize,
+) -> usize {
+    let mut visited: HashSet<(usize, usize)> = HashSet::new();
+    let bridge_set: HashSet<(usize, usize)> = bridge_tiles.iter().copied().collect();
+    let mut components = 0usize;
+
+    for &(x, y) in bridge_tiles {
+        if visited.contains(&(x, y)) {
+            continue;
+        }
+        components += 1;
+
+        // BFS flood fill
+        let mut queue = VecDeque::new();
+        queue.push_back((x, y));
+        visited.insert((x, y));
+
+        while let Some((cx, cy)) = queue.pop_front() {
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = cx as i32 + dx;
+                let ny = cy as i32 + dy;
+                if nx < 0 || ny < 0 || nx >= grid_w as i32 || ny >= grid_h as i32 {
+                    continue;
+                }
+                let nux = nx as usize;
+                let nuy = ny as usize;
+                if bridge_set.contains(&(nux, nuy)) && !visited.contains(&(nux, nuy)) {
+                    visited.insert((nux, nuy));
+                    queue.push_back((nux, nuy));
+                }
+            }
+        }
+    }
+
+    components
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

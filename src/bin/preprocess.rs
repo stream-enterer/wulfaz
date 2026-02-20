@@ -51,7 +51,12 @@ fn collect_input_fingerprints(source_dir: &str) -> Vec<FileFingerprint> {
     }
 
     // Shapefile sidecar extensions
-    let prefixes = ["BATI", "Vasserot_Ilots", "Num_Voies_Vasserot"];
+    let prefixes = [
+        "BATI",
+        "Vasserot_Ilots",
+        "Num_Voies_Vasserot",
+        "Vasserot_Hydrographie_WGS84",
+    ];
     let extensions = ["shp", "shx", "dbf", "prj", "cpg"];
 
     for prefix in &prefixes {
@@ -155,8 +160,17 @@ fn main() {
     // Rasterize: polygons → tile arrays + registries
     println!("Rasterizing...");
     let raster_start = Instant::now();
-    let (tiles, mut buildings, blocks, quartier_names) = loading_gis::rasterize_paris(&data);
+    let (mut tiles, mut buildings, blocks, quartier_names) = loading_gis::rasterize_paris(&data);
     println!("Rasterized in {:.1}s", raster_start.elapsed().as_secs_f64());
+
+    // A08: Rasterize water (Seine, canals) — must run AFTER rasterize_paris()
+    let water_shp = format!("{source_dir}/Vasserot_Hydrographie_WGS84.shp");
+    if std::path::Path::new(&water_shp).exists() {
+        println!("Rasterizing water...");
+        loading_gis::rasterize_water(&water_shp, &mut tiles);
+    } else {
+        println!("Water shapefile not found: {water_shp} (skipping)");
+    }
 
     // A07: Load addresses + occupants
     let addresses_shp = format!("{source_dir}/Num_Voies_Vasserot.shp");

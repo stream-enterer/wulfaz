@@ -578,10 +578,8 @@ fn main() {
 
     loading::load_utility_config(&mut world, "data/utility.ron");
 
-    let start_camera = Camera {
-        x: world.tiles.width() as i32 / 2,
-        y: world.tiles.height() as i32 / 2,
-    };
+    // Start camera overlooking the Seine near Ile de la Cité / Notre-Dame
+    let start_camera = Camera { x: 3750, y: 3450 };
 
     let event_loop = EventLoop::new().expect("create event loop");
     let mut app = App {

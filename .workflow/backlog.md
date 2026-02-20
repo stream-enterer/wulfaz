@@ -11,15 +11,6 @@ Goal: See Paris on screen. No entities.
 Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 30m padding).
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
-- **SCALE-A08** — Seine + bridge placement. Needs: A03.
-  - **Preprocessor** (extend `preprocess.rs`): runs after block/building rasterization, before writing binary tiles.
-  - The Seine is NOT in any GIS dataset. Hardcoded polygon vertices in `loading_gis.rs`.
-  - River band: approximately lat 48.856-48.860, tile rows ~2600-3050 (y-axis, from top). Not uniform width.
-  - Island exclusions: Ile de la Cite (quartier "Cite") and Ile Saint-Louis (quartier "Ile Saint-Louis"). Only overwrite tiles that are currently Road (tiles with building_id or block_id are already Courtyard or building from A03).
-  - Method: define river as a polygon (~20-30 vertices tracing both banks), rasterize with `scanline_fill`, mark resulting tiles as Water unless they already have building_id or block_id.
-  - Bridges (hardcoded, 1830s-era): Pont Royal, Pont du Carrousel, Pont des Arts, Pont Neuf, Pont au Change, Pont Notre-Dame, Pont de l'Arcole, Pont Saint-Louis, Pont Marie, Pont de la Tournelle. Each bridge: two endpoints (tile coordinates), fill the rectangle between them with Bridge tiles (~5-8 wide).
-  - Set `quartier_id` on water tiles to 0 (unassigned). Bridge tiles get quartier from the nearest bank.
-  - Result baked into `paris.tiles` binary. Game loads Water/Bridge terrain the same as any other tile.
 
 ## Phase B — Entities in One Neighborhood
 
@@ -112,12 +103,6 @@ Developable on test map or integrated after Phase B.
 - **SIM-010** — Building (Phase 4). Requires inventory.
 - **SIM-011** — Crafting (Phase 4). Requires recipes.
 - **SIM-012** — Fluid flow (Phase 1). Cellular automaton. Needs: A08 (Seine placement).
-
-## Deferred Rasterization Simplifications
-
-Design decisions needed before implementation.
-
-- **S06** — BATI=3 minor features (199 polygons: fountains, wells, kiosks). Currently skipped and logged. No terrain type exists for them. Decide: new terrain variant? Point-of-interest overlay? Ignore permanently?
 
 ## Pending (threshold not yet met)
 
