@@ -399,18 +399,46 @@ fn normalize_to_atlas(s: &str) -> String {
             '\u{016F}' => out.push('u'), // ů → u
             '\u{017E}' => out.push('z'), // ž → z
             '\u{017F}' => out.push('s'), // ſ (long s) → s
+            // Latin-1 Supplement not in font
+            '\u{00DF}' => out.push_str("ss"), // ß → ss
+            '\u{00E6}' => out.push_str("ae"), // æ → ae
+            '\u{00C6}' => out.push_str("AE"), // Æ → AE
+            // Latin Extended-A: ligatures and OCR misreads
+            '\u{010F}' => out.push('d'),      // ď → d
+            '\u{0142}' => out.push('l'),      // ł → l
+            '\u{0152}' => out.push_str("OE"), // Œ → OE
+            '\u{0153}' => out.push_str("oe"), // œ → oe
+            // Latin Extended-B
+            '\u{0192}' => out.push('f'), // ƒ → f (OCR misread of f)
             // Cyrillic lookalikes: OCR misreads
             '\u{0410}' => out.push('A'), // А → A
             '\u{0411}' => out.push('B'), // Б → B
             '\u{0412}' => out.push('B'), // В → B
+            '\u{0418}' => out.push('N'), // И → N
             '\u{0421}' => out.push('C'), // С → C
             '\u{0430}' => out.push('a'), // а → a
             '\u{0432}' => out.push('B'), // в → B (uppercase in OCR context)
+            '\u{0433}' => out.push('r'), // г → r
+            '\u{0434}' => out.push('d'), // д → d
             '\u{0435}' => out.push('e'), // е → e
+            '\u{0437}' => out.push('z'), // з → z
+            '\u{0438}' => out.push('u'), // и → u
+            '\u{043B}' => out.push('n'), // л → n
+            '\u{043C}' => out.push('m'), // м → m
+            '\u{043D}' => out.push('n'), // н → n
             '\u{043E}' => out.push('o'), // о → o
+            '\u{043F}' => out.push('n'), // п → n
+            '\u{0440}' => out.push('p'), // р → p
+            '\u{0441}' => out.push('c'), // с → c
             '\u{0442}' => out.push('T'), // т → T
+            '\u{0443}' => out.push('y'), // у → y
+            '\u{0448}' => out.push('w'), // ш → w
+            '\u{044A}' => {}             // ъ → drop (hard sign)
+            '\u{044F}' => out.push('R'), // я → R
+            '\u{0463}' => out.push('e'), // ѣ → e (yat)
             // Misc OCR artifacts
             '\u{20AC}' => out.push('E'), // € → E (OCR misread)
+            '\u{261E}' => out.push('>'), // ☞ → > (directory pointer)
             '\u{FFFD}' => out.push('?'), // replacement char
             _ => out.push(ch),
         }
@@ -3010,6 +3038,35 @@ mod tests {
     fn test_normalize_to_atlas_cyrillic_lookalikes() {
         assert_eq!(normalize_to_atlas("Schultz (\u{0421}.)"), "Schultz (C.)");
         assert_eq!(normalize_to_atlas("J.-\u{0412}.-\u{0410}."), "J.-B.-A.");
+        // Additional Cyrillic from SoDUCo OCR
+        assert_eq!(normalize_to_atlas("Robert Cy\u{0433}."), "Robert Cyr.");
+        assert_eq!(normalize_to_atlas("Cha\u{0440}el"), "Chapel");
+        assert_eq!(normalize_to_atlas("Pro\u{0440}."), "Prop.");
+        assert_eq!(normalize_to_atlas("\u{0441}heTues"), "cheTues");
+    }
+
+    #[test]
+    fn test_normalize_to_atlas_oe_ligature() {
+        assert_eq!(normalize_to_atlas("b\u{0153}uf"), "boeuf");
+        assert_eq!(normalize_to_atlas("s\u{0153}urs"), "soeurs");
+        assert_eq!(normalize_to_atlas("\u{0153}ufs"), "oeufs");
+        assert_eq!(normalize_to_atlas("Sch\u{0153}newerk"), "Schoenewerk");
+        assert_eq!(normalize_to_atlas("\u{0152}uvre"), "OEuvre");
+    }
+
+    #[test]
+    fn test_normalize_to_atlas_latin1_not_in_font() {
+        assert_eq!(normalize_to_atlas("Sch\u{00E6}ffer"), "Schaeffer");
+        assert_eq!(normalize_to_atlas("\u{00C6}sculape"), "AEsculape");
+        assert_eq!(normalize_to_atlas("Stra\u{00DF}e"), "Strasse");
+    }
+
+    #[test]
+    fn test_normalize_to_atlas_misc_ocr() {
+        assert_eq!(normalize_to_atlas("\u{0192}.fleurs"), "f.fleurs");
+        assert_eq!(normalize_to_atlas("C\u{0142}usel"), "Clusel");
+        assert_eq!(normalize_to_atlas("\u{010F}'or"), "d'or");
+        assert_eq!(normalize_to_atlas("P \u{261E} A"), "P > A");
     }
 
     #[test]

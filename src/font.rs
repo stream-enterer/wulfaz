@@ -603,13 +603,7 @@ fn rasterize_glyphs(
     // - ASCII printable: U+0020..U+007E
     // - Latin-1 Supplement: U+00A0..U+00FF (é, è, ê, ë, à, â, ç, ô, ù, û, ü, etc.)
     // - Latin Extended-A subset: U+0152..U+0153 (Œ, œ)
-    // - General Punctuation: U+2013..U+2014 (en-dash, em-dash)
-    let codepoint_ranges: &[(u32, u32)] = &[
-        (0x0020, 0x007E),
-        (0x00A0, 0x00FF),
-        (0x0152, 0x0153),
-        (0x2013, 0x2014),
-    ];
+    let codepoint_ranges: &[(u32, u32)] = &[(0x0020, 0x007E), (0x00A0, 0x00FF), (0x0152, 0x0153)];
 
     for &(range_start, range_end) in codepoint_ranges {
         for cp in range_start..=range_end {
