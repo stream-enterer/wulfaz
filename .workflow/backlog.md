@@ -180,14 +180,6 @@ All three tasks have zero dependencies on each other. Build in parallel.
 
 **UI-DEMO after Tier 1:** Fixed-position test panel containing 3 colored labels: gold "Header", white "Body text", red "Warning". Panel background from P03, text colors from P01, layout from W01. Toggled with F11 or `--ui-demo` flag.
 
-- **UI-P01 ||** — Per-vertex color attribute. Needs: nothing.
-  - Current `text.wgsl` uses a single `fg_color` uniform — every glyph in the frame is the same color. CK3-style UI needs gold headers, white body, red warnings, grey disabled text in one draw call.
-  - Add `color: [f32; 4]` to `TextVertex` (16 bytes -> 32 bytes per vertex).
-  - Modify `text.wgsl`: read per-vertex color in `vs_main`, pass to `fs_main`, replace uniform `fg_color` with interpolated vertex color in the alpha compositing math.
-  - Modify `build_vertices()` and `prepare_text_shaped()` to accept and propagate a color parameter.
-  - Existing `begin_frame()` fg_color becomes the default; per-vertex color overrides when set.
-  - Bind group layout, sampler, atlas — unchanged. Pipeline vertex layout changes (new attribute at location 2).
-
 - **UI-P03 ||** — Panel renderer. Needs: nothing (separate quad pipeline, not text pipeline).
   - Initial impl: shader-generated borders per DD-2 (gold stroke + inner shadow in fragment shader, no external textures). Upgrade path to 9-slice with texture when art assets exist.
   - WGSL fragment shader: compute signed distance from fragment position to panel rect edges. Border = fragments within `border_width` of edge (gold color). Inner shadow = fragments within `shadow_width` inside border (darkened background, linear falloff). Center = base background color. All branching on distance, no texture fetch needed.

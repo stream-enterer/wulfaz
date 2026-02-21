@@ -14,11 +14,13 @@ struct Uniforms {
 struct VertexInput {
     @location(0) position: vec2<f32>,
     @location(1) uv: vec2<f32>,
+    @location(2) color: vec4<f32>,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
+    @location(1) color: vec4<f32>,
 }
 
 @vertex
@@ -26,6 +28,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = uniforms.projection * vec4<f32>(in.position, 0.0, 1.0);
     out.uv = in.uv;
+    out.color = in.color;
     return out;
 }
 
@@ -55,8 +58,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample glyph alpha from R8Unorm atlas
     let a = textureSample(atlas_tex, atlas_sampler, in.uv).r;
 
-    // Convert sRGB uniforms to linear
-    let fg_linear = srgb_to_linear3(uniforms.fg_color.rgb);
+    // Convert per-vertex sRGB color to linear
+    let fg_linear = srgb_to_linear3(in.color.rgb);
     let bg_linear = srgb_to_linear3(uniforms.bg_color.rgb);
 
     // BT.709 luminance for contrast adjustment

@@ -12,6 +12,7 @@ use freetype::face::LoadFlag;
 pub struct TextVertex {
     pub position: [f32; 2],
     pub uv: [f32; 2],
+    pub color: [f32; 4],
 }
 
 #[repr(C)]
@@ -42,6 +43,13 @@ pub struct FontMetrics {
     pub ascender: f32,
     pub line_height: f32,
     pub cell_width: f32,
+}
+
+/// Grid cell layout for map text rendering.
+struct GridLayout {
+    h_advance: f32,
+    h_offset: f32,
+    v_advance: f32,
 }
 
 struct PendingGlyphUpload {
@@ -278,6 +286,11 @@ impl FontRenderer {
                             shader_location: 1,
                             format: wgpu::VertexFormat::Float32x2,
                         },
+                        wgpu::VertexAttribute {
+                            offset: 16,
+                            shader_location: 2,
+                            format: wgpu::VertexFormat::Float32x4,
+                        },
                     ],
                 }],
                 compilation_options: Default::default(),
@@ -368,8 +381,8 @@ impl FontRenderer {
     }
 
     /// Append text vertices using cosmic-text shaping (for status/event log).
-    pub fn prepare_text(&mut self, text: &str, x: f32, y: f32) {
-        self.prepare_text_shaped(text, x, y);
+    pub fn prepare_text(&mut self, text: &str, x: f32, y: f32, color: [f32; 4]) {
+        self.prepare_text_shaped(text, x, y, color);
     }
 
     /// Map cell dimensions (width, height). Square cells for uniform grid.
@@ -379,10 +392,14 @@ impl FontRenderer {
     }
 
     /// Append text vertices for the map grid.
-    pub fn prepare_map(&mut self, text: &str, x: f32, y: f32) {
+    pub fn prepare_map(&mut self, text: &str, x: f32, y: f32, color: [f32; 4]) {
         let (w, h) = self.map_cell();
-        let h_offset = ((w - self.metrics.cell_width) / 2.0).floor();
-        self.build_vertices(text, x, y, w, h_offset, h);
+        let grid = GridLayout {
+            h_advance: w,
+            h_offset: ((w - self.metrics.cell_width) / 2.0).floor(),
+            v_advance: h,
+        };
+        self.build_vertices(text, x, y, &grid, color);
     }
 
     /// Upload accumulated vertices to the GPU. Returns vertex count for render().
@@ -541,7 +558,7 @@ impl FontRenderer {
     }
 
     /// Layout and shape text using cosmic-text, then build vertices.
-    fn prepare_text_shaped(&mut self, text: &str, x: f32, y: f32) {
+    fn prepare_text_shaped(&mut self, text: &str, x: f32, y: f32, color: [f32; 4]) {
         let cosmic_metrics = CosmicMetrics::new(self.font_size_px, self.metrics.line_height);
         let mut buffer = Buffer::new(&mut self.font_system, cosmic_metrics);
         buffer.set_size(&mut self.font_system, None, None);
@@ -598,44 +615,39 @@ impl FontRenderer {
             self.frame_vertices.push(TextVertex {
                 position: [x0, y0],
                 uv: [info.u0, info.v0],
+                color,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x1, y0],
                 uv: [info.u1, info.v0],
+                color,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x0, y1],
                 uv: [info.u0, info.v1],
+                color,
             });
 
             self.frame_vertices.push(TextVertex {
                 position: [x1, y0],
                 uv: [info.u1, info.v0],
+                color,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x1, y1],
                 uv: [info.u1, info.v1],
+                color,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x0, y1],
                 uv: [info.u0, info.v1],
+                color,
             });
         }
     }
 
     /// Build vertex quads for text and append to frame_vertices.
-    /// h_advance: horizontal distance between cell origins.
-    /// h_offset: extra horizontal offset for glyph within cell (centering).
-    /// v_advance: vertical distance between lines.
-    fn build_vertices(
-        &mut self,
-        text: &str,
-        x: f32,
-        y: f32,
-        h_advance: f32,
-        h_offset: f32,
-        v_advance: f32,
-    ) {
+    fn build_vertices(&mut self, text: &str, x: f32, y: f32, grid: &GridLayout, color: [f32; 4]) {
         let mut pen_x = x.floor();
         let mut pen_y = (y + self.metrics.ascender).floor();
         let question = self.glyphs.get(&(b'?' as u32)).copied();
@@ -643,7 +655,7 @@ impl FontRenderer {
         for ch in text.chars() {
             if ch == '\n' {
                 pen_x = x.floor();
-                pen_y += v_advance;
+                pen_y += grid.v_advance;
                 continue;
             }
             let cp = ch as u32;
@@ -652,18 +664,18 @@ impl FontRenderer {
                 None => match question {
                     Some(g) => g,
                     None => {
-                        pen_x += h_advance;
+                        pen_x += grid.h_advance;
                         continue;
                     }
                 },
             };
 
             if glyph.width == 0 || glyph.height == 0 {
-                pen_x += h_advance;
+                pen_x += grid.h_advance;
                 continue;
             }
 
-            let x0 = (pen_x + h_offset + glyph.bearing_x as f32).floor();
+            let x0 = (pen_x + grid.h_offset + glyph.bearing_x as f32).floor();
             let y0 = (pen_y - glyph.bearing_y as f32).floor();
             let x1 = x0 + glyph.width as f32;
             let y1 = y0 + glyph.height as f32;
@@ -671,30 +683,36 @@ impl FontRenderer {
             self.frame_vertices.push(TextVertex {
                 position: [x0, y0],
                 uv: [glyph.u0, glyph.v0],
+                color,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x1, y0],
                 uv: [glyph.u1, glyph.v0],
+                color,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x0, y1],
                 uv: [glyph.u0, glyph.v1],
+                color,
             });
 
             self.frame_vertices.push(TextVertex {
                 position: [x1, y0],
                 uv: [glyph.u1, glyph.v0],
+                color,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x1, y1],
                 uv: [glyph.u1, glyph.v1],
+                color,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x0, y1],
                 uv: [glyph.u0, glyph.v1],
+                color,
             });
 
-            pen_x += h_advance;
+            pen_x += grid.h_advance;
         }
     }
 

@@ -4,25 +4,21 @@
 None
 
 ## Completed
-Tier 1 preprocessor optimization — COMPLETE
+UI-P01 — Per-vertex color attribute — COMPLETE
 
-- Added zstd compression to all 3 data files (paris.tiles, paris.meta.bin, paris.ron.zst)
-- Switched metadata from RON to bincode+zstd (new WULM header format)
-- Added generation UUID (16 bytes) to both tiles (WULF v2) and metadata (WULM v1)
-- UUID mismatch at load time produces clear panic with instructions
-- Disk: 360MB -> 16MB (tiles 4.0MB + meta 3.9MB + ron.zst 7.7MB) + 76MB debug RON
-- paris.meta.ron kept as debug artifact (uncompressed, human-readable)
-- Old paris.ron deleted, replaced by paris.ron.zst
-- Zero warnings, 439 tests pass, water_diag 8/8 checks pass
+- Added `color: [f32; 4]` to `TextVertex` (16 → 32 bytes/vertex)
+- Pipeline vertex layout: new attribute at location 2 (Float32x4, offset 16)
+- `text.wgsl`: per-vertex color passed through vs_main → fs_main, replaces uniform fg_color in compositing
+- `build_vertices()` and `prepare_text_shaped()` accept color parameter
+- `prepare_text()` and `prepare_map()` forward color to internals
+- All callers in main.rs pass `[FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0]`
+- Uniform fg_color remains in buffer (no bind group change) but unused by shader
+- Zero warnings, builds clean
 
 ## Files Modified
-- Cargo.toml (bincode, zstd deps)
-- src/tile_map.rs (v2 format, UUID, zstd chunks)
-- src/loading_gis.rs (bincode meta, UUID gen/verify, zstd RON)
-- src/bin/preprocess.rs (7-arg save, new file paths)
-- src/bin/water_diag.rs (destructure read_binary tuple)
-- src/main.rs (paris.meta.bin, paris.ron.zst paths)
-- .gitignore (updated data file names)
+- src/font.rs (TextVertex, pipeline layout, build_vertices, prepare_text_shaped, prepare_text, prepare_map)
+- src/text.wgsl (VertexInput, VertexOutput, vs_main, fs_main)
+- src/main.rs (callers pass fg4 color)
 
 ## Next Action
 Pick next task from backlog.

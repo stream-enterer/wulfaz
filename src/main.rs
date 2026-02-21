@@ -535,12 +535,13 @@ impl ApplicationHandler for App {
                             let events = render::render_recent_events(&self.world, event_lines);
 
                             font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
-                            font.prepare_text(&status, padding, padding);
-                            font.prepare_map(&map_text, padding, map_y);
+                            let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
+                            font.prepare_text(&status, padding, padding, fg4);
+                            font.prepare_map(&map_text, padding, map_y, fg4);
                             let hover_y = map_y + viewport_rows as f32 * mch;
-                            font.prepare_text(&hover_text, padding, hover_y);
+                            font.prepare_text(&hover_text, padding, hover_y, fg4);
                             let event_y = screen_h as f32 - event_h - padding;
-                            font.prepare_text(&events, padding, event_y);
+                            font.prepare_text(&events, padding, event_y, fg4);
 
                             let vertex_count = font.flush(&gpu.queue, &gpu.device);
                             gpu.render(font, vertex_count);
