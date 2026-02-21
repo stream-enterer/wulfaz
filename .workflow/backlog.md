@@ -128,7 +128,7 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 
 | Tier | Tasks | Milestone |
 |------|-------|-----------|
-| 1 — Foundation | 3 (all parallel) | Colored text + panel backgrounds + widget tree |
+| 1 — Foundation | 1 remaining (W01) | Colored text + panel backgrounds + widget tree |
 | 2 — Styled Panels | 3 | Multi-font + theme + mouse input |
 | 3 — Full Widget Set | 3 | Rich text + scroll list + tooltips |
 | 4 — Game Integration | 5 (I01a-d + I02) | Real game UI replaces string rendering |
@@ -170,24 +170,15 @@ Resolve before the tier that needs them. Recommended defaults marked with >>.
 
 ### Tier 1 — Foundation ||
 
-All three tasks have zero dependencies on each other. Build in parallel.
+UI-P01 (per-vertex color) and UI-P03 (panel renderer) are complete. One task remaining.
 
 **Available after this tier:**
-- Per-glyph color in the text pipeline (gold, white, red, grey in one draw call)
-- Panel quad renderer (rectangles with shader-generated borders)
+- Per-glyph color in the text pipeline (gold, white, red, grey in one draw call) — DONE (UI-P01)
+- Panel quad renderer (rectangles with shader-generated borders) — DONE (UI-P03)
 - Widget tree describing UI as data, emitting `DrawList` commands
 - Unit tests proving layout math works (no GPU needed for widget tree tests)
 
 **UI-DEMO after Tier 1:** Fixed-position test panel containing 3 colored labels: gold "Header", white "Body text", red "Warning". Panel background from P03, text colors from P01, layout from W01. Toggled with F11 or `--ui-demo` flag.
-
-- **UI-P03 ||** — Panel renderer. Needs: nothing (separate quad pipeline, not text pipeline).
-  - Initial impl: shader-generated borders per DD-2 (gold stroke + inner shadow in fragment shader, no external textures). Upgrade path to 9-slice with texture when art assets exist.
-  - WGSL fragment shader: compute signed distance from fragment position to panel rect edges. Border = fragments within `border_width` of edge (gold color). Inner shadow = fragments within `shadow_width` inside border (darkened background, linear falloff). Center = base background color. All branching on distance, no texture fetch needed.
-  - Uniforms: panel rect (x, y, w, h), border_width, border_color, bg_color, shadow_width. One quad per panel, shader does the rest.
-  - Rust-side: `PanelRenderer` struct with its own pipeline, vertex buffer, bind group. Separate from `FontRenderer` — panels are colored quads, not glyph quads.
-  - Input: panel rect (screen position + size), colors, border width. Output: one quad per panel with shader-generated borders.
-  - Render order: panels draw BEFORE text (text renders on top of panel backgrounds).
-  - Future 9-slice upgrade: panel textures loaded from PNG into a separate `Rgba8Unorm` texture (not the R8Unorm glyph atlas). Sampler can use linear filtering. 9 quads (4 corners, 4 edges, 1 center) with correct UVs.
 
 - **UI-W01 ||** — Widget tree core + layout model. Needs: nothing. Decisions resolved by DD-1.
   - Retained-mode widget hierarchy. Base types: `Panel`, `Label`, `Button`.

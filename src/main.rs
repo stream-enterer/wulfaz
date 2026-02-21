@@ -12,6 +12,7 @@ mod events;
 mod font;
 mod loading;
 mod loading_gis;
+mod panel;
 mod registry;
 mod render;
 mod rng;
@@ -122,7 +123,13 @@ impl GpuState {
         self.config.format
     }
 
-    fn render(&self, font: &font::FontRenderer, vertex_count: u32) {
+    fn render(
+        &self,
+        panel: &panel::PanelRenderer,
+        panel_vertex_count: u32,
+        font: &font::FontRenderer,
+        text_vertex_count: u32,
+    ) {
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
             Err(wgpu::SurfaceError::Lost) => {
@@ -169,7 +176,8 @@ impl GpuState {
                 ..Default::default()
             });
 
-            font.render(&mut render_pass, vertex_count);
+            panel.render(&mut render_pass, panel_vertex_count);
+            font.render(&mut render_pass, text_vertex_count);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -211,6 +219,7 @@ fn run_one_tick(world: &mut World) {
 struct App {
     gpu: Option<GpuState>,
     font: Option<font::FontRenderer>,
+    panel: Option<panel::PanelRenderer>,
     world: World,
     camera: Camera,
     last_frame_time: Instant,
@@ -246,8 +255,11 @@ impl ApplicationHandler for App {
             window.scale_factor(),
         );
 
+        let panel_renderer = panel::PanelRenderer::new(&gpu.device, gpu.surface_format());
+
         self.gpu = Some(gpu);
         self.font = Some(font_renderer);
+        self.panel = Some(panel_renderer);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -330,6 +342,8 @@ impl ApplicationHandler for App {
                             9.0,
                             scale_factor,
                         ));
+                        self.panel =
+                            Some(panel::PanelRenderer::new(&gpu.device, gpu.surface_format()));
                     }
                     // Shift+left-click: toggle player control on a creature
                     WindowEvent::MouseInput {
@@ -464,7 +478,8 @@ impl ApplicationHandler for App {
                         }
 
                         // === Render ===
-                        if let Some(font) = self.font.as_mut() {
+                        if let (Some(font), Some(panel)) = (self.font.as_mut(), self.panel.as_mut())
+                        {
                             let m = font.metrics();
                             let screen_w = gpu.config.width;
                             let screen_h = gpu.config.height;
@@ -534,6 +549,22 @@ impl ApplicationHandler for App {
                             );
                             let events = render::render_recent_events(&self.world, event_lines);
 
+                            // Panels (backgrounds first)
+                            panel.begin_frame(&gpu.queue, screen_w, screen_h);
+                            // Test panel: parchment bg, gold border, inner shadow
+                            panel.add_panel(
+                                20.0,
+                                20.0,
+                                260.0,
+                                120.0,
+                                [0.87, 0.81, 0.70, 0.95], // parchment bg
+                                [0.83, 0.68, 0.21, 1.0],  // CK3 gold border
+                                2.0,                      // border width (px)
+                                6.0,                      // inner shadow (px)
+                            );
+                            let panel_vertex_count = panel.flush(&gpu.queue, &gpu.device);
+
+                            // Text (on top)
                             font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
                             let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
                             font.prepare_text(&status, padding, padding, fg4);
@@ -543,8 +574,8 @@ impl ApplicationHandler for App {
                             let event_y = screen_h as f32 - event_h - padding;
                             font.prepare_text(&events, padding, event_y, fg4);
 
-                            let vertex_count = font.flush(&gpu.queue, &gpu.device);
-                            gpu.render(font, vertex_count);
+                            let text_vertex_count = font.flush(&gpu.queue, &gpu.device);
+                            gpu.render(panel, panel_vertex_count, font, text_vertex_count);
                         }
                         gpu.window.request_redraw();
                     }
@@ -588,6 +619,7 @@ fn main() {
     let mut app = App {
         gpu: None,
         font: None,
+        panel: None,
         world,
         camera: start_camera,
         last_frame_time: Instant::now(),
