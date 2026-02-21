@@ -19,6 +19,7 @@ serde = { version = "1", features = ["derive"] }
 ron = "0.9"
 bincode = "1"
 zstd = "0.13"
+cosmic-text = { version = "0.18", default-features = false, features = ["std"] }
 shapefile = { version = "0.7", features = ["yore"] }
 rusqlite = { version = "0.33", features = ["bundled"] }
 
