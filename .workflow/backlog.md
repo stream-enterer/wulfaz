@@ -11,7 +11,6 @@ Goal: See Paris on screen. No entities.
 Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 30m padding).
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
-
 - **SCALE-A09** — Water/bridge polish. Needs: A08. **Remaining known limitations:**
   - **Eastern coverage gap**: ~150-tile-wide hole in ALPAGE data (tiles ~4950-5100 X, ~3500-3900 Y). Road patch in the Seine near Pont d'Austerlitz. Components #12 (2777 tiles) and #13 (424 tiles) are data-gap artifacts, not real bridges. Fix: obtain APUR PLAN D'EAU shapefile, reproject from Lambert-93 (EPSG:2154) to WGS84 via ogr2ogr, feed through `rasterize_water_polygons()`.
   - **Western bridge coverage**: ALPAGE water polygons don't extend west of ~lon 2.336 (5 bridges: Invalides, Concorde, Royal, Carrousel, Arts). Same fix — supplemental data needed.
@@ -110,6 +109,146 @@ Developable on test map or integrated after Phase B.
 - **SIM-010** — Building (Phase 4). Requires inventory.
 - **SIM-011** — Crafting (Phase 4). Requires recipes.
 - **SIM-012** — Fluid flow (Phase 1). Cellular automaton. Needs: A08 (Seine placement).
+
+## Phase UI — CK3-Style Game Interface
+
+Goal: Retained-mode widget layer on wgpu for player-facing UI. cosmic-text for shaping/layout, FreeType for rasterization, custom widget tree for CK3 parchment+gold aesthetic.
+
+Foundation (cosmic-text migration) is complete. Remaining steps below.
+
+Dependency graph:
+```
+Parallel starts: UI-P01, UI-P03, UI-W01
+
+UI-P01 → UI-P02 → UI-R01 ──────────────────────┐
+                └──→ UI-R02 ────────────────────┤
+UI-P03 ──────────→ UI-R02                       ↓
+                                             UI-I01
+UI-W01 → UI-W02 → UI-W03 ─────────────────────┘
+  │          ├──→ UI-W04 ──────────────────────┘
+  │          └──→ UI-I03
+  └──→ UI-W05
+
+UI-P01 + UI-P03 → UI-I02
+```
+
+### Rendering foundation
+
+Items here modify the GPU pipeline. No widget logic.
+
+- **UI-P01** — Per-vertex color attribute. Needs: nothing. Blocks: UI-P02, UI-R01, UI-I02.
+  - Current `text.wgsl` uses a single `fg_color` uniform — every glyph in the frame is the same color. CK3-style UI needs gold headers, white body, red warnings, grey disabled text in one draw call.
+  - Add `color: [f32; 4]` to `TextVertex` (16 bytes → 32 bytes per vertex).
+  - Modify `text.wgsl`: read per-vertex color in `vs_main`, pass to `fs_main`, replace uniform `fg_color` with interpolated vertex color in the alpha compositing math.
+  - Modify `build_vertices()` and `prepare_text_shaped()` to accept and propagate a color parameter.
+  - Existing `begin_frame()` fg_color becomes the default; per-vertex color overrides when set.
+  - Bind group layout, sampler, atlas — unchanged. Pipeline vertex layout changes (new attribute at location 2).
+
+- **UI-P02** — Multi-font atlas support. Needs: UI-P01. Blocks: UI-R01, UI-R02. **BLOCKED: design review required.**
+  - Current atlas and `FontRenderer` assume one font (Libertinus Mono) at one size. CK3-style needs at minimum: a serif for flavor/narrative text, monospace for data, possibly a display face for panel headers.
+  - Decisions needed: (a) one shared atlas with mixed fonts keyed by `(font_id, glyph_id)`, or separate atlas textures per font (separate bind groups, multiple draw calls)? (b) Which fonts? Libertinus Serif is bundled alongside Libertinus Mono — use that, or source something else? (c) How many font sizes to support — fixed set (9pt data, 12pt body, 16pt header) or arbitrary?
+  - cosmic-text already supports multiple fonts via fontdb — add font files to the Database, use `Attrs::new().family(Family::Name("Libertinus Serif"))` per span. The shaping side is free.
+  - FreeType rasterization side: `rasterize_glyph_on_demand()` needs to handle multiple `ft_face` instances. Store `HashMap<fontdb::ID, freetype::Face>` instead of a single `ft_face`.
+  - Atlas key changes from `u32` (glyph_id) to `(fontdb::ID, u16, u32)` (font_id, glyph_id, size_bits).
+
+- **UI-P03** — 9-slice panel renderer. Needs: nothing (separate quad pipeline, not text pipeline). Blocks: UI-R02, UI-I02.
+  - WGSL shader taking a panel texture + source rect + 9-slice margins as uniforms. Renders textured panels with fixed-size ornate corners and stretchable center/edges.
+  - Rust-side: `PanelRenderer` struct with its own pipeline, vertex buffer, bind group. Separate from `FontRenderer` — panels are textured quads, not glyph quads.
+  - Input: panel rect (screen position + size), texture region, margin insets. Output: 9 quads (4 corners, 4 edges, 1 center) with correct UVs.
+  - Render order: panels draw BEFORE text (text renders on top of panel backgrounds).
+  - Panel textures loaded from PNG/image files into a separate `Rgba8Unorm` texture (not the R8Unorm glyph atlas). Sampler can use linear filtering for panel textures.
+
+### Widget system
+
+Items here are pure Rust data structures and algorithms. No GPU changes. Widget `draw()` emits commands into a `DrawList` that renderers (from P01/P03) consume — the widget tree does not call wgpu directly.
+
+- **UI-W01** — Widget tree core + layout model. Needs: nothing. Blocks: UI-W02, UI-W03, UI-W04, UI-W05, UI-I01. **BLOCKED: design review required.**
+  - Retained-mode widget hierarchy. Base types: `Panel`, `Label`, `Button`.
+  - Decisions needed:
+    - **Layout model**: flexbox-like (main axis + cross axis + wrap) vs constraint-based (anchor edges to parent/sibling) vs simple box model (fixed/percentage + padding/margin). Flexbox is the most expressive but most complex. Simple box model may suffice for CK3-style fixed-chrome panels.
+    - **Widget identity**: `Box<dyn Widget>` trait objects (flexible, dynamic dispatch) vs flat enum (`Widget::Panel { .. } | Widget::Label { .. }`) (faster, no vtable, but closed set) vs ECS-style where widgets are entities with component tables (aligns with project architecture but may be overkill for UI).
+    - **Tree storage**: arena-allocated (indextree/slotmap) vs recursive `Vec<Box<dyn Widget>>` children. Arena is better for cache locality and avoids recursive borrow issues.
+  - Core trait/interface:
+    - `measure(constraints) -> Size` — compute intrinsic size given min/max constraints
+    - `layout(allocated_rect)` — assign final position to self and children
+    - `draw(draw_list: &mut DrawList)` — emit panel quads and text runs into a draw list
+  - `DrawList`: intermediate representation. Contains `Vec<PanelCommand>` (rect + texture + 9-slice margins) and `Vec<TextCommand>` (string + position + color + font attrs). Consumed by `PanelRenderer` and `FontRenderer` during the render pass. Decouples widget logic from GPU.
+  - Dirty-flagging: each widget has a `dirty: bool`. `layout()` only recurses into dirty subtrees. Text content changes and window resize set dirty on affected widgets.
+  - Note: visually complete panels require UI-P03 (backgrounds) and UI-P01 (colored text), but the widget tree itself is renderer-agnostic and can be developed and tested with text-only output first.
+
+- **UI-W02** — Input routing + hit testing. Needs: UI-W01. Blocks: UI-W03, UI-W04, UI-I03.
+  - Mouse position → walk widget tree back-to-front → first widget whose rect contains cursor gets hover/click.
+  - Event types: `Hover`, `Click(button)`, `DragStart`, `DragMove`, `DragEnd`, `Scroll(delta)`.
+  - Focus management: `focused_widget: Option<WidgetId>`. Tab advances focus. Focused widget receives keyboard events.
+  - Mouse capture: dragging a scrollbar or slider holds capture even when cursor leaves the widget rect. Release on mouse-up.
+  - All UI input handling runs BEFORE the simulation tick in the main loop (reads `winit` events, updates `UiState`, consumes events so they don't reach the sim).
+
+- **UI-W03** — ScrollList widget. Needs: UI-W01, UI-W02.
+  - Scrollable content area: `content_height` measured from children, `scroll_offset: f32` tracks position.
+  - Scrollbar: thin vertical bar rendered as a Panel quad. Draggable (uses mouse capture from UI-W02). Auto-hides when content fits.
+  - Keyboard navigation: arrow keys move selection, Page Up/Down jump by visible height, Home/End go to extremes.
+  - Virtual scrolling: only `measure()` + `draw()` children whose Y range intersects the visible viewport. Essential for entity lists (hundreds of items).
+  - Scroll-to-item: `scroll_list.ensure_visible(child_index)` — smooth or instant scroll to bring a specific child into view.
+  - Momentum/overscroll: optional, can defer. Functional without it.
+
+- **UI-W04** — Tooltip system. Needs: UI-W01, UI-W02.
+  - `TooltipStack: Vec<TooltipEntry>` in `UiState`. Each entry: content widget tree, anchor position, hover source widget ID.
+  - Nested tooltips: when hovering a clickable/hoverable element inside tooltip N, push tooltip N+1. When cursor leaves tooltip N's rect AND is not inside tooltip N+1, pop N+1. Recursive dismissal — popping N also pops N+1..N+k.
+  - Positioning: prefer below-right of cursor. If tooltip would clip screen edge, flip to above/left. Each nesting level offsets slightly to avoid total overlap.
+  - Hover delay: ~300ms before showing (configurable). Instant show if another tooltip was recently visible (CK3 behavior — fast tooltip switching).
+  - Each tooltip renders as a Panel (9-slice background from UI-P03) containing Label/RichText children. Z-order: tooltips always render above all other panels. Tooltip N+1 renders above tooltip N.
+
+- **UI-W05** — Animation system. Needs: UI-W01. Enhancement, not on critical path.
+  - Time-driven interpolation for widget properties: position (slide in/out), opacity (fade), color (hover highlight), size (expand/collapse).
+  - Core: `AnimationState` stored per-widget. `animate(property, from, to, duration, easing)`. Ticks on wall-clock delta (from `winit` `Instant`, not sim tick — UI animation is always real-time).
+  - Easing functions: linear, ease-in-out (cubic), ease-out (decel). Small enum, not a plugin system.
+  - Hover highlight: `Button` lerps background color/opacity on hover enter/leave (~200ms). Panel transitions: slide from screen edge on open/close. Tooltip fade-in ~150ms.
+  - Minimal scope: animate `f32` values only. No keyframe chains or timeline editor.
+  - Hover-driven animations need UI-W02 (input events trigger them), but the animation tick itself is independent.
+
+### Rich content
+
+- **UI-R01** — Rich text rendering. Needs: UI-P01, UI-P02. **BLOCKED: design review required.**
+  - Leverage cosmic-text `set_rich_text()` for mixed-style text: `&[(&str, Attrs)]` spans with different families, weights, colors per span.
+  - Decisions needed:
+    - **Markup format**: how does game data specify styled text? Options: (a) simple inline markup like `{bold}text{/bold}` or `[color=gold]text[/color]`, parsed into spans at render time; (b) structured data — `Vec<TextSpan>` with `enum Style { Bold, Italic, Color(Color), Icon(IconId) }` built programmatically; (c) no markup — all styling applied by the widget type (Labels are always white, Headers are always gold, etc.). Option (c) is simplest and may be sufficient initially.
+    - **Inline icons**: CK3 puts trait/resource icons inline with wrapped text ("Your [gold_icon] 420 gold"). This requires either: synthetic glyph entries in the atlas for each icon (cosmic-text shapes them as normal glyphs via PUA codepoints U+E000+), or a post-layout pass that inserts icon quads at measured positions between text runs. The synthetic glyph approach is cleaner but requires registering icons as font glyphs. The post-layout approach is more flexible but breaks line wrapping around icons.
+  - Per-vertex color from UI-P01 carries the color for each glyph. `prepare_text_shaped()` reads `glyph.color_opt` from cosmic-text's layout output and writes it into the vertex color attribute.
+
+- **UI-R02** — Theme and visual style. Needs: UI-P02, UI-P03. **BLOCKED: design review required.**
+  - Decisions needed:
+    - **Art pipeline**: hand-drawn panel textures (PNGs, requires artist or asset source), procedural shader generation (panel borders as shader math — no external assets but limited aesthetic), or creative-commons asset pack (e.g., Kenney UI, OpenGameArt medieval sets). For a historical Paris sim, hand-drawn parchment/wood textures are most appropriate but highest effort.
+    - **Color palette**: define the exact colors. CK3 reference: parchment bg `#D4B896`, gold accent `#C8A850`, text white `#F0E6D2`, text dark `#3C2A1A`, danger red `#C04040`, disabled grey `#808080`. Adapt or define custom.
+    - **Font roster**: Libertinus Mono for data/terminal text, Libertinus Serif for narrative/flavor text, and what for headers? Libertinus display weights, or a separate face?
+    - **9-slice vs shader borders**: texture-based 9-slice (more authentic, requires border textures) vs shader-generated borders (gold stroke + inner shadow computed in fragment shader — no texture dependency, but flat/geometric look).
+  - Implementation: `Theme` struct holding color constants, font family names, panel texture IDs, margin/padding defaults. Passed to `draw()` so widgets don't hardcode colors. Single global theme initially (no runtime theme switching).
+
+### Integration
+
+- **UI-I01** — Game UI panels + data binding. Needs: UI-W01, UI-W02, UI-W03, UI-W04, UI-R01, UI-R02. **BLOCKED: design review required.**
+  - This is a meta-task. Will be broken into per-panel sub-tasks during design review.
+  - Decisions needed:
+    - **Panel inventory**: which panels exist? Minimum viable set: (a) status bar (top — tick count, population, paused state), (b) entity inspector (side panel on entity click — name, occupation, needs, inventory), (c) event log (bottom — scrollable recent events), (d) hover tooltip (cursor over map tile — terrain, entities present, building info). What else? Building inspector? District overview? Mini-map?
+    - **Data binding model**: how does the widget tree react to World changes? Options: (a) full rebuild every frame — simple, no caching, fine for small UI; (b) poll + diff — each panel's `update(world)` method checks relevant World fields and sets dirty if changed; (c) event-driven — World pushes change notifications that panels subscribe to. Option (b) is the pragmatic middle ground. Option (a) is acceptable initially.
+    - **Panel lifecycle**: are panels always present (hidden/shown) or created/destroyed on demand? CK3 uses both — chrome panels are permanent, inspector panels are created on click and destroyed on close.
+  - Replaces the current `render::render_status()` / `render::render_hover_info()` / `render::render_recent_events()` string-based rendering in `main.rs`. The `prepare_text()` calls are replaced by `ui.layout()` → `ui.draw(&mut draw_list)` → draw_list fed to renderers.
+  - `UiState` struct on `App` (not on `World` — UI is not simulation state). Holds the widget tree root, tooltip stack, focused widget, panel visibility flags.
+
+- **UI-I02** — Map overlay integration. Needs: UI-P01, UI-P03.
+  - UI elements that composite with the world-space map: tile selection highlight, movement path lines, area-of-effect indicators, entity health bars above map glyphs.
+  - Render order: (1) map glyphs (`prepare_map`), (2) map overlays (highlights, paths — same coordinate space as map), (3) UI panels (screen-space, on top of everything), (4) tooltips (above panels).
+  - Tile highlight: colored semi-transparent quad drawn at the hovered tile's screen position. Uses the panel renderer (a single untextured colored quad) or a dedicated overlay pass.
+  - Scissor rects: UI panels that overlap the map viewport clip the map render beneath them. Requires `set_scissor_rect()` on the render pass, or stencil buffer, or simply rendering panels as opaque backgrounds that occlude the map.
+  - Path visualization: line segments between tile centers for A* paths. Could be a simple line renderer (2 vertices per segment) or a series of highlight quads on each tile in the path.
+
+- **UI-I03** — Keyboard shortcut system. Needs: UI-W02. Enhancement, not on critical path.
+  - Global keybindings processed before widget focus dispatch. Configurable map: `HashMap<KeyCombo, Action>` where `KeyCombo` is modifier flags + keycode, `Action` is an enum (PauseSim, TogglePanel(PanelId), SpeedUp, SpeedDown, etc.).
+  - Default bindings: Space = pause, Escape = close topmost panel/tooltip, 1-5 = sim speed, Tab = cycle panels.
+  - Displayed in tooltips: "Pause (Space)" — keybinding text sourced from the map, not hardcoded in UI strings.
+
+## Deferred
+
+- **UI-D01** — egui dev tools overlay. Add `egui-wgpu` + `egui-winit`. Second render pass after game UI. Entity inspector, world state browser, system performance view. Toggle with a key (F12). Debug-only layer, not player-facing. Independent of the custom widget pipeline — can be added at any point.
 
 ## Pending (threshold not yet met)
 

@@ -231,7 +231,7 @@ src/
   loading.rs             # KDL parsing, entity spawning (small test map)
   loading_gis.rs         # GIS shapefile parsing, rasterization, binary load
   render.rs              # terminal/debug display output
-  font.rs                # FreeType glyph rasterization + atlas
+  font.rs                # cosmic-text shaping + FreeType rasterization + wgpu atlas
   rng.rs                 # deterministic seeded RNG wrapper
   bin/
     preprocess.rs        # offline GIS → binary pipeline (generates tiles + bincode meta + RON debug)
