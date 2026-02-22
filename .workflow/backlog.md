@@ -112,15 +112,6 @@ Manager structs (ModalStack, NotificationManager, PanelManager, ContextMenu) eac
 
 
 
-- **UI-302** — Notification/toast system. Needs: UI-100 (Row for icon+text). Blocks: UI-405.
-  - Top-right notification stack, exactly like CK3's alert system: war declared, heir born, scheme discovered.
-  - Add `NotificationManager` struct to `src/ui/notification.rs`. Holds `Vec<Notification>` where each has: `message: String`, `icon: Option<String>`, `priority: NotificationPriority`, `created: Instant`, `duration: Duration`, `dismissed: bool`.
-  - `NotificationPriority` enum: `Info`, `Important`, `Critical`. Critical: `theme.danger` border + Animator-driven pulsing alpha. Important: `theme.gold` border. Info: standard. Sort: Critical on top, then Important, then Info.
-  - Each tick, `NotificationManager::build()` constructs a Column of notification panels anchored to top-right of screen (using `Position::Percent { x: 1.0, y: 0.0 }` with negative x offset for width).
-  - Notifications auto-dismiss after `duration` (default 8 seconds). Click to dismiss immediately. Stacking: newest on top, older slide down.
-  - Animate fade-in/fade-out using the existing `Animator` in `src/ui/animation.rs`.
-  - Max visible: 5 notifications. Excess queued until space opens.
-  - Test: push 3 notifications, advance time past duration of first, assert first is dismissed and remaining 2 shift up.
 
 
 
