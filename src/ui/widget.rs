@@ -140,4 +140,15 @@ pub enum Widget {
         bg_color: [f32; 4], // background sRGB RGBA
         font_size: f32,     // pixels
     },
+
+    /// Horizontal slider widget (UI-205).
+    /// Thin track with a draggable thumb positioned at `(value - min) / (max - min)`.
+    Slider {
+        value: f32,
+        min: f32,
+        max: f32,
+        track_color: [f32; 4], // track bar sRGB RGBA
+        thumb_color: [f32; 4], // thumb sRGB RGBA
+        width: f32,            // total track width in pixels
+    },
 }

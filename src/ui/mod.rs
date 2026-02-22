@@ -1059,6 +1059,13 @@ impl WidgetTree {
                     height: h + 8.0,
                 }
             }
+            Widget::Slider { width, .. } => {
+                let thumb_size = 16.0;
+                Size {
+                    width: *width,
+                    height: thumb_size,
+                }
+            }
         }
     }
 
@@ -1363,6 +1370,45 @@ impl WidgetTree {
                     }
                 }
             }
+            Widget::Slider {
+                value,
+                min,
+                max,
+                track_color,
+                thumb_color,
+                ..
+            } => {
+                let thumb_size = 16.0;
+                let track_h = 4.0;
+                let track_y = node.rect.y + (node.rect.height - track_h) / 2.0;
+                // Track bar.
+                draw_list.panels.push(PanelCommand {
+                    x: node.rect.x,
+                    y: track_y,
+                    width: node.rect.width,
+                    height: track_h,
+                    bg_color: *track_color,
+                    border_color: [0.0; 4],
+                    border_width: 0.0,
+                    shadow_width: 0.0,
+                    clip,
+                });
+                // Thumb.
+                let range = (max - min).max(f32::EPSILON);
+                let t = ((value - min) / range).clamp(0.0, 1.0);
+                let thumb_x = node.rect.x + t * (node.rect.width - thumb_size);
+                draw_list.panels.push(PanelCommand {
+                    x: thumb_x,
+                    y: node.rect.y,
+                    width: thumb_size,
+                    height: thumb_size,
+                    bg_color: *thumb_color,
+                    border_color: *track_color,
+                    border_width: 1.0,
+                    shadow_width: 0.0,
+                    clip,
+                });
+            }
             Widget::ScrollList {
                 bg_color,
                 border_color,
@@ -1606,6 +1652,14 @@ impl WidgetTree {
             } => {
                 color[3] *= opacity;
                 bg_color[3] *= opacity;
+            }
+            Widget::Slider {
+                track_color,
+                thumb_color,
+                ..
+            } => {
+                track_color[3] *= opacity;
+                thumb_color[3] *= opacity;
             }
         }
     }
@@ -5667,5 +5721,95 @@ mod tests {
         );
         assert_eq!(draw_list.texts[0].text, "\u{2713}");
         assert_eq!(draw_list.texts[1].text, "Toggle");
+    }
+
+    #[test]
+    fn slider_measure_uses_width_field() {
+        let mut tree = WidgetTree::new();
+        let sl = tree.insert_root(Widget::Slider {
+            value: 0.5,
+            min: 0.0,
+            max: 1.0,
+            track_color: [0.3; 4],
+            thumb_color: [0.8; 4],
+            width: 200.0,
+        });
+        let size = tree.measure_node(sl, 14.0);
+        assert!((size.width - 200.0).abs() < 0.01);
+        assert!(
+            (size.height - 16.0).abs() < 0.01,
+            "height should be thumb_size 16"
+        );
+    }
+
+    #[test]
+    fn slider_thumb_at_midpoint() {
+        let mut tree = WidgetTree::new();
+        let sl = tree.insert_root(Widget::Slider {
+            value: 0.5,
+            min: 0.0,
+            max: 1.0,
+            track_color: [0.3, 0.3, 0.3, 1.0],
+            thumb_color: [0.8, 0.8, 0.8, 1.0],
+            width: 200.0,
+        });
+        tree.set_sizing(sl, Sizing::Fixed(200.0), Sizing::Fixed(16.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // 2 panels: track + thumb.
+        assert_eq!(draw_list.panels.len(), 2, "slider: track + thumb");
+        let thumb = &draw_list.panels[1];
+        // thumb_x = 0 + 0.5 * (200 - 16) = 92
+        let expected_x = 0.5 * (200.0 - 16.0);
+        assert!(
+            (thumb.x - expected_x).abs() < 0.5,
+            "thumb x {:.1} should be near {:.1}",
+            thumb.x,
+            expected_x
+        );
+    }
+
+    #[test]
+    fn slider_thumb_clamped_at_extremes() {
+        let mut tree = WidgetTree::new();
+        // Value beyond max.
+        let sl = tree.insert_root(Widget::Slider {
+            value: 2.0,
+            min: 0.0,
+            max: 1.0,
+            track_color: [0.3; 4],
+            thumb_color: [0.8; 4],
+            width: 100.0,
+        });
+        tree.set_sizing(sl, Sizing::Fixed(100.0), Sizing::Fixed(16.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        let thumb = &draw_list.panels[1];
+        // t clamped to 1.0, thumb_x = 0 + 1.0 * (100 - 16) = 84
+        let expected_x = 100.0 - 16.0;
+        assert!(
+            (thumb.x - expected_x).abs() < 0.5,
+            "thumb at max: x {:.1} should be near {:.1}",
+            thumb.x,
+            expected_x
+        );
     }
 }
