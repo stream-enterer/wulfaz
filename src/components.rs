@@ -154,6 +154,123 @@ pub struct ActionState {
     pub cooldowns: HashMap<ActionId, u64>,
 }
 
+/// In-game date derived from simulation tick count (UI-108).
+/// 1 tick = 1 minute, 100 ticks = 1h40m, 1440 ticks = 1 day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameDate {
+    pub year: i32,
+    pub month: u32,  // 1-12
+    pub day: u32,    // 1-31
+    pub hour: u32,   // 0-23
+    pub minute: u32, // 0-59
+}
+
+/// Starting date for the simulation.
+#[derive(Debug, Clone, Copy)]
+pub struct StartDate {
+    pub year: i32,
+    pub month: u32,
+    pub day: u32,
+}
+
+impl StartDate {
+    /// Default start: 1 January 1845.
+    pub fn default_1845() -> Self {
+        Self {
+            year: 1845,
+            month: 1,
+            day: 1,
+        }
+    }
+}
+
+/// Days in each month (non-leap year).
+const DAYS_IN_MONTH: [u32; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    if month == 2 && is_leap_year(year) {
+        29
+    } else {
+        DAYS_IN_MONTH[(month - 1) as usize]
+    }
+}
+
+impl GameDate {
+    /// Convert a tick count to an in-game date, given a starting date.
+    /// 1 tick = 1 minute. 1440 ticks = 1 day.
+    pub fn from_tick(tick: Tick, start: &StartDate) -> Self {
+        let total_minutes = tick.0;
+        let extra_minutes = (total_minutes % 60) as u32;
+        let total_hours = total_minutes / 60;
+        let extra_hours = (total_hours % 24) as u32;
+        let mut remaining_days = (total_hours / 24) as u32;
+
+        let mut year = start.year;
+        let mut month = start.month;
+        let mut day = start.day;
+
+        // Add days to the starting date.
+        remaining_days += day - 1; // convert day to 0-based offset within month
+        day = 1;
+        loop {
+            let dim = days_in_month(year, month);
+            if remaining_days < dim {
+                day += remaining_days;
+                break;
+            }
+            remaining_days -= dim;
+            month += 1;
+            if month > 12 {
+                month = 1;
+                year += 1;
+            }
+        }
+
+        Self {
+            year,
+            month,
+            day,
+            hour: extra_hours,
+            minute: extra_minutes,
+        }
+    }
+
+    /// Month name in English.
+    pub fn month_name(&self) -> &'static str {
+        match self.month {
+            1 => "January",
+            2 => "February",
+            3 => "March",
+            4 => "April",
+            5 => "May",
+            6 => "June",
+            7 => "July",
+            8 => "August",
+            9 => "September",
+            10 => "October",
+            11 => "November",
+            12 => "December",
+            _ => "???",
+        }
+    }
+
+    /// Format as "1 January 1845, 14:30".
+    pub fn format(&self) -> String {
+        format!(
+            "{} {} {}, {:02}:{:02}",
+            self.day,
+            self.month_name(),
+            self.year,
+            self.hour,
+            self.minute,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,5 +400,76 @@ mod tests {
     fn fatigue_fields() {
         let f = Fatigue { current: 30.0 };
         assert_eq!(f.current, 30.0);
+    }
+
+    #[test]
+    fn game_date_tick_zero() {
+        let start = StartDate::default_1845();
+        let date = GameDate::from_tick(Tick(0), &start);
+        assert_eq!(date.year, 1845);
+        assert_eq!(date.month, 1);
+        assert_eq!(date.day, 1);
+        assert_eq!(date.hour, 0);
+        assert_eq!(date.minute, 0);
+        assert_eq!(date.format(), "1 January 1845, 00:00");
+    }
+
+    #[test]
+    fn game_date_one_day() {
+        let start = StartDate::default_1845();
+        // 1440 minutes = 24 hours = 1 day
+        let date = GameDate::from_tick(Tick(1440), &start);
+        assert_eq!(date.year, 1845);
+        assert_eq!(date.month, 1);
+        assert_eq!(date.day, 2);
+        assert_eq!(date.hour, 0);
+        assert_eq!(date.minute, 0);
+    }
+
+    #[test]
+    fn game_date_mid_day() {
+        let start = StartDate::default_1845();
+        // 14 hours 30 minutes = 870 minutes
+        let date = GameDate::from_tick(Tick(870), &start);
+        assert_eq!(date.day, 1);
+        assert_eq!(date.hour, 14);
+        assert_eq!(date.minute, 30);
+    }
+
+    #[test]
+    fn game_date_month_rollover() {
+        let start = StartDate::default_1845();
+        // 31 days = 31 * 1440 = 44640 minutes → 1 February
+        let date = GameDate::from_tick(Tick(44640), &start);
+        assert_eq!(date.month, 2);
+        assert_eq!(date.day, 1);
+    }
+
+    #[test]
+    fn game_date_year_rollover() {
+        let start = StartDate::default_1845();
+        // 365 days = 365 * 1440 = 525600 minutes → 1 January 1846
+        let date = GameDate::from_tick(Tick(525600), &start);
+        assert_eq!(date.year, 1846);
+        assert_eq!(date.month, 1);
+        assert_eq!(date.day, 1);
+    }
+
+    #[test]
+    fn game_date_leap_year() {
+        // 1848 is a leap year
+        let start = StartDate {
+            year: 1848,
+            month: 2,
+            day: 28,
+        };
+        // +1 day should be Feb 29
+        let date = GameDate::from_tick(Tick(1440), &start);
+        assert_eq!(date.month, 2);
+        assert_eq!(date.day, 29);
+        // +2 days should be March 1
+        let date2 = GameDate::from_tick(Tick(2880), &start);
+        assert_eq!(date2.month, 3);
+        assert_eq!(date2.day, 1);
     }
 }

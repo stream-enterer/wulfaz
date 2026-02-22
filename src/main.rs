@@ -753,8 +753,13 @@ impl ApplicationHandler for App {
                                 .and_then(|p| self.world.body.names.get(&p))
                                 .map(|n| n.value.as_str());
                             self.ui_tree = ui::WidgetTree::new();
+                            let game_date = components::GameDate::from_tick(
+                                self.world.tick,
+                                &self.world.start_date,
+                            );
                             let status_info = ui::StatusBarInfo {
                                 tick: self.world.tick.0,
+                                date: game_date.format(),
                                 population: self.world.alive.len(),
                                 is_turn_based: self.world.player.is_some(),
                                 player_name,

@@ -124,6 +124,8 @@ pub struct World {
     pub events: EventLog,
     pub rng: StdRng,
     pub tick: Tick,
+    /// In-game starting date for tick-to-date conversion (UI-108).
+    pub start_date: StartDate,
     /// Player-controlled entity. None = realtime mode, Some = roguelike mode.
     pub player: Option<Entity>,
 }
@@ -146,6 +148,7 @@ impl World {
             events: EventLog::default_capacity(),
             rng: create_rng(seed),
             tick: Tick(0),
+            start_date: StartDate::default_1845(),
             player: None,
         }
     }

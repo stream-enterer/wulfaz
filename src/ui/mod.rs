@@ -1357,6 +1357,7 @@ fn wrapped_line_count(text: &str, width: f32, char_w: f32) -> usize {
 /// Status bar configuration for pause/speed display (UI-I03).
 pub struct StatusBarInfo<'a> {
     pub tick: u64,
+    pub date: String,
     pub population: usize,
     pub is_turn_based: bool,
     pub player_name: Option<&'a str>,
@@ -1408,7 +1409,7 @@ pub fn build_status_bar(tree: &mut WidgetTree, theme: &Theme, info: &StatusBarIn
 
     let mut spans = vec![
         TextSpan {
-            text: format!("Tick: {}", info.tick),
+            text: info.date.clone(),
             color: theme.gold,
             font_family: FontFamily::Mono,
         },
@@ -2964,6 +2965,7 @@ mod tests {
         let kb = KeyBindings::defaults();
         let info = StatusBarInfo {
             tick: 42,
+            date: "1 January 1845, 00:42".to_string(),
             population: 15,
             is_turn_based: false,
             player_name: None,
@@ -2993,7 +2995,7 @@ mod tests {
             assert!((font_size - theme.font_data_size).abs() < 0.01);
             // Real-time mode, speed 1, no player: 5 spans (tick, sep, pop, sep, speed).
             assert_eq!(spans.len(), 5);
-            assert_eq!(spans[0].text, "Tick: 42");
+            assert_eq!(spans[0].text, "1 January 1845, 00:42");
             assert_eq!(spans[0].color, theme.gold);
             assert_eq!(spans[2].text, "Pop: 15");
             assert_eq!(spans[2].color, theme.text_light);
@@ -3010,6 +3012,7 @@ mod tests {
         let kb = KeyBindings::defaults();
         let info = StatusBarInfo {
             tick: 100,
+            date: "1 January 1845, 01:40".to_string(),
             population: 3,
             is_turn_based: true,
             player_name: Some("Goblin"),
@@ -3042,6 +3045,7 @@ mod tests {
         let kb = KeyBindings::defaults();
         let info = StatusBarInfo {
             tick: 0,
+            date: "1 January 1845, 00:00".to_string(),
             population: 0,
             is_turn_based: false,
             player_name: None,
@@ -3076,6 +3080,7 @@ mod tests {
         let kb = KeyBindings::defaults();
         let info = StatusBarInfo {
             tick: 7,
+            date: "1 January 1845, 00:07".to_string(),
             population: 200,
             is_turn_based: true,
             player_name: Some("Wolf"),
@@ -3120,6 +3125,7 @@ mod tests {
         let kb = KeyBindings::defaults();
         let info = StatusBarInfo {
             tick: 10,
+            date: "1 January 1845, 00:10".to_string(),
             population: 5,
             is_turn_based: false,
             player_name: None,
@@ -3151,6 +3157,7 @@ mod tests {
         let kb = KeyBindings::defaults();
         let info = StatusBarInfo {
             tick: 10,
+            date: "1 January 1845, 00:10".to_string(),
             population: 5,
             is_turn_based: false,
             player_name: None,
