@@ -48,6 +48,24 @@ impl Rect {
     pub fn contains(&self, px: f32, py: f32) -> bool {
         px >= self.x && px < self.x + self.width && py >= self.y && py < self.y + self.height
     }
+
+    /// Compute the intersection of two rectangles. Returns None if they don't overlap.
+    pub fn intersect(&self, other: &Rect) -> Option<Rect> {
+        let x1 = self.x.max(other.x);
+        let y1 = self.y.max(other.y);
+        let x2 = (self.x + self.width).min(other.x + other.width);
+        let y2 = (self.y + self.height).min(other.y + other.height);
+        if x2 > x1 && y2 > y1 {
+            Some(Rect {
+                x: x1,
+                y: y1,
+                width: x2 - x1,
+                height: y2 - y1,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -527,6 +545,7 @@ impl WidgetTree {
             let gap = *gap;
             let align = *align;
             let children: Vec<WidgetId> = node.children.clone();
+            let parent_clip = node.clip_rect;
 
             // First pass: measure all children, identify Percent-width children.
             let mut child_infos: Vec<(WidgetId, Size, Sizing, Edges, Edges)> = Vec::new();
@@ -599,6 +618,7 @@ impl WidgetTree {
                         width: child_w,
                         height: stretched_h,
                     };
+                    child_node.clip_rect = Self::merge_clips(parent_clip, child_node.clip_rect);
                     child_node.dirty = false;
                 }
 
@@ -628,6 +648,7 @@ impl WidgetTree {
             let gap = *gap;
             let align = *align;
             let children: Vec<WidgetId> = node.children.clone();
+            let parent_clip = node.clip_rect;
 
             // First pass: measure all children, identify Percent-height children.
             let mut child_infos: Vec<(WidgetId, Size, Sizing, Edges, Edges)> = Vec::new();
@@ -700,6 +721,7 @@ impl WidgetTree {
                         width: stretched_w,
                         height: child_h,
                     };
+                    child_node.clip_rect = Self::merge_clips(parent_clip, child_node.clip_rect);
                     child_node.dirty = false;
                 }
 
@@ -736,6 +758,7 @@ impl WidgetTree {
             let so = *scroll_offset;
             let sbw = *scrollbar_width;
             let children: Vec<WidgetId> = node.children.clone();
+            let parent_clip = node.clip_rect;
             let viewport_h = content.height;
             let content_w = (content.width - sbw).max(0.0);
 
@@ -749,6 +772,11 @@ impl WidgetTree {
                         child_node.dirty = false;
                     }
                     continue;
+                }
+
+                // Propagate clip from parent (UI-104).
+                if let Some(child_node) = self.arena.get_mut(*child_id) {
+                    child_node.clip_rect = Self::merge_clips(parent_clip, child_node.clip_rect);
                 }
 
                 // Layout visible item: set rect directly, then recurse for children.
@@ -769,11 +797,20 @@ impl WidgetTree {
         let children: Vec<WidgetId> = node.children.clone();
         for child in &children {
             if let Some(child_node) = self.arena.get_mut(*child) {
-                child_node.clip_rect = parent_clip;
+                child_node.clip_rect = Self::merge_clips(parent_clip, child_node.clip_rect);
             }
         }
         for child in children {
             self.layout_node(child, content, line_height);
+        }
+    }
+
+    /// Merge parent and child clip rects (UI-104). If both exist, intersect them.
+    fn merge_clips(parent: Option<Rect>, child: Option<Rect>) -> Option<Rect> {
+        match (parent, child) {
+            (Some(p), Some(c)) => p.intersect(&c),
+            (Some(p), None) => Some(p),
+            (None, c) => c,
         }
     }
 
@@ -964,12 +1001,17 @@ impl WidgetTree {
 
     /// Walk the tree and emit draw commands into a `DrawList`.
     pub fn draw(&self, draw_list: &mut DrawList) {
+        self.draw_with_line_height(draw_list, 14.0);
+    }
+
+    /// Walk the tree and emit draw commands, using `line_height` for wrap metrics.
+    pub fn draw_with_line_height(&self, draw_list: &mut DrawList, line_height: f32) {
         for &root in &self.roots {
-            self.draw_node(root, draw_list);
+            self.draw_node(root, draw_list, line_height);
         }
     }
 
-    fn draw_node(&self, id: WidgetId, draw_list: &mut DrawList) {
+    fn draw_node(&self, id: WidgetId, draw_list: &mut DrawList, line_height: f32) {
         let Some(node) = self.arena.get(id) else {
             return;
         };
@@ -1005,9 +1047,9 @@ impl WidgetTree {
                 wrap,
             } => {
                 if *wrap && node.rect.width > 0.0 {
-                    let scale = font_size / 14.0;
-                    let char_w = 14.0 * 0.6 * scale;
-                    let line_h = 14.0 * scale;
+                    let scale = font_size / line_height;
+                    let char_w = line_height * 0.6 * scale;
+                    let line_h = line_height * scale;
                     let max_chars = (node.rect.width / char_w).max(1.0) as usize;
                     let lines = wrap_text(text, max_chars);
                     for (i, line) in lines.iter().enumerate() {
@@ -1109,7 +1151,7 @@ impl WidgetTree {
                         && cn.rect.width > 0.0
                         && cn.rect.height > 0.0
                     {
-                        self.draw_node(child, draw_list);
+                        self.draw_node(child, draw_list, line_height);
                     }
                 }
 
@@ -1145,7 +1187,7 @@ impl WidgetTree {
 
         // Draw children on top (non-ScrollList widgets).
         for &child in &node.children {
-            self.draw_node(child, draw_list);
+            self.draw_node(child, draw_list, line_height);
         }
     }
 
@@ -4513,6 +4555,313 @@ mod tests {
         assert!(
             (p.bg_color[3] - 0.15).abs() < 0.01,
             "overlay alpha should be 0.15"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Edge-case tests (quality pass)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn row_zero_children_measures_zero() {
+        let mut tree = WidgetTree::new();
+        let row = tree.insert_root(Widget::Row {
+            gap: 4.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(row, Sizing::Fit, Sizing::Fit);
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let node = tree.get(row).unwrap();
+        assert!((node.measured.width).abs() < 0.01);
+        assert!((node.measured.height).abs() < 0.01);
+    }
+
+    #[test]
+    fn column_zero_children_measures_zero() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 4.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(col, Sizing::Fit, Sizing::Fit);
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let node = tree.get(col).unwrap();
+        assert!((node.measured.width).abs() < 0.01);
+        assert!((node.measured.height).abs() < 0.01);
+    }
+
+    #[test]
+    fn row_single_child() {
+        let mut tree = WidgetTree::new();
+        let row = tree.insert_root(Widget::Row {
+            gap: 4.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(row, Sizing::Fixed(400.0), Sizing::Fixed(50.0));
+
+        let label = tree.insert(
+            row,
+            Widget::Label {
+                text: "Only".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let rl = tree.node_rect(label).unwrap();
+        assert!(rl.width > 0.0, "single child should have width");
+        // No gap applied since there's only one child.
+    }
+
+    #[test]
+    fn row_all_percent_children() {
+        let mut tree = WidgetTree::new();
+        let row = tree.insert_root(Widget::Row {
+            gap: 0.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(row, Sizing::Fixed(300.0), Sizing::Fixed(50.0));
+
+        let a = tree.insert(
+            row,
+            Widget::Panel {
+                bg_color: [0.0; 4],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+        );
+        tree.set_sizing(a, Sizing::Percent(0.25), Sizing::Fit);
+
+        let b = tree.insert(
+            row,
+            Widget::Panel {
+                bg_color: [0.0; 4],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+        );
+        tree.set_sizing(b, Sizing::Percent(0.75), Sizing::Fit);
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let ra = tree.node_rect(a).unwrap();
+        let rb = tree.node_rect(b).unwrap();
+        // No fixed children, so all 300px goes to percent children.
+        // 25% of 300 = 75, 75% of 300 = 225.
+        assert!(
+            (ra.width - 75.0).abs() < 1.0,
+            "25% of 300 should be ~75, got {}",
+            ra.width
+        );
+        assert!(
+            (rb.width - 225.0).abs() < 1.0,
+            "75% of 300 should be ~225, got {}",
+            rb.width
+        );
+    }
+
+    #[test]
+    fn column_single_child() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 4.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(col, Sizing::Fixed(200.0), Sizing::Fixed(400.0));
+
+        let label = tree.insert(
+            col,
+            Widget::Label {
+                text: "Only".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let rl = tree.node_rect(label).unwrap();
+        assert!(rl.height > 0.0, "single child should have height");
+    }
+
+    #[test]
+    fn wrap_text_short_no_wrap() {
+        // Text shorter than max_chars should remain on one line.
+        let lines = wrap_text("short", 20);
+        assert_eq!(lines, vec!["short"]);
+    }
+
+    #[test]
+    fn wrap_text_zero_max_chars() {
+        // max_chars == 0 returns text unchanged.
+        let lines = wrap_text("hello world", 0);
+        assert_eq!(lines, vec!["hello world"]);
+    }
+
+    #[test]
+    fn clip_rect_intersection() {
+        let a = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        let b = Rect {
+            x: 50.0,
+            y: 50.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        let result = a.intersect(&b).expect("should intersect");
+        assert!((result.x - 50.0).abs() < 0.01);
+        assert!((result.y - 50.0).abs() < 0.01);
+        assert!((result.width - 50.0).abs() < 0.01);
+        assert!((result.height - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn clip_rect_no_intersection() {
+        let a = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let b = Rect {
+            x: 20.0,
+            y: 20.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        assert!(a.intersect(&b).is_none());
+    }
+
+    #[test]
+    fn clip_propagates_through_row() {
+        let mut tree = WidgetTree::new();
+        let row = tree.insert_root(Widget::Row {
+            gap: 0.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(row, Sizing::Fixed(200.0), Sizing::Fixed(50.0));
+        let clip = Rect {
+            x: 10.0,
+            y: 10.0,
+            width: 180.0,
+            height: 30.0,
+        };
+        tree.set_clip_rect(row, Some(clip));
+
+        let label = tree.insert(
+            row,
+            Widget::Label {
+                text: "Clipped".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let child_node = tree.get(label).unwrap();
+        assert!(
+            child_node.clip_rect.is_some(),
+            "Row child should inherit clip_rect"
+        );
+        let c = child_node.clip_rect.unwrap();
+        assert!((c.x - 10.0).abs() < 0.1);
+        assert!((c.width - 180.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn clip_propagates_through_column() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 0.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(col, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
+        let clip = Rect {
+            x: 5.0,
+            y: 5.0,
+            width: 190.0,
+            height: 90.0,
+        };
+        tree.set_clip_rect(col, Some(clip));
+
+        let label = tree.insert(
+            col,
+            Widget::Label {
+                text: "Clipped".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let child_node = tree.get(label).unwrap();
+        assert!(
+            child_node.clip_rect.is_some(),
+            "Column child should inherit clip_rect"
         );
     }
 }

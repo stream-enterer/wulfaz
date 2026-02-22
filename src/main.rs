@@ -380,13 +380,33 @@ impl ApplicationHandler for App {
                     winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 20.0,
                 };
                 if !self.ui_state.handle_scroll(&mut self.ui_tree, dy) {
-                    // Scroll not consumed by UI — zoom camera (UI-107).
+                    // Scroll not consumed by UI — zoom-to-cursor (UI-107).
+                    // Adjust camera so the tile under cursor stays under cursor after zoom.
                     let zoom_factor = 1.1_f32;
-                    if dy > 0.0 {
-                        self.camera.target_zoom = (self.camera.target_zoom * zoom_factor).min(4.0);
+                    let old_zoom = self.camera.target_zoom;
+                    let new_zoom = if dy > 0.0 {
+                        (old_zoom * zoom_factor).min(4.0)
                     } else if dy < 0.0 {
-                        self.camera.target_zoom = (self.camera.target_zoom / zoom_factor).max(0.25);
+                        (old_zoom / zoom_factor).max(0.25)
+                    } else {
+                        old_zoom
+                    };
+                    if (new_zoom - old_zoom).abs() > f32::EPSILON && self.map_cell_w > 0.0 {
+                        // Cursor position relative to map origin in screen pixels.
+                        let cx = self.cursor_pos.x as f32 - self.map_origin.0;
+                        let cy = self.cursor_pos.y as f32 - self.map_origin.1;
+                        // base_cell = map_cell / zoom (font char size without zoom).
+                        let base_w = self.map_cell_w / old_zoom;
+                        let base_h = self.map_cell_h / old_zoom;
+                        // Offset in tiles: how far the cursor is from camera origin.
+                        // delta = cursor_px * (1/old_zoom - 1/new_zoom) / base_cell
+                        //       = cursor_px / base * (1/old - 1/new)
+                        let dx = (cx / base_w) * (1.0 / old_zoom - 1.0 / new_zoom);
+                        let dy_adj = (cy / base_h) * (1.0 / old_zoom - 1.0 / new_zoom);
+                        self.camera.target_x += dx;
+                        self.camera.target_y += dy_adj;
                     }
+                    self.camera.target_zoom = new_zoom;
                 }
             }
             WindowEvent::CloseRequested => event_loop.exit(),

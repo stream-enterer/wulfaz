@@ -472,4 +472,35 @@ mod tests {
         assert_eq!(date2.month, 3);
         assert_eq!(date2.day, 1);
     }
+
+    #[test]
+    fn game_date_multi_year() {
+        let start = StartDate::default_1845();
+        // 3 years (1845, 1846, 1847 — none are leap) = 3 * 365 = 1095 days
+        // 1095 * 1440 = 1,576,800 ticks → 1 January 1848
+        let date = GameDate::from_tick(Tick(1_576_800), &start);
+        assert_eq!(date.year, 1848);
+        assert_eq!(date.month, 1);
+        assert_eq!(date.day, 1);
+    }
+
+    #[test]
+    fn game_date_mid_month_start() {
+        // Start on March 15, 1845
+        let start = StartDate {
+            year: 1845,
+            month: 3,
+            day: 15,
+        };
+        // Tick 0 = March 15
+        let date = GameDate::from_tick(Tick(0), &start);
+        assert_eq!(date.year, 1845);
+        assert_eq!(date.month, 3);
+        assert_eq!(date.day, 15);
+
+        // +17 days (March has 31 days, 15+17=32 → April 1)
+        let date2 = GameDate::from_tick(Tick(17 * 1440), &start);
+        assert_eq!(date2.month, 4);
+        assert_eq!(date2.day, 1);
+    }
 }
