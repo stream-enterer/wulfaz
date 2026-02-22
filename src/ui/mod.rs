@@ -797,6 +797,74 @@ impl WidgetTree {
             return;
         }
 
+        // Collapsible: header row + vertical children when expanded (UI-304).
+        if let Widget::Collapsible {
+            expanded,
+            font_size,
+            ..
+        } = &node.widget
+        {
+            let expanded = *expanded;
+            let scale = font_size / line_height;
+            let header_h = line_height * scale + 4.0; // header row height
+            let children: Vec<WidgetId> = node.children.clone();
+            let parent_clip = node.clip_rect;
+
+            if expanded {
+                // Lay out children below the header, Column-style.
+                let mut cursor_y = content.y + header_h;
+                for &child_id in &children {
+                    let child_measured = self.measure_node(child_id, line_height);
+                    let Some(child) = self.arena.get(child_id) else {
+                        continue;
+                    };
+                    let cp = child.padding;
+                    let cm = child.margin;
+                    let child_h = match child.height {
+                        Sizing::Fixed(px) => px,
+                        Sizing::Percent(frac) => content.height * frac,
+                        Sizing::Fit => child_measured.height + cp.vertical(),
+                    };
+                    let child_w = match child.width {
+                        Sizing::Fixed(px) => px,
+                        Sizing::Percent(frac) => content.width * frac,
+                        Sizing::Fit => child_measured.width + cp.horizontal(),
+                    };
+
+                    if let Some(child_node) = self.arena.get_mut(child_id) {
+                        child_node.measured = child_measured;
+                        child_node.rect = Rect {
+                            x: content.x + cm.left,
+                            y: cursor_y + cm.top,
+                            width: content.width - cm.horizontal(),
+                            height: child_h,
+                        };
+                        child_node.clip_rect = Self::merge_clips(parent_clip, child_node.clip_rect);
+                        child_node.dirty = false;
+                    }
+
+                    let child_content = Rect {
+                        x: content.x + cm.left + cp.left,
+                        y: cursor_y + cm.top + cp.top,
+                        width: (child_w - cp.horizontal()).max(0.0),
+                        height: (child_h - cp.vertical()).max(0.0),
+                    };
+                    let grandchildren: Vec<WidgetId> = self
+                        .arena
+                        .get(child_id)
+                        .map(|n| n.children.clone())
+                        .unwrap_or_default();
+                    for gc in grandchildren {
+                        self.layout_node(gc, child_content, line_height);
+                    }
+
+                    cursor_y += child_h + cm.vertical();
+                }
+            }
+            // When collapsed, skip children entirely.
+            return;
+        }
+
         // Propagate clip_rect from parent to children (UI-104).
         let parent_clip = node.clip_rect;
         let children: Vec<WidgetId> = node.children.clone();
@@ -1073,6 +1141,46 @@ impl WidgetTree {
                 Size {
                     width: 0.0,
                     height: h + 8.0,
+                }
+            }
+            Widget::Collapsible {
+                header,
+                expanded,
+                font_size,
+                ..
+            } => {
+                let scale = font_size / line_height;
+                let char_w = line_height * 0.6 * scale;
+                let header_h = line_height * scale + 4.0;
+                // Triangle indicator (~2 chars) + header text.
+                let header_w = char_w * 2.0 + header.len() as f32 * char_w;
+                if *expanded {
+                    // Header + sum of children heights.
+                    let mut max_w = header_w;
+                    let mut total_h = header_h;
+                    for &child_id in &node.children {
+                        if let Some(child) = self.arena.get(child_id) {
+                            let child_measured = self.measure_node(child_id, line_height);
+                            let child_w = child_measured.width
+                                + child.padding.horizontal()
+                                + child.margin.horizontal();
+                            let child_h = child_measured.height
+                                + child.padding.vertical()
+                                + child.margin.vertical();
+                            max_w = max_w.max(child_w);
+                            total_h += child_h;
+                        }
+                    }
+                    Size {
+                        width: max_w,
+                        height: total_h,
+                    }
+                } else {
+                    // Collapsed: header only.
+                    Size {
+                        width: header_w,
+                        height: header_h,
+                    }
                 }
             }
         }
@@ -1480,6 +1588,40 @@ impl WidgetTree {
                     });
                 }
             }
+            Widget::Collapsible {
+                header,
+                expanded,
+                color,
+                font_size,
+            } => {
+                let scale = font_size / line_height;
+                let char_w = line_height * 0.6 * scale;
+                // Triangle indicator: ▶ collapsed, ▼ expanded.
+                let indicator = if *expanded { "\u{25BC}" } else { "\u{25B6}" };
+                draw_list.texts.push(TextCommand {
+                    text: indicator.to_string(),
+                    x: node.rect.x,
+                    y: node.rect.y + 2.0,
+                    color: *color,
+                    font_size: *font_size,
+                    font_family: FontFamily::default(),
+                    clip,
+                });
+                // Header label, offset past the triangle.
+                draw_list.texts.push(TextCommand {
+                    text: header.clone(),
+                    x: node.rect.x + char_w * 2.0,
+                    y: node.rect.y + 2.0,
+                    color: *color,
+                    font_size: *font_size,
+                    font_family: FontFamily::default(),
+                    clip,
+                });
+                if !*expanded {
+                    return; // Skip children when collapsed.
+                }
+                // When expanded, fall through to the default child draw loop.
+            }
             Widget::ScrollList {
                 bg_color,
                 border_color,
@@ -1737,6 +1879,9 @@ impl WidgetTree {
             } => {
                 color[3] *= opacity;
                 bg_color[3] *= opacity;
+            }
+            Widget::Collapsible { color, .. } => {
+                color[3] *= opacity;
             }
         }
     }
@@ -6003,5 +6148,155 @@ mod tests {
             (cursor.width - 1.0).abs() < 0.01,
             "cursor should be 1px wide"
         );
+    }
+
+    #[test]
+    fn collapsible_collapsed_measures_header_only() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Collapsible {
+            header: "Section".into(),
+            expanded: false,
+            color: [1.0; 4],
+            font_size: 14.0,
+        });
+        // Add a child that should NOT contribute to height.
+        tree.insert(
+            col,
+            Widget::Label {
+                text: "Hidden content".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        let size = tree.measure_node(col, 14.0);
+        // Header only: line_height * scale + 4.0 = 14 + 4 = 18
+        assert!(
+            (size.height - 18.0).abs() < 0.5,
+            "collapsed height {:.1} should be header-only (~18)",
+            size.height
+        );
+    }
+
+    #[test]
+    fn collapsible_expanded_includes_children() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Collapsible {
+            header: "Section".into(),
+            expanded: true,
+            color: [1.0; 4],
+            font_size: 14.0,
+        });
+        tree.insert(
+            col,
+            Widget::Label {
+                text: "Content".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        let size = tree.measure_node(col, 14.0);
+        // Header (18) + child label (14) = 32
+        assert!(
+            size.height > 25.0,
+            "expanded height {:.1} should include header + children",
+            size.height
+        );
+    }
+
+    #[test]
+    fn collapsible_collapsed_skips_child_draw() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Collapsible {
+            header: "Items".into(),
+            expanded: false,
+            color: [1.0; 4],
+            font_size: 14.0,
+        });
+        tree.set_sizing(col, Sizing::Fixed(300.0), Sizing::Fixed(200.0));
+        tree.insert(
+            col,
+            Widget::Label {
+                text: "Should not appear".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // 2 texts: triangle indicator + header label. No child labels.
+        assert_eq!(
+            draw_list.texts.len(),
+            2,
+            "collapsed: indicator + header only"
+        );
+        assert_eq!(draw_list.texts[1].text, "Items");
+    }
+
+    #[test]
+    fn collapsible_expanded_draws_children() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Collapsible {
+            header: "Items".into(),
+            expanded: true,
+            color: [1.0; 4],
+            font_size: 14.0,
+        });
+        tree.set_sizing(col, Sizing::Fixed(300.0), Sizing::Fixed(200.0));
+        tree.insert(
+            col,
+            Widget::Label {
+                text: "Child A".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        tree.insert(
+            col,
+            Widget::Label {
+                text: "Child B".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // 4 texts: triangle + header + 2 children.
+        assert_eq!(
+            draw_list.texts.len(),
+            4,
+            "expanded: indicator + header + 2 children"
+        );
+        assert_eq!(draw_list.texts[0].text, "\u{25BC}"); // down triangle
+        assert_eq!(draw_list.texts[1].text, "Items");
+        assert_eq!(draw_list.texts[2].text, "Child A");
+        assert_eq!(draw_list.texts[3].text, "Child B");
     }
 }

@@ -164,4 +164,14 @@ pub enum Widget {
         placeholder: String, // shown when text is empty
         focused: bool,       // whether cursor is visible
     },
+
+    /// Collapsible section with header and toggleable children (UI-304).
+    /// Header row shows a triangle indicator + label. Click toggles `expanded`.
+    /// When collapsed, children are not measured, laid out, or drawn.
+    Collapsible {
+        header: String,
+        expanded: bool,
+        color: [f32; 4], // text + indicator color sRGB RGBA
+        font_size: f32,  // pixels
+    },
 }
