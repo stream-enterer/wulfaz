@@ -234,6 +234,9 @@ struct App {
     map_origin: (f32, f32),
     map_cell_w: f32,
     map_cell_h: f32,
+    // UI widget system (UI-W02)
+    ui_state: ui::UiState,
+    ui_tree: ui::WidgetTree,
 }
 
 impl ApplicationHandler for App {
@@ -269,9 +272,22 @@ impl ApplicationHandler for App {
             // Input tracking (no GPU needed)
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_pos = position;
+                // Route to UI input system.
+                self.ui_state.handle_cursor_moved(
+                    &self.ui_tree,
+                    position.x as f32,
+                    position.y as f32,
+                );
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let dy = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y,
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 20.0,
+                };
+                self.ui_state.handle_scroll(&self.ui_tree, dy);
             }
             WindowEvent::CloseRequested => event_loop.exit(),
             // Everything below requires GPU
@@ -281,6 +297,13 @@ impl ApplicationHandler for App {
                 };
                 match other {
                     WindowEvent::KeyboardInput { event, .. } => {
+                        // Route keyboard to UI first; skip game keys if consumed.
+                        if let PhysicalKey::Code(kc) = event.physical_key {
+                            let pressed = event.state == ElementState::Pressed;
+                            if self.ui_state.handle_key_input(&self.ui_tree, kc, pressed) {
+                                return;
+                            }
+                        }
                         if event.state != ElementState::Pressed {
                             return;
                         }
@@ -347,15 +370,36 @@ impl ApplicationHandler for App {
                         self.panel =
                             Some(panel::PanelRenderer::new(&gpu.device, gpu.surface_format()));
                     }
-                    // Shift+left-click: toggle player control on a creature
+                    // Mouse click: route to UI first, then game
                     WindowEvent::MouseInput {
-                        state: ElementState::Pressed,
-                        button: MouseButton::Left,
+                        state: btn_state,
+                        button,
                         ..
-                    } if self.modifiers.shift_key() => {
-                        if self.map_cell_w > 0.0 {
-                            let px = self.cursor_pos.x as f32;
-                            let py = self.cursor_pos.y as f32;
+                    } => {
+                        let px = self.cursor_pos.x as f32;
+                        let py = self.cursor_pos.y as f32;
+                        let ui_btn = match button {
+                            MouseButton::Left => ui::MouseButton::Left,
+                            MouseButton::Right => ui::MouseButton::Right,
+                            MouseButton::Middle => ui::MouseButton::Middle,
+                            _ => ui::MouseButton::Left,
+                        };
+                        let pressed = btn_state == ElementState::Pressed;
+
+                        // UI consumes click — don't pass to game.
+                        if self
+                            .ui_state
+                            .handle_mouse_input(&self.ui_tree, ui_btn, pressed, px, py)
+                        {
+                            return;
+                        }
+
+                        // Game: Shift+left-click toggles player control.
+                        if pressed
+                            && button == MouseButton::Left
+                            && self.modifiers.shift_key()
+                            && self.map_cell_w > 0.0
+                        {
                             let vx = (px - self.map_origin.0) / self.map_cell_w;
                             let vy = (py - self.map_origin.1) / self.map_cell_h;
                             if vx >= 0.0 && vy >= 0.0 {
@@ -551,10 +595,8 @@ impl ApplicationHandler for App {
                             );
                             let events = render::render_recent_events(&self.world, event_lines);
 
-                            // Build UI widget tree (demo: Tier 2 showcase)
-                            let ui_theme = ui::Theme::default();
-                            let mut ui_tree = ui::demo_tree(&ui_theme);
-                            ui_tree.layout(
+                            // Layout persistent UI tree and emit draw commands.
+                            self.ui_tree.layout(
                                 ui::Size {
                                     width: screen_w as f32,
                                     height: screen_h as f32,
@@ -562,7 +604,7 @@ impl ApplicationHandler for App {
                                 m.line_height,
                             );
                             let mut draw_list = ui::DrawList::new();
-                            ui_tree.draw(&mut draw_list);
+                            self.ui_tree.draw(&mut draw_list);
 
                             // Panels (backgrounds first)
                             panel.begin_frame(&gpu.queue, screen_w, screen_h);
@@ -643,6 +685,7 @@ fn main() {
     let start_camera = Camera { x: 3750, y: 3450 };
 
     let event_loop = EventLoop::new().expect("create event loop");
+    let ui_theme = ui::Theme::default();
     let mut app = App {
         gpu: None,
         font: None,
@@ -657,6 +700,8 @@ fn main() {
         map_origin: (0.0, 0.0),
         map_cell_w: 0.0,
         map_cell_h: 0.0,
+        ui_state: ui::UiState::new(),
+        ui_tree: ui::demo_tree(&ui_theme),
     };
     event_loop.run_app(&mut app).expect("run event loop");
 }

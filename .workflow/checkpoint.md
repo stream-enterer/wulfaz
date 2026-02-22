@@ -4,21 +4,28 @@
 None
 
 ## Completed
-UI-R02 — Theme and visual style — COMPLETE
+UI-W02 — Input routing + hit testing — COMPLETE
 
-- `Theme` struct in `src/ui/theme.rs` with DD-2 palette: parchment bg, gold accent, text light/dark, danger red, disabled grey
-- Font defaults: Serif header 16pt, Serif body 12pt, Mono data 9pt
-- Panel defaults: gold border 2px, shadow 6px, padding 12px
-- Spacing defaults: label gap 4px, button padding 8h/4v
-- `demo_tree()` now takes `&Theme` instead of hardcoded colors
-- Theme constructed in `main.rs` and passed through
-- 3 new tests (default_palette_matches_dd2, hex_conversion, demo_tree_uses_theme), all 235 tests pass, zero warnings
+- `Rect::contains(px, py)` for point-in-rect tests
+- `WidgetTree::hit_test(x, y)` — back-to-front traversal returns topmost widget
+- `WidgetTree::focusable_widgets()` — depth-first collection of Buttons for Tab cycling
+- `UiState` struct: hovered, focused, pressed, captured, drag tracking
+- `handle_cursor_moved` / `handle_mouse_input` / `handle_key_input` / `handle_scroll`
+- Mouse capture holds during drag (threshold 4px), released on mouse-up
+- Tab cycles focus through focusable widgets (Buttons)
+- Click on Button sets focus; click outside clears focus
+- UI events consumed before game input (keyboard, mouse, scroll)
+- Persistent `ui_tree` + `ui_state` on App (not rebuilt each frame)
+- 11 new tests, all 246 tests pass, zero warnings
 
 ## Files Modified
-- src/ui/theme.rs (new — Theme struct, DD-2 constants, tests)
-- src/ui/mod.rs (theme module, re-export, demo_tree signature, demo_tree_uses_theme test)
-- src/main.rs (Theme::default() + demo_tree(&theme))
+- src/ui/input.rs (new — UiEvent, MouseButton, UiState, 11 tests)
+- src/ui/mod.rs (Rect::contains, hit_test, focusable_widgets, mod input)
+- src/main.rs (UiState + ui_tree on App, event routing)
 
 ## Next Action
-Pick next task from backlog. UI-W02 (input routing) is unblocked (needs UI-W01, done).
-Tier 3 tasks becoming available: UI-R01 needs P01+P02 (done). UI-W03/W04 need W01+W02.
+Pick next task from backlog. Unblocked candidates:
+- UI-R01 — Rich text rendering (needs P01+P02, both done)
+- UI-I01a — Status bar (needs W01+R02, both done)
+- UI-I02 — Map overlay (needs P01+P03, both done)
+Tier 3 tasks W03/W04 now unblocked (need W01+W02, both done).

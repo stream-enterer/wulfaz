@@ -1,9 +1,12 @@
 mod draw;
+mod input;
 mod theme;
 mod widget;
 
 #[allow(unused_imports)] // Public API: used by game panels constructing widgets.
 pub use draw::{DrawList, FontFamily, PanelCommand, TextCommand};
+#[allow(unused_imports)] // Public API: used by main.rs for input routing (UI-W02).
+pub use input::{MouseButton, UiEvent, UiState};
 pub use theme::Theme;
 pub use widget::Widget;
 
@@ -30,6 +33,13 @@ pub struct Rect {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+}
+
+impl Rect {
+    /// Returns true if the point (px, py) is inside this rectangle.
+    pub fn contains(&self, px: f32, py: f32) -> bool {
+        px >= self.x && px < self.x + self.width && py >= self.y && py < self.y + self.height
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -312,6 +322,56 @@ impl WidgetTree {
     /// Root widget ids.
     pub fn roots(&self) -> &[WidgetId] {
         &self.roots
+    }
+
+    // ------------------------------------------------------------------
+    // Hit testing
+    // ------------------------------------------------------------------
+
+    /// Find the topmost widget whose rect contains the point (x, y).
+    /// Walks back-to-front: last child / last root is topmost.
+    pub fn hit_test(&self, x: f32, y: f32) -> Option<WidgetId> {
+        for &root in self.roots.iter().rev() {
+            if let Some(hit) = self.hit_test_node(root, x, y) {
+                return Some(hit);
+            }
+        }
+        None
+    }
+
+    fn hit_test_node(&self, id: WidgetId, x: f32, y: f32) -> Option<WidgetId> {
+        let node = self.arena.get(id)?;
+        if !node.rect.contains(x, y) {
+            return None;
+        }
+        // Children drawn on top — check last child first.
+        for &child in node.children.iter().rev() {
+            if let Some(hit) = self.hit_test_node(child, x, y) {
+                return Some(hit);
+            }
+        }
+        Some(id)
+    }
+
+    /// Collect all focusable widgets in tree order (depth-first).
+    /// Currently only Buttons are focusable.
+    pub fn focusable_widgets(&self) -> Vec<WidgetId> {
+        let mut result = Vec::new();
+        for &root in &self.roots {
+            self.collect_focusable(root, &mut result);
+        }
+        result
+    }
+
+    fn collect_focusable(&self, id: WidgetId, out: &mut Vec<WidgetId>) {
+        if let Some(node) = self.arena.get(id) {
+            if matches!(node.widget, Widget::Button { .. }) {
+                out.push(id);
+            }
+            for &child in &node.children {
+                self.collect_focusable(child, out);
+            }
+        }
     }
 
     // ------------------------------------------------------------------

@@ -129,13 +129,13 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 | Tier | Tasks | Milestone |
 |------|-------|-----------|
 | 1 — Foundation | COMPLETE | Colored text + panel backgrounds + widget tree |
-| 2 — Styled Panels | 2 | Theme + mouse input |
+| 2 — Styled Panels | COMPLETE | Theme + mouse input |
 | 3 — Full Widget Set | 3 | Rich text + scroll list + tooltips |
 | 4 — Game Integration | 5 (I01a-d + I02) | Real game UI replaces string rendering |
 | 5 — Polish | 2 | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-13 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+11 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -180,24 +180,17 @@ All three tasks done: UI-P01 (per-vertex color), UI-P03 (panel renderer), UI-W01
 
 ---
 
-### Tier 2 — Styled Panels
+### Tier 2 — Styled Panels — COMPLETE
 
-W02 can start now (W01 done). R02 DONE.
+All tasks done: UI-P02 (multi-font atlas), UI-R02 (theme), UI-W02 (input routing).
 
-**Available after this tier:**
-- Multiple fonts (serif + mono) rendered from a shared atlas — DONE (UI-P02)
-- `Theme` struct centralizing all colors, fonts, and spacing constants — DONE (UI-R02)
+**Available:**
+- Multiple fonts (serif + mono) rendered from a shared atlas
+- `Theme` struct centralizing all colors, fonts, and spacing constants
 - Mouse hover and click dispatched to widgets (buttons respond to clicks)
 - Focus management (Tab to cycle, keyboard events to focused widget)
-
-**UI-DEMO after Tier 2:** Previous test panel now uses Libertinus Serif 16pt for header, Libertinus Mono 9pt for data labels. Theme colors applied from `Theme` struct. A clickable button toggles a label's text. Mouse hover highlights the button.
-
-- **UI-W02** — Input routing + hit testing. Needs: UI-W01.
-  - Mouse position -> walk widget tree back-to-front -> first widget whose rect contains cursor gets hover/click.
-  - Event types: `Hover`, `Click(button)`, `DragStart`, `DragMove`, `DragEnd`, `Scroll(delta)`.
-  - Focus management: `focused_widget: Option<WidgetId>`. Tab advances focus. Focused widget receives keyboard events.
-  - Mouse capture: dragging a scrollbar or slider holds capture even when cursor leaves the widget rect. Release on mouse-up.
-  - All UI input handling runs BEFORE the simulation tick in the main loop (reads `winit` events, updates `UiState`, consumes events so they don't reach the sim).
+- Mouse capture for drag operations, 4px threshold
+- UI events consumed before game input
 
 ---
 
