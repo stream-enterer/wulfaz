@@ -196,6 +196,13 @@ const MAX_TICKS_PER_FRAME: u32 = 5;
 struct Camera {
     x: i32,
     y: i32,
+    /// Smooth float target for lerp interpolation (UI-107).
+    target_x: f32,
+    target_y: f32,
+    /// Zoom level: 1.0 = default (1 tile per character cell). >1 = zoomed in.
+    zoom: f32,
+    /// Target zoom for smooth interpolation.
+    target_zoom: f32,
 }
 
 enum PlayerAction {
@@ -372,7 +379,15 @@ impl ApplicationHandler for App {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => y,
                     winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 20.0,
                 };
-                self.ui_state.handle_scroll(&mut self.ui_tree, dy);
+                if !self.ui_state.handle_scroll(&mut self.ui_tree, dy) {
+                    // Scroll not consumed by UI — zoom camera (UI-107).
+                    let zoom_factor = 1.1_f32;
+                    if dy > 0.0 {
+                        self.camera.target_zoom = (self.camera.target_zoom * zoom_factor).min(4.0);
+                    } else if dy < 0.0 {
+                        self.camera.target_zoom = (self.camera.target_zoom / zoom_factor).max(0.25);
+                    }
+                }
             }
             WindowEvent::CloseRequested => event_loop.exit(),
             // Everything below requires GPU
@@ -455,18 +470,23 @@ impl ApplicationHandler for App {
 
                         // 3. Game keys.
                         match kc {
-                            // Camera: WASD + arrows (realtime mode only)
+                            // Camera: WASD + arrows (realtime mode only) (UI-107).
+                            // Pan speed scales inversely with zoom (faster when zoomed out).
                             KeyCode::KeyW | KeyCode::ArrowUp if self.world.player.is_none() => {
-                                self.camera.y -= 1;
+                                let speed = (3.0 / self.camera.zoom).max(1.0);
+                                self.camera.target_y -= speed;
                             }
                             KeyCode::KeyS | KeyCode::ArrowDown if self.world.player.is_none() => {
-                                self.camera.y += 1;
+                                let speed = (3.0 / self.camera.zoom).max(1.0);
+                                self.camera.target_y += speed;
                             }
                             KeyCode::KeyA | KeyCode::ArrowLeft if self.world.player.is_none() => {
-                                self.camera.x -= 1;
+                                let speed = (3.0 / self.camera.zoom).max(1.0);
+                                self.camera.target_x -= speed;
                             }
                             KeyCode::KeyD | KeyCode::ArrowRight if self.world.player.is_none() => {
-                                self.camera.x += 1;
+                                let speed = (3.0 / self.camera.zoom).max(1.0);
+                                self.camera.target_x += speed;
                             }
                             // Numpad movement (roguelike mode)
                             kc if self.world.player.is_some() => {
@@ -810,12 +830,50 @@ impl ApplicationHandler for App {
                             {
                                 self.camera.x = pos.x - viewport_cols as i32 / 2;
                                 self.camera.y = pos.y - viewport_rows as i32 / 2;
+                                self.camera.target_x = self.camera.x as f32;
+                                self.camera.target_y = self.camera.y as f32;
+                            } else {
+                                // Edge-scroll: pan camera when cursor is within 20px of screen edge (UI-107).
+                                let edge_margin = 20.0_f32;
+                                let edge_speed = (2.0 / self.camera.zoom).max(0.5);
+                                let cx = self.cursor_pos.x as f32;
+                                let cy = self.cursor_pos.y as f32;
+                                let sw = screen_w as f32;
+                                let sh = screen_h as f32;
+                                if cx < edge_margin && cx >= 0.0 {
+                                    self.camera.target_x -= edge_speed;
+                                } else if cx > sw - edge_margin && cx <= sw {
+                                    self.camera.target_x += edge_speed;
+                                }
+                                if cy < edge_margin && cy >= 0.0 {
+                                    self.camera.target_y -= edge_speed;
+                                } else if cy > sh - edge_margin && cy <= sh {
+                                    self.camera.target_y += edge_speed;
+                                }
+
+                                // Smooth lerp: camera position interpolates toward target (UI-107).
+                                let lerp_factor = 0.15_f32;
+                                self.camera.zoom +=
+                                    (self.camera.target_zoom - self.camera.zoom) * lerp_factor;
+                                let tx = self.camera.target_x;
+                                let ty = self.camera.target_y;
+                                let curr_x = self.camera.x as f32;
+                                let curr_y = self.camera.y as f32;
+                                let new_x = curr_x + (tx - curr_x) * lerp_factor;
+                                let new_y = curr_y + (ty - curr_y) * lerp_factor;
+                                self.camera.x = new_x.round() as i32;
+                                self.camera.y = new_y.round() as i32;
                             }
 
                             let map_w = self.world.tiles.width() as i32;
                             let map_h = self.world.tiles.height() as i32;
                             let max_cam_x = (map_w - viewport_cols as i32).max(0);
                             let max_cam_y = (map_h - viewport_rows as i32).max(0);
+                            // Clamp both target and actual camera position.
+                            self.camera.target_x =
+                                self.camera.target_x.clamp(0.0, max_cam_x as f32);
+                            self.camera.target_y =
+                                self.camera.target_y.clamp(0.0, max_cam_y as f32);
                             self.camera.x = self.camera.x.clamp(0, max_cam_x);
                             self.camera.y = self.camera.y.clamp(0, max_cam_y);
 
@@ -1186,7 +1244,14 @@ fn main() {
     loading::load_utility_config(&mut world, "data/utility.ron");
 
     // Start camera overlooking the Seine near Ile de la Cité / Notre-Dame
-    let start_camera = Camera { x: 3750, y: 3450 };
+    let start_camera = Camera {
+        x: 3750,
+        y: 3450,
+        target_x: 3750.0,
+        target_y: 3450.0,
+        zoom: 1.0,
+        target_zoom: 1.0,
+    };
 
     let event_loop = EventLoop::new().expect("create event loop");
     let ui_theme = ui::Theme::default();
