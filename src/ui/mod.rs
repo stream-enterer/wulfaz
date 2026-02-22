@@ -1,7 +1,10 @@
 mod draw;
+mod theme;
 mod widget;
 
+#[allow(unused_imports)] // Public API: used by game panels constructing widgets.
 pub use draw::{DrawList, FontFamily, PanelCommand, TextCommand};
+pub use theme::Theme;
 pub use widget::Widget;
 
 use slotmap::{SlotMap, new_key_type};
@@ -532,70 +535,71 @@ impl WidgetTree {
 }
 
 // ---------------------------------------------------------------------------
-// Tier 1 UI-DEMO: parchment panel with 3 colored labels
+// Tier 2 UI-DEMO: themed panel with multi-font labels
 // ---------------------------------------------------------------------------
 
-/// Build the Tier 1 demo widget tree: a parchment panel containing three
-/// colored labels (gold header, white body, red warning).
-pub fn demo_tree(line_height: f32) -> WidgetTree {
+/// Build the demo widget tree using Theme constants.
+/// Tier 2: parchment panel with themed colors, Serif header (16pt),
+/// Serif body (12pt), Mono warning (9pt).
+pub fn demo_tree(theme: &Theme) -> WidgetTree {
     let mut tree = WidgetTree::new();
 
-    // CK3 parchment panel
+    // Themed parchment panel
     let panel = tree.insert_root(Widget::Panel {
-        bg_color: [0.87, 0.81, 0.70, 0.95],
-        border_color: [0.83, 0.68, 0.21, 1.0],
-        border_width: 2.0,
-        shadow_width: 6.0,
+        bg_color: theme.bg_parchment,
+        border_color: theme.panel_border_color,
+        border_width: theme.panel_border_width,
+        shadow_width: theme.panel_shadow_width,
     });
     tree.set_position(panel, Position::Fixed { x: 20.0, y: 20.0 });
     tree.set_sizing(panel, Sizing::Fixed(260.0), Sizing::Fixed(120.0));
-    tree.set_padding(panel, Edges::all(12.0));
+    tree.set_padding(panel, Edges::all(theme.panel_padding));
 
-    // Gold header — Serif 16pt style
+    // Gold header — Serif, header size
     let header = tree.insert(
         panel,
         Widget::Label {
             text: "Header".into(),
-            color: [0.78, 0.66, 0.31, 1.0], // CK3 gold
-            font_size: line_height,
-            font_family: FontFamily::Serif,
+            color: theme.gold,
+            font_size: theme.font_header_size,
+            font_family: theme.font_header_family,
         },
     );
     tree.set_position(header, Position::Fixed { x: 0.0, y: 0.0 });
 
-    // White body text — Serif
+    // Light body text — Serif, body size
     let body = tree.insert(
         panel,
         Widget::Label {
             text: "Body text".into(),
-            color: [0.94, 0.90, 0.82, 1.0], // warm white
-            font_size: line_height,
-            font_family: FontFamily::Serif,
+            color: theme.text_light,
+            font_size: theme.font_body_size,
+            font_family: theme.font_body_family,
         },
     );
     tree.set_position(
         body,
         Position::Fixed {
             x: 0.0,
-            y: line_height + 4.0,
+            y: theme.font_header_size + theme.label_gap,
         },
     );
 
-    // Red warning — Mono for data/terminal style
+    // Red warning — Mono, data size
     let warning = tree.insert(
         panel,
         Widget::Label {
             text: "Warning".into(),
-            color: [0.75, 0.25, 0.25, 1.0], // danger red
-            font_size: line_height,
-            font_family: FontFamily::Mono,
+            color: theme.danger,
+            font_size: theme.font_data_size,
+            font_family: theme.font_data_family,
         },
     );
     tree.set_position(
         warning,
         Position::Fixed {
             x: 0.0,
-            y: (line_height + 4.0) * 2.0,
+            y: theme.font_header_size + theme.label_gap + theme.font_body_size + theme.label_gap,
         },
     );
 
@@ -819,6 +823,42 @@ mod tests {
         assert!((dl.panels[0].border_width - 2.0).abs() < 0.01);
         assert_eq!(dl.texts[0].text, "Gold Header");
         assert_eq!(dl.texts[0].font_family, FontFamily::Serif);
+    }
+
+    #[test]
+    fn demo_tree_uses_theme() {
+        let theme = Theme::default();
+        let mut tree = demo_tree(&theme);
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        // Panel uses theme parchment bg
+        assert_eq!(dl.panels.len(), 1);
+        assert_eq!(dl.panels[0].bg_color, theme.bg_parchment);
+        assert_eq!(dl.panels[0].border_color, theme.panel_border_color);
+        assert!((dl.panels[0].border_width - theme.panel_border_width).abs() < 0.01);
+
+        // 3 labels: gold header, light body, red warning
+        assert_eq!(dl.texts.len(), 3);
+        assert_eq!(dl.texts[0].color, theme.gold);
+        assert_eq!(dl.texts[0].font_family, theme.font_header_family);
+        assert!((dl.texts[0].font_size - theme.font_header_size).abs() < 0.01);
+
+        assert_eq!(dl.texts[1].color, theme.text_light);
+        assert_eq!(dl.texts[1].font_family, theme.font_body_family);
+        assert!((dl.texts[1].font_size - theme.font_body_size).abs() < 0.01);
+
+        assert_eq!(dl.texts[2].color, theme.danger);
+        assert_eq!(dl.texts[2].font_family, theme.font_data_family);
+        assert!((dl.texts[2].font_size - theme.font_data_size).abs() < 0.01);
     }
 
     #[test]

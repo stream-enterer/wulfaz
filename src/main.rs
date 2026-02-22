@@ -551,8 +551,9 @@ impl ApplicationHandler for App {
                             );
                             let events = render::render_recent_events(&self.world, event_lines);
 
-                            // Build UI widget tree (demo: Tier 1 showcase)
-                            let mut ui_tree = ui::demo_tree(m.line_height);
+                            // Build UI widget tree (demo: Tier 2 showcase)
+                            let ui_theme = ui::Theme::default();
+                            let mut ui_tree = ui::demo_tree(&ui_theme);
                             ui_tree.layout(
                                 ui::Size {
                                     width: screen_w as f32,

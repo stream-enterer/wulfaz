@@ -182,20 +182,15 @@ All three tasks done: UI-P01 (per-vertex color), UI-P03 (panel renderer), UI-W01
 
 ### Tier 2 — Styled Panels
 
-W02 can start now (W01 done). R02 can start now (P02 + P03 done). Both unblocked.
+W02 can start now (W01 done). R02 DONE.
 
 **Available after this tier:**
 - Multiple fonts (serif + mono) rendered from a shared atlas — DONE (UI-P02)
-- `Theme` struct centralizing all colors, fonts, and spacing constants
+- `Theme` struct centralizing all colors, fonts, and spacing constants — DONE (UI-R02)
 - Mouse hover and click dispatched to widgets (buttons respond to clicks)
 - Focus management (Tab to cycle, keyboard events to focused widget)
 
 **UI-DEMO after Tier 2:** Previous test panel now uses Libertinus Serif 16pt for header, Libertinus Mono 9pt for data labels. Theme colors applied from `Theme` struct. A clickable button toggles a label's text. Mouse hover highlights the button.
-
-- **UI-R02** — Theme and visual style. Needs: UI-P02, UI-P03. Decisions resolved by DD-2.
-  - `Theme` struct holding: color palette constants (parchment, gold, white, dark, red, grey per DD-2), font family names, panel border style, margin/padding defaults.
-  - Passed to `draw()` so widgets don't hardcode colors. Single global theme initially (no runtime theme switching).
-  - Border style: shader-generated (per DD-2). `Theme` holds border width, border color, background color, inner shadow offset.
 
 - **UI-W02** — Input routing + hit testing. Needs: UI-W01.
   - Mouse position -> walk widget tree back-to-front -> first widget whose rect contains cursor gets hover/click.

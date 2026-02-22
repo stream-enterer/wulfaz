@@ -4,25 +4,21 @@
 None
 
 ## Completed
-UI-P02 — Multi-font atlas support — COMPLETE
+UI-R02 — Theme and visual style — COMPLETE
 
-- `FontFamily` enum: `Mono` (Libertinus Mono), `Serif` (Libertinus Serif) with `family_name()` accessor
-- `GlyphCacheKey`: composite `(fontdb::ID, font_size_bits, glyph_id)` per DD-3
-- `FontRenderer` loads both bundled fonts into `fontdb::Database` and maps each to a FreeType face via `HashMap<fontdb::ID, freetype::Face>`
-- `rasterize_glyph_on_demand()` accepts `font_id`, `font_size_px`, `glyph_id` — dynamically calls `set_char_size` for size-variant rasterization
-- `prepare_text_shaped()` parameterized by family name + font size; cosmic-text selects font via `Attrs::family()`
-- `prepare_text_with_font()` public API for UI widget text commands
-- `TextCommand` and `Widget::Label`/`Widget::Button` carry `font_family: FontFamily`
-- `demo_tree()` uses Serif for header/body, Mono for warning (verifies multi-font rendering)
-- 7 UI tests (added `draw_list_multi_font`), all 232 tests pass, zero warnings
+- `Theme` struct in `src/ui/theme.rs` with DD-2 palette: parchment bg, gold accent, text light/dark, danger red, disabled grey
+- Font defaults: Serif header 16pt, Serif body 12pt, Mono data 9pt
+- Panel defaults: gold border 2px, shadow 6px, padding 12px
+- Spacing defaults: label gap 4px, button padding 8h/4v
+- `demo_tree()` now takes `&Theme` instead of hardcoded colors
+- Theme constructed in `main.rs` and passed through
+- 3 new tests (default_palette_matches_dd2, hex_conversion, demo_tree_uses_theme), all 235 tests pass, zero warnings
 
 ## Files Modified
-- src/font.rs (multi-face loading, GlyphCacheKey, parameterized shaping/rasterization)
-- src/ui/draw.rs (FontFamily enum, font_family field on TextCommand)
-- src/ui/widget.rs (font_family field on Label and Button)
-- src/ui/mod.rs (font_family wiring in draw/measure, multi-font test, demo_tree update)
-- src/main.rs (prepare_text_with_font for UI widget commands)
+- src/ui/theme.rs (new — Theme struct, DD-2 constants, tests)
+- src/ui/mod.rs (theme module, re-export, demo_tree signature, demo_tree_uses_theme test)
+- src/main.rs (Theme::default() + demo_tree(&theme))
 
 ## Next Action
-Pick next task from backlog. Tier 2 remaining: UI-R02 (theme), UI-W02 (input routing).
-UI-R02 needs UI-P02 (done) + UI-P03 (done). UI-W02 needs UI-W01 (done). Both unblocked.
+Pick next task from backlog. UI-W02 (input routing) is unblocked (needs UI-W01, done).
+Tier 3 tasks becoming available: UI-R01 needs P01+P02 (done). UI-W03/W04 need W01+W02.
