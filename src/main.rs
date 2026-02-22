@@ -545,6 +545,17 @@ impl ApplicationHandler for App {
                             return;
                         }
 
+                        // Map click dispatch (UI-106): translate screen coords to tile coords.
+                        if pressed && self.map_cell_w > 0.0 {
+                            let vx = (px - self.map_origin.0) / self.map_cell_w;
+                            let vy = (py - self.map_origin.1) / self.map_cell_h;
+                            if vx >= 0.0 && vy >= 0.0 {
+                                let tile_x = self.camera.x + vx as i32;
+                                let tile_y = self.camera.y + vy as i32;
+                                self.ui_state.submit_map_click(tile_x, tile_y, ui_btn);
+                            }
+                        }
+
                         // Game: Shift+left-click toggles player control.
                         if pressed
                             && button == MouseButton::Left

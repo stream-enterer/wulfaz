@@ -11,7 +11,7 @@ pub use animation::{Animator, Easing};
 #[allow(unused_imports)] // Public API: used by game panels constructing widgets.
 pub use draw::{DrawList, FontFamily, PanelCommand, RichTextCommand, TextCommand, TextSpan};
 #[allow(unused_imports)] // Public API: used by main.rs for input routing (UI-W02).
-pub use input::{MouseButton, UiEvent, UiState};
+pub use input::{MapClick, MouseButton, UiEvent, UiState};
 #[allow(unused_imports)] // Public API: used by main.rs for keyboard shortcuts (UI-I03).
 pub use keybindings::{Action, KeyBindings, KeyCombo, ModifierFlags};
 pub use theme::Theme;

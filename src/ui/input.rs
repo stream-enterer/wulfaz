@@ -29,6 +29,14 @@ pub enum UiEvent {
     Scroll(f32),
 }
 
+/// Map click event emitted when a mouse click falls through the UI (UI-106).
+#[derive(Debug, Clone, Copy)]
+pub struct MapClick {
+    pub tile_x: i32,
+    pub tile_y: i32,
+    pub button: MouseButton,
+}
+
 /// Minimum pixel distance before a press becomes a drag.
 const DRAG_THRESHOLD: f32 = 4.0;
 
@@ -88,6 +96,8 @@ pub struct UiState {
     tooltip_pending: Option<TooltipPending>,
     /// When the last tooltip was dismissed (for fast-show window).
     tooltip_last_dismiss: Option<Instant>,
+    /// Pending map click event (UI-106). Consumed by `poll_map_click()`.
+    map_click: Option<MapClick>,
 }
 
 impl UiState {
@@ -105,7 +115,23 @@ impl UiState {
             tooltip_stack: Vec::new(),
             tooltip_pending: None,
             tooltip_last_dismiss: None,
+            map_click: None,
         }
+    }
+
+    /// Submit a map click event from the main loop (UI-106).
+    /// Called when a mouse click falls through `hit_test()`.
+    pub fn submit_map_click(&mut self, tile_x: i32, tile_y: i32, button: MouseButton) {
+        self.map_click = Some(MapClick {
+            tile_x,
+            tile_y,
+            button,
+        });
+    }
+
+    /// Poll the most recent map click event, consuming it.
+    pub fn poll_map_click(&mut self) -> Option<MapClick> {
+        self.map_click.take()
     }
 
     /// Handle cursor movement. Returns true if the cursor is over a UI widget
@@ -1167,5 +1193,25 @@ mod tests {
             has_tooltip,
             "demo should have at least one widget with tooltip"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Map click dispatch (UI-106)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn map_click_submit_and_poll() {
+        let mut state = UiState::new();
+        assert!(state.poll_map_click().is_none());
+
+        state.submit_map_click(42, 17, MouseButton::Left);
+
+        let click = state.poll_map_click().expect("should have a MapClick");
+        assert_eq!(click.tile_x, 42);
+        assert_eq!(click.tile_y, 17);
+        assert_eq!(click.button, MouseButton::Left);
+
+        // Polling consumes the event.
+        assert!(state.poll_map_click().is_none());
     }
 }
