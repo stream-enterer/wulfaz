@@ -647,7 +647,7 @@ impl TileMap {
         const CARDINAL_COST: u32 = 100;
         const DIAGONAL_COST: u32 = 141; // √2 × 100, truncated
 
-        const MAX_EXPANDED: usize = 8192;
+        const MAX_EXPANDED: usize = 32_768;
         const DIRS: [(i32, i32); 8] = [
             (0, -1),
             (1, -1),

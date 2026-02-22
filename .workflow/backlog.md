@@ -48,8 +48,6 @@ Goal: ~200 entities with full AI on the real map.
   - Single neighborhood first: filter to one QUARTIER (recommend "Arcis" — 825 buildings, dense, central, ~150m×300m).
   - The full data pipeline reference (address → building → people) is documented in SCALE-A07 and `~/Development/paris/PROJECT.md`.
 
-- **SCALE-B04** — Increase A* node limit to 32K. Stopgap for larger-map pathing. Replaced by SCALE-D03.
-
 ## Phase C — Simulation LOD (1M Population)
 
 Goal: Full city population. ~4K active, rest statistical.
