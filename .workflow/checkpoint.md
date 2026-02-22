@@ -4,28 +4,25 @@
 None
 
 ## Completed
-UI-W05 — Animation system — COMPLETE
+UI-I03 — Keyboard shortcut system — COMPLETE
 
-- New file: `src/ui/animation.rs` — `Animator` (HashMap-keyed f32 interpolation), `Easing` enum (Linear, EaseInOut, EaseOut), cubic easing math
-- `WidgetTree::set_subtree_opacity()` — walks subtree, multiplies all color alpha channels
-- `WidgetTree::set_widget_bg_alpha()` — sets single widget's bg alpha (for hover highlight)
-- 4 animation theme constants in `Theme`: tooltip fade (150ms), inspector slide (200ms), hover highlight (200ms, 0.3 alpha)
-- 3 concrete animations integrated in main.rs:
-  - Hover tooltip fade-in: 150ms EaseOut opacity when hovering a new tile
-  - Inspector slide-in: 200ms EaseOut slide from right edge when entity selected
-  - Button hover highlight: 200ms EaseOut bg alpha on inspector close button hover/unhover
-- Animator tracks `last_hover_tile` and `last_selected_entity` for state change detection
-- `Animator::gc()` called each frame to clean up completed animations
-- 15 new animation tests + 2 widget tree opacity tests
-- All 528 tests pass (214 lib + 303 main + 5 determinism + 6 invariant), zero warnings
+- New file: `src/ui/keybindings.rs` — `KeyCombo`, `ModifierFlags`, `Action` enum, `KeyBindings` map with defaults + reverse lookup for labels
+- Default bindings: Space=PauseSim, Escape=CloseTopmost, 1-5=SpeedSet
+- `KeyBindings::label_for(action)` returns human-readable label (e.g. "Space", "Ctrl+P")
+- `StatusBarInfo` struct replaces positional args for `build_status_bar`
+- Status bar shows: "PAUSED (Space)" in danger red when paused, "Speed: Nx (N)" with gold highlight when speed > 1
+- CloseTopmost priority: tooltips → inspector → exit
+- Pause stops tick accumulator; unpause resets frame time to avoid burst
+- Speed multiplier applied to tick accumulator: `dt * sim_speed`
+- Global keybindings processed before widget focus dispatch in keyboard handler
+- 6 keybindings tests + 2 status bar pause/speed tests
+- All 537 tests pass (214 lib + 312 main + 5 determinism + 6 invariant), zero warnings
 
 ## Files Modified
-- src/ui/animation.rs (NEW — Animator, Easing, Animation, easing math, 15 tests)
-- src/ui/mod.rs (module wire-up, set_subtree_opacity, set_widget_bg_alpha, 2 tests)
-- src/ui/theme.rs (4 animation duration/alpha constants)
-- src/main.rs (Animator on App, 3 animation integrations in RedrawRequested)
+- src/ui/keybindings.rs (NEW — KeyCombo, ModifierFlags, Action, KeyBindings, key_name, 6 tests)
+- src/ui/mod.rs (module wire-up, StatusBarInfo struct, build_status_bar refactored, 2 new tests, 4 existing tests updated)
+- src/main.rs (keybindings/paused/sim_speed on App, global keybinding dispatch, pause/speed tick logic)
 
 ## Next Action
 Pick next task from backlog. Remaining:
-- UI-I03 — Keyboard shortcut system (Tier 5 polish)
 - UI-DEMO update (Tier 5 milestone)

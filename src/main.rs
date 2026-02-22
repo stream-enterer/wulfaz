@@ -310,6 +310,10 @@ struct App {
     animator: ui::Animator,
     last_hover_tile: Option<(i32, i32)>,
     last_selected_entity: Option<components::Entity>,
+    // Keyboard shortcut system (UI-I03)
+    keybindings: ui::KeyBindings,
+    paused: bool,
+    sim_speed: u32, // 1 = normal, 2-5 = faster
     // Entity inspector (UI-I01d)
     selected_entity: Option<components::Entity>,
     inspector_close_id: Option<ui::WidgetId>,
@@ -373,50 +377,74 @@ impl ApplicationHandler for App {
                 };
                 match other {
                     WindowEvent::KeyboardInput { event, .. } => {
-                        // Route keyboard to UI first; skip game keys if consumed.
-                        if let PhysicalKey::Code(kc) = event.physical_key {
-                            let pressed = event.state == ElementState::Pressed;
-                            if self
-                                .ui_state
-                                .handle_key_input(&mut self.ui_tree, kc, pressed)
-                            {
-                                return;
-                            }
-                        }
                         if event.state != ElementState::Pressed {
                             return;
                         }
-                        match event.physical_key {
-                            PhysicalKey::Code(KeyCode::Escape) => {
-                                if self.selected_entity.is_some() {
-                                    self.selected_entity = None;
-                                } else {
-                                    event_loop.exit();
+                        let PhysicalKey::Code(kc) = event.physical_key else {
+                            return;
+                        };
+
+                        // 1. Global keybindings (UI-I03) — processed before widget focus.
+                        let combo = ui::KeyCombo {
+                            modifiers: ui::ModifierFlags {
+                                shift: self.modifiers.shift_key(),
+                                ctrl: self.modifiers.control_key(),
+                                alt: self.modifiers.alt_key(),
+                            },
+                            key: kc,
+                        };
+                        if let Some(action) = self.keybindings.lookup(combo) {
+                            match action {
+                                ui::Action::PauseSim => {
+                                    self.paused = !self.paused;
+                                    if !self.paused {
+                                        // Reset accumulator to avoid tick burst on unpause.
+                                        self.last_frame_time = Instant::now();
+                                        self.tick_accumulator = 0.0;
+                                    }
+                                }
+                                ui::Action::SpeedSet(speed) => {
+                                    self.sim_speed = speed;
+                                }
+                                ui::Action::CloseTopmost => {
+                                    // Priority: tooltips → inspector → exit.
+                                    if self.ui_state.tooltip_count() > 0 {
+                                        self.ui_state.dismiss_all_tooltips(
+                                            &mut self.ui_tree,
+                                            Instant::now(),
+                                        );
+                                    } else if self.selected_entity.is_some() {
+                                        self.selected_entity = None;
+                                    } else {
+                                        event_loop.exit();
+                                    }
                                 }
                             }
+                            return;
+                        }
+
+                        // 2. UI widget focus dispatch (Tab, ScrollList nav).
+                        if self.ui_state.handle_key_input(&mut self.ui_tree, kc, true) {
+                            return;
+                        }
+
+                        // 3. Game keys.
+                        match kc {
                             // Camera: WASD + arrows (realtime mode only)
-                            PhysicalKey::Code(KeyCode::KeyW | KeyCode::ArrowUp)
-                                if self.world.player.is_none() =>
-                            {
+                            KeyCode::KeyW | KeyCode::ArrowUp if self.world.player.is_none() => {
                                 self.camera.y -= 1;
                             }
-                            PhysicalKey::Code(KeyCode::KeyS | KeyCode::ArrowDown)
-                                if self.world.player.is_none() =>
-                            {
+                            KeyCode::KeyS | KeyCode::ArrowDown if self.world.player.is_none() => {
                                 self.camera.y += 1;
                             }
-                            PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft)
-                                if self.world.player.is_none() =>
-                            {
+                            KeyCode::KeyA | KeyCode::ArrowLeft if self.world.player.is_none() => {
                                 self.camera.x -= 1;
                             }
-                            PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight)
-                                if self.world.player.is_none() =>
-                            {
+                            KeyCode::KeyD | KeyCode::ArrowRight if self.world.player.is_none() => {
                                 self.camera.x += 1;
                             }
                             // Numpad movement (roguelike mode)
-                            PhysicalKey::Code(kc) if self.world.player.is_some() => {
+                            kc if self.world.player.is_some() => {
                                 let dir = match kc {
                                     KeyCode::Numpad7 => Some((-1, -1)),
                                     KeyCode::Numpad8 => Some((0, -1)),
@@ -634,12 +662,12 @@ impl ApplicationHandler for App {
                                     }
                                 }
                             }
-                        } else {
-                            // Realtime: fixed-timestep simulation
+                        } else if !self.paused {
+                            // Realtime: fixed-timestep simulation (UI-I03: pause + speed)
                             let now = Instant::now();
                             let dt = now.duration_since(self.last_frame_time).as_secs_f64();
                             self.last_frame_time = now;
-                            self.tick_accumulator += dt;
+                            self.tick_accumulator += dt * self.sim_speed as f64;
 
                             let mut ticks_this_frame = 0u32;
                             while self.tick_accumulator >= SIM_TICK_INTERVAL
@@ -649,6 +677,9 @@ impl ApplicationHandler for App {
                                 self.tick_accumulator -= SIM_TICK_INTERVAL;
                                 ticks_this_frame += 1;
                             }
+                        } else {
+                            // Paused: keep frame time current to avoid tick burst on unpause.
+                            self.last_frame_time = Instant::now();
                         }
 
                         // === Render ===
@@ -666,14 +697,20 @@ impl ApplicationHandler for App {
                                 .and_then(|p| self.world.body.names.get(&p))
                                 .map(|n| n.value.as_str());
                             self.ui_tree = ui::WidgetTree::new();
+                            let status_info = ui::StatusBarInfo {
+                                tick: self.world.tick.0,
+                                population: self.world.alive.len(),
+                                is_turn_based: self.world.player.is_some(),
+                                player_name,
+                                paused: self.paused,
+                                sim_speed: self.sim_speed,
+                                keybindings: &self.keybindings,
+                                screen_width: screen_w as f32,
+                            };
                             let status_bar_id = ui::build_status_bar(
                                 &mut self.ui_tree,
                                 &self.ui_theme,
-                                self.world.tick.0,
-                                self.world.alive.len(),
-                                self.world.player.is_some(),
-                                player_name,
-                                screen_w as f32,
+                                &status_info,
                             );
 
                             // Layout UI tree to compute status bar height.
@@ -1089,6 +1126,9 @@ fn main() {
         animator: ui::Animator::new(),
         last_hover_tile: None,
         last_selected_entity: None,
+        keybindings: ui::KeyBindings::defaults(),
+        paused: false,
+        sim_speed: 1,
         selected_entity: None,
         inspector_close_id: None,
     };

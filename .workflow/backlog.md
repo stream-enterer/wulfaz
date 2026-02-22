@@ -132,10 +132,10 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 | 2 — Styled Panels | COMPLETE | Theme + mouse input |
 | 3 — Full Widget Set | COMPLETE | Rich text + scroll list + tooltips |
 | 4 — Game Integration | COMPLETE | Real game UI replaces string rendering |
-| 5 — Polish | 1 | Animation + keyboard shortcuts |
+| 5 — Polish | COMPLETE | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-2 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+1 task remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -220,14 +220,15 @@ All tasks done: UI-I01a (status bar), UI-I01b (hover tooltip), UI-I01c (event lo
 
 ---
 
-### Tier 5 — Polish (not on critical path)
+### Tier 5 — Polish — COMPLETE
 
-Enhancements. Buildable any time after their dependencies are met.
+All tasks done: UI-W05 (animation), UI-I03 (keyboard shortcuts).
 
-- **UI-I03** — Keyboard shortcut system. Needs: UI-W02. Enhancement.
-  - Global keybindings processed before widget focus dispatch. Configurable map: `HashMap<KeyCombo, Action>` where `KeyCombo` is modifier flags + keycode, `Action` is an enum (PauseSim, TogglePanel(PanelId), SpeedUp, SpeedDown, etc.).
-  - Default bindings: Space = pause, Escape = close topmost panel/tooltip, 1-5 = sim speed, Tab = cycle panels.
-  - Displayed in tooltips: "Pause (Space)" — keybinding text sourced from the map, not hardcoded in UI strings.
+**Available:**
+- Animation system (tooltip fade, inspector slide, button hover highlight)
+- Global keybindings (Space=pause, Esc=close topmost, 1-5=speed)
+- Keybinding labels in status bar ("PAUSED (Space)", "Speed: 3x (3)")
+- Pause/speed control for realtime simulation
 
 ---
 

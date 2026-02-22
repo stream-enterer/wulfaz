@@ -1,6 +1,7 @@
 mod animation;
 mod draw;
 mod input;
+mod keybindings;
 mod theme;
 mod widget;
 
@@ -10,6 +11,8 @@ pub use animation::{Animator, Easing};
 pub use draw::{DrawList, FontFamily, PanelCommand, RichTextCommand, TextCommand, TextSpan};
 #[allow(unused_imports)] // Public API: used by main.rs for input routing (UI-W02).
 pub use input::{MouseButton, UiEvent, UiState};
+#[allow(unused_imports)] // Public API: used by main.rs for keyboard shortcuts (UI-I03).
+pub use keybindings::{Action, KeyBindings, KeyCombo, ModifierFlags};
 pub use theme::Theme;
 #[allow(unused_imports)] // Public API: used by game panels setting tooltip content.
 pub use widget::{TooltipContent, Widget};
@@ -1152,15 +1155,19 @@ pub fn demo_tree(theme: &Theme) -> WidgetTree {
 ///
 /// Returns the root panel's `WidgetId` so the caller can read its
 /// computed height after layout (via `WidgetTree::node_rect`).
-pub fn build_status_bar(
-    tree: &mut WidgetTree,
-    theme: &Theme,
-    tick: u64,
-    population: usize,
-    is_turn_based: bool,
-    player_name: Option<&str>,
-    screen_width: f32,
-) -> WidgetId {
+/// Status bar configuration for pause/speed display (UI-I03).
+pub struct StatusBarInfo<'a> {
+    pub tick: u64,
+    pub population: usize,
+    pub is_turn_based: bool,
+    pub player_name: Option<&'a str>,
+    pub paused: bool,
+    pub sim_speed: u32,
+    pub keybindings: &'a KeyBindings,
+    pub screen_width: f32,
+}
+
+pub fn build_status_bar(tree: &mut WidgetTree, theme: &Theme, info: &StatusBarInfo) -> WidgetId {
     let panel = tree.insert_root(Widget::Panel {
         bg_color: theme.status_bar_bg,
         border_color: theme.panel_border_color,
@@ -1168,7 +1175,7 @@ pub fn build_status_bar(
         shadow_width: 0.0,                        // no shadow for a flat bar
     });
     tree.set_position(panel, Position::Fixed { x: 0.0, y: 0.0 });
-    tree.set_sizing(panel, Sizing::Fixed(screen_width), Sizing::Fit);
+    tree.set_sizing(panel, Sizing::Fixed(info.screen_width), Sizing::Fit);
     tree.set_padding(
         panel,
         Edges {
@@ -1187,34 +1194,57 @@ pub fn build_status_bar(
 
     let mut spans = vec![
         TextSpan {
-            text: format!("Tick: {tick}"),
+            text: format!("Tick: {}", info.tick),
             color: theme.gold,
             font_family: FontFamily::Mono,
         },
         sep(),
         TextSpan {
-            text: format!("Pop: {population}"),
+            text: format!("Pop: {}", info.population),
             color: theme.text_light,
             font_family: FontFamily::Mono,
         },
         sep(),
     ];
 
-    if is_turn_based {
+    if info.is_turn_based {
         spans.push(TextSpan {
             text: "TURN-BASED".to_string(),
             color: theme.gold,
             font_family: FontFamily::Mono,
         });
-    } else {
+    } else if info.paused {
+        // Show "PAUSED (Space)" with keybinding label.
+        let pause_label = info
+            .keybindings
+            .label_for(keybindings::Action::PauseSim)
+            .map(|k| format!("PAUSED ({k})"))
+            .unwrap_or_else(|| "PAUSED".to_string());
         spans.push(TextSpan {
-            text: "REAL-TIME".to_string(),
-            color: theme.text_light,
+            text: pause_label,
+            color: theme.danger,
+            font_family: FontFamily::Mono,
+        });
+    } else {
+        // Show speed indicator: "Speed: 1x (1)" through "Speed: 5x (5)"
+        let speed_label = info
+            .keybindings
+            .label_for(keybindings::Action::SpeedSet(info.sim_speed))
+            .map(|k| format!("Speed: {}x ({k})", info.sim_speed))
+            .unwrap_or_else(|| format!("Speed: {}x", info.sim_speed));
+        let color = if info.sim_speed > 1 {
+            theme.gold
+        } else {
+            theme.text_light
+        };
+        spans.push(TextSpan {
+            text: speed_label,
+            color,
             font_family: FontFamily::Mono,
         });
     }
 
-    if let Some(name) = player_name {
+    if let Some(name) = info.player_name {
         spans.push(sep());
         spans.push(TextSpan {
             text: format!("@{name}"),
@@ -2692,7 +2722,18 @@ mod tests {
     fn status_bar_structure() {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
-        let bar = build_status_bar(&mut tree, &theme, 42, 15, false, None, 800.0);
+        let kb = KeyBindings::defaults();
+        let info = StatusBarInfo {
+            tick: 42,
+            population: 15,
+            is_turn_based: false,
+            player_name: None,
+            paused: false,
+            sim_speed: 1,
+            keybindings: &kb,
+            screen_width: 800.0,
+        };
+        let bar = build_status_bar(&mut tree, &theme, &info);
 
         // One root: the status bar panel.
         assert_eq!(tree.roots().len(), 1);
@@ -2711,14 +2752,13 @@ mod tests {
         let child = tree.get(node.children[0]).expect("child exists");
         if let Widget::RichText { spans, font_size } = &child.widget {
             assert!((font_size - theme.font_data_size).abs() < 0.01);
-            // Real-time mode, no player: 5 spans (tick, sep, pop, sep, mode).
+            // Real-time mode, speed 1, no player: 5 spans (tick, sep, pop, sep, speed).
             assert_eq!(spans.len(), 5);
             assert_eq!(spans[0].text, "Tick: 42");
             assert_eq!(spans[0].color, theme.gold);
             assert_eq!(spans[2].text, "Pop: 15");
             assert_eq!(spans[2].color, theme.text_light);
-            assert_eq!(spans[4].text, "REAL-TIME");
-            assert_eq!(spans[4].color, theme.text_light);
+            assert!(spans[4].text.starts_with("Speed: 1x"));
         } else {
             panic!("status bar child should be RichText");
         }
@@ -2728,7 +2768,18 @@ mod tests {
     fn status_bar_turn_based_with_player() {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
-        build_status_bar(&mut tree, &theme, 100, 3, true, Some("Goblin"), 800.0);
+        let kb = KeyBindings::defaults();
+        let info = StatusBarInfo {
+            tick: 100,
+            population: 3,
+            is_turn_based: true,
+            player_name: Some("Goblin"),
+            paused: false,
+            sim_speed: 1,
+            keybindings: &kb,
+            screen_width: 800.0,
+        };
+        build_status_bar(&mut tree, &theme, &info);
 
         let bar = tree.roots()[0];
         let child_id = tree.get(bar).expect("bar").children[0];
@@ -2749,7 +2800,18 @@ mod tests {
     fn status_bar_layout_full_width() {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
-        let bar = build_status_bar(&mut tree, &theme, 0, 0, false, None, 1024.0);
+        let kb = KeyBindings::defaults();
+        let info = StatusBarInfo {
+            tick: 0,
+            population: 0,
+            is_turn_based: false,
+            player_name: None,
+            paused: false,
+            sim_speed: 1,
+            keybindings: &kb,
+            screen_width: 1024.0,
+        };
+        let bar = build_status_bar(&mut tree, &theme, &info);
 
         tree.layout(
             Size {
@@ -2772,7 +2834,18 @@ mod tests {
     fn status_bar_draw_output() {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
-        build_status_bar(&mut tree, &theme, 7, 200, true, Some("Wolf"), 800.0);
+        let kb = KeyBindings::defaults();
+        let info = StatusBarInfo {
+            tick: 7,
+            population: 200,
+            is_turn_based: true,
+            player_name: Some("Wolf"),
+            paused: false,
+            sim_speed: 1,
+            keybindings: &kb,
+            screen_width: 800.0,
+        };
+        build_status_bar(&mut tree, &theme, &info);
 
         tree.layout(
             Size {
@@ -2799,6 +2872,68 @@ mod tests {
 
         // No plain text commands (only rich text).
         assert_eq!(dl.texts.len(), 0);
+    }
+
+    #[test]
+    fn status_bar_paused_display() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let kb = KeyBindings::defaults();
+        let info = StatusBarInfo {
+            tick: 10,
+            population: 5,
+            is_turn_based: false,
+            player_name: None,
+            paused: true,
+            sim_speed: 1,
+            keybindings: &kb,
+            screen_width: 800.0,
+        };
+        build_status_bar(&mut tree, &theme, &info);
+
+        let bar = tree.roots()[0];
+        let child_id = tree.get(bar).expect("bar").children[0];
+        let child = tree.get(child_id).expect("child");
+        if let Widget::RichText { spans, .. } = &child.widget {
+            // Paused: 5 spans (tick, sep, pop, sep, "PAUSED (Space)").
+            assert_eq!(spans.len(), 5);
+            assert!(spans[4].text.contains("PAUSED"));
+            assert!(spans[4].text.contains("Space"));
+            assert_eq!(spans[4].color, theme.danger);
+        } else {
+            panic!("expected RichText");
+        }
+    }
+
+    #[test]
+    fn status_bar_speed_display() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let kb = KeyBindings::defaults();
+        let info = StatusBarInfo {
+            tick: 10,
+            population: 5,
+            is_turn_based: false,
+            player_name: None,
+            paused: false,
+            sim_speed: 3,
+            keybindings: &kb,
+            screen_width: 800.0,
+        };
+        build_status_bar(&mut tree, &theme, &info);
+
+        let bar = tree.roots()[0];
+        let child_id = tree.get(bar).expect("bar").children[0];
+        let child = tree.get(child_id).expect("child");
+        if let Widget::RichText { spans, .. } = &child.widget {
+            assert_eq!(spans.len(), 5);
+            assert!(spans[4].text.contains("3x"));
+            assert!(spans[4].text.contains("(3)"));
+            // Speed > 1 gets gold highlight.
+            assert_eq!(spans[4].color, theme.gold);
+        } else {
+            panic!("expected RichText");
+        }
     }
 
     // ------------------------------------------------------------------
