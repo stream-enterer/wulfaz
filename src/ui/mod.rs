@@ -16,7 +16,7 @@ pub use input::{MouseButton, UiEvent, UiState};
 pub use keybindings::{Action, KeyBindings, KeyCombo, ModifierFlags};
 pub use theme::Theme;
 #[allow(unused_imports)] // Public API: used by game panels setting tooltip content.
-pub use widget::{TooltipContent, Widget};
+pub use widget::{CrossAlign, TooltipContent, Widget};
 
 use slotmap::{SlotMap, new_key_type};
 
@@ -465,6 +465,208 @@ impl WidgetTree {
             height: (node.rect.height - node.padding.vertical()).max(0.0),
         };
 
+        // Row: lay out children left-to-right with gap spacing (UI-100).
+        if let Widget::Row { gap, align } = &node.widget {
+            let gap = *gap;
+            let align = *align;
+            let children: Vec<WidgetId> = node.children.clone();
+
+            // First pass: measure all children, identify Percent-width children.
+            let mut child_infos: Vec<(WidgetId, Size, Sizing, Edges, Edges)> = Vec::new();
+            let mut fixed_total_w: f32 = 0.0;
+            let mut percent_total: f32 = 0.0;
+            for &child_id in &children {
+                let child_measured = self.measure_node(child_id, line_height);
+                let Some(child) = self.arena.get(child_id) else {
+                    continue;
+                };
+                let cw = child.width;
+                let cp = child.padding;
+                let cm = child.margin;
+                let child_w = match cw {
+                    Sizing::Fixed(px) => px + cm.horizontal(),
+                    Sizing::Fit => child_measured.width + cp.horizontal() + cm.horizontal(),
+                    Sizing::Percent(frac) => {
+                        percent_total += frac;
+                        0.0
+                    }
+                };
+                fixed_total_w += child_w;
+                child_infos.push((child_id, child_measured, cw, cp, cm));
+            }
+            let n = children.len();
+            let gap_total = if n > 1 { gap * (n - 1) as f32 } else { 0.0 };
+            let remaining = (content.width - fixed_total_w - gap_total).max(0.0);
+
+            // Second pass: position children.
+            let mut cursor_x = content.x;
+            for (child_id, child_measured, cw, cp, cm) in &child_infos {
+                let child_w = match cw {
+                    Sizing::Fixed(px) => *px,
+                    Sizing::Fit => child_measured.width + cp.horizontal(),
+                    Sizing::Percent(frac) => {
+                        if percent_total > 0.0 {
+                            remaining * frac / percent_total
+                        } else {
+                            0.0
+                        }
+                    }
+                };
+                let child_total_w = child_w + cm.horizontal();
+
+                // Resolve child height.
+                let child_h = match self.arena.get(*child_id).map(|n| n.height) {
+                    Some(Sizing::Fixed(px)) => px,
+                    Some(Sizing::Percent(frac)) => content.height * frac,
+                    Some(Sizing::Fit) | None => child_measured.height + cp.vertical(),
+                };
+
+                // Cross-axis alignment: vertical position within row.
+                let child_y = match align {
+                    widget::CrossAlign::Start => content.y + cm.top,
+                    widget::CrossAlign::Center => content.y + (content.height - child_h) / 2.0,
+                    widget::CrossAlign::End => content.y + content.height - child_h - cm.bottom,
+                    widget::CrossAlign::Stretch => content.y + cm.top,
+                };
+                let stretched_h = if align == widget::CrossAlign::Stretch {
+                    content.height - cm.vertical()
+                } else {
+                    child_h
+                };
+
+                if let Some(child_node) = self.arena.get_mut(*child_id) {
+                    child_node.measured = *child_measured;
+                    child_node.rect = Rect {
+                        x: cursor_x + cm.left,
+                        y: child_y,
+                        width: child_w,
+                        height: stretched_h,
+                    };
+                    child_node.dirty = false;
+                }
+
+                // Recurse into child's children.
+                let child_content = Rect {
+                    x: cursor_x + cm.left + cp.left,
+                    y: child_y + cp.top,
+                    width: (child_w - cp.horizontal()).max(0.0),
+                    height: (stretched_h - cp.vertical()).max(0.0),
+                };
+                let grandchildren: Vec<WidgetId> = self
+                    .arena
+                    .get(*child_id)
+                    .map(|n| n.children.clone())
+                    .unwrap_or_default();
+                for gc in grandchildren {
+                    self.layout_node(gc, child_content, line_height);
+                }
+
+                cursor_x += child_total_w + gap;
+            }
+            return;
+        }
+
+        // Column: lay out children top-to-bottom with gap spacing (UI-101).
+        if let Widget::Column { gap, align } = &node.widget {
+            let gap = *gap;
+            let align = *align;
+            let children: Vec<WidgetId> = node.children.clone();
+
+            // First pass: measure all children, identify Percent-height children.
+            let mut child_infos: Vec<(WidgetId, Size, Sizing, Edges, Edges)> = Vec::new();
+            let mut fixed_total_h: f32 = 0.0;
+            let mut percent_total: f32 = 0.0;
+            for &child_id in &children {
+                let child_measured = self.measure_node(child_id, line_height);
+                let Some(child) = self.arena.get(child_id) else {
+                    continue;
+                };
+                let ch = child.height;
+                let cp = child.padding;
+                let cm = child.margin;
+                let child_h = match ch {
+                    Sizing::Fixed(px) => px + cm.vertical(),
+                    Sizing::Fit => child_measured.height + cp.vertical() + cm.vertical(),
+                    Sizing::Percent(frac) => {
+                        percent_total += frac;
+                        0.0
+                    }
+                };
+                fixed_total_h += child_h;
+                child_infos.push((child_id, child_measured, ch, cp, cm));
+            }
+            let n = children.len();
+            let gap_total = if n > 1 { gap * (n - 1) as f32 } else { 0.0 };
+            let remaining = (content.height - fixed_total_h - gap_total).max(0.0);
+
+            // Second pass: position children.
+            let mut cursor_y = content.y;
+            for (child_id, child_measured, ch, cp, cm) in &child_infos {
+                let child_h = match ch {
+                    Sizing::Fixed(px) => *px,
+                    Sizing::Fit => child_measured.height + cp.vertical(),
+                    Sizing::Percent(frac) => {
+                        if percent_total > 0.0 {
+                            remaining * frac / percent_total
+                        } else {
+                            0.0
+                        }
+                    }
+                };
+                let child_total_h = child_h + cm.vertical();
+
+                // Resolve child width.
+                let child_w = match self.arena.get(*child_id).map(|n| n.width) {
+                    Some(Sizing::Fixed(px)) => px,
+                    Some(Sizing::Percent(frac)) => content.width * frac,
+                    Some(Sizing::Fit) | None => child_measured.width + cp.horizontal(),
+                };
+
+                // Cross-axis alignment: horizontal position within column.
+                let child_x = match align {
+                    widget::CrossAlign::Start => content.x + cm.left,
+                    widget::CrossAlign::Center => content.x + (content.width - child_w) / 2.0,
+                    widget::CrossAlign::End => content.x + content.width - child_w - cm.right,
+                    widget::CrossAlign::Stretch => content.x + cm.left,
+                };
+                let stretched_w = if align == widget::CrossAlign::Stretch {
+                    content.width - cm.horizontal()
+                } else {
+                    child_w
+                };
+
+                if let Some(child_node) = self.arena.get_mut(*child_id) {
+                    child_node.measured = *child_measured;
+                    child_node.rect = Rect {
+                        x: child_x,
+                        y: cursor_y + cm.top,
+                        width: stretched_w,
+                        height: child_h,
+                    };
+                    child_node.dirty = false;
+                }
+
+                // Recurse into child's children.
+                let child_content = Rect {
+                    x: child_x + cp.left,
+                    y: cursor_y + cm.top + cp.top,
+                    width: (stretched_w - cp.horizontal()).max(0.0),
+                    height: (child_h - cp.vertical()).max(0.0),
+                };
+                let grandchildren: Vec<WidgetId> = self
+                    .arena
+                    .get(*child_id)
+                    .map(|n| n.children.clone())
+                    .unwrap_or_default();
+                for gc in grandchildren {
+                    self.layout_node(gc, child_content, line_height);
+                }
+
+                cursor_y += child_total_h + gap;
+            }
+            return;
+        }
+
         // ScrollList positions children in a vertical stack with virtual scrolling.
         if let Widget::ScrollList {
             item_height,
@@ -592,6 +794,58 @@ impl WidgetTree {
                     height: h,
                 }
             }
+            Widget::Row { gap, .. } => {
+                // Row: width = sum of child widths + gaps, height = max child height.
+                let n = node.children.len();
+                let mut total_w: f32 = 0.0;
+                let mut max_h: f32 = 0.0;
+                for &child_id in &node.children {
+                    if let Some(child) = self.arena.get(child_id) {
+                        let child_measured = self.measure_node(child_id, line_height);
+                        let child_w = child_measured.width
+                            + child.padding.horizontal()
+                            + child.margin.horizontal();
+                        let child_h = child_measured.height
+                            + child.padding.vertical()
+                            + child.margin.vertical();
+                        total_w += child_w;
+                        max_h = max_h.max(child_h);
+                    }
+                }
+                if n > 1 {
+                    total_w += *gap * (n - 1) as f32;
+                }
+                Size {
+                    width: total_w,
+                    height: max_h,
+                }
+            }
+            Widget::Column { gap, .. } => {
+                // Column: width = max child width, height = sum of child heights + gaps.
+                let n = node.children.len();
+                let mut max_w: f32 = 0.0;
+                let mut total_h: f32 = 0.0;
+                for &child_id in &node.children {
+                    if let Some(child) = self.arena.get(child_id) {
+                        let child_measured = self.measure_node(child_id, line_height);
+                        let child_w = child_measured.width
+                            + child.padding.horizontal()
+                            + child.margin.horizontal();
+                        let child_h = child_measured.height
+                            + child.padding.vertical()
+                            + child.margin.vertical();
+                        max_w = max_w.max(child_w);
+                        total_h += child_h;
+                    }
+                }
+                if n > 1 {
+                    total_h += *gap * (n - 1) as f32;
+                }
+                Size {
+                    width: max_w,
+                    height: total_h,
+                }
+            }
             Widget::Panel { .. } => {
                 // Panel measures from children bounding box.
                 let mut max_w: f32 = 0.0;
@@ -657,6 +911,8 @@ impl WidgetTree {
         };
 
         match &node.widget {
+            // Row and Column are transparent containers — no draw commands.
+            Widget::Row { .. } | Widget::Column { .. } => {}
             Widget::Panel {
                 bg_color,
                 border_color,
@@ -903,6 +1159,8 @@ impl WidgetTree {
     /// Apply opacity multiplier to all color fields on a single widget.
     fn apply_opacity(widget: &mut Widget, opacity: f32) {
         match widget {
+            // Row and Column have no colors to fade.
+            Widget::Row { .. } | Widget::Column { .. } => {}
             Widget::Panel {
                 bg_color,
                 border_color,
@@ -3481,5 +3739,291 @@ mod tests {
         if let Widget::Button { bg_color, .. } = &node.widget {
             assert!((bg_color[3] - 0.3).abs() < 1e-6);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Row auto-layout (UI-100)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn row_children_contiguous_with_gap() {
+        let mut tree = WidgetTree::new();
+        let row = tree.insert_root(Widget::Row {
+            gap: 4.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(row, Sizing::Fixed(400.0), Sizing::Fixed(50.0));
+
+        // 3 labels with known approximate widths.
+        let lh = 14.0; // line_height used in tests
+        let label_a = tree.insert(
+            row,
+            Widget::Label {
+                text: "AAA".into(), // 3 chars
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+        let label_b = tree.insert(
+            row,
+            Widget::Label {
+                text: "BBBB".into(), // 4 chars
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+        let label_c = tree.insert(
+            row,
+            Widget::Label {
+                text: "CC".into(), // 2 chars
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            lh,
+        );
+
+        let ra = tree.node_rect(label_a).unwrap();
+        let rb = tree.node_rect(label_b).unwrap();
+        let rc = tree.node_rect(label_c).unwrap();
+
+        // Children are contiguous left-to-right with 4px gap.
+        let expected_b_x = ra.x + ra.width + 4.0;
+        let expected_c_x = rb.x + rb.width + 4.0;
+        assert!(
+            (rb.x - expected_b_x).abs() < 0.1,
+            "label_b should start at {expected_b_x}, got {}",
+            rb.x
+        );
+        assert!(
+            (rc.x - expected_c_x).abs() < 0.1,
+            "label_c should start at {expected_c_x}, got {}",
+            rc.x
+        );
+    }
+
+    #[test]
+    fn row_cross_align_center() {
+        let mut tree = WidgetTree::new();
+        let row = tree.insert_root(Widget::Row {
+            gap: 0.0,
+            align: CrossAlign::Center,
+        });
+        tree.set_sizing(row, Sizing::Fixed(400.0), Sizing::Fixed(100.0));
+
+        let label = tree.insert(
+            row,
+            Widget::Label {
+                text: "Hi".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let rl = tree.node_rect(label).unwrap();
+        // Label height is 14.0 (scale=1.0), row is 100.0 tall.
+        // Centered: y = (100 - 14) / 2 = 43.
+        assert!(
+            (rl.y - 43.0).abs() < 1.0,
+            "label should be vertically centered, y = {}",
+            rl.y
+        );
+    }
+
+    #[test]
+    fn row_percent_children_split_remaining() {
+        let mut tree = WidgetTree::new();
+        let row = tree.insert_root(Widget::Row {
+            gap: 0.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(row, Sizing::Fixed(300.0), Sizing::Fixed(50.0));
+
+        // One fixed-width label (approx 3 chars * 8.4 = 25.2), two percent children.
+        let _fixed = tree.insert(
+            row,
+            Widget::Label {
+                text: "AAA".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+        let pct_a = tree.insert(
+            row,
+            Widget::Panel {
+                bg_color: [0.0; 4],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+        );
+        tree.set_sizing(pct_a, Sizing::Percent(0.5), Sizing::Fit);
+
+        let pct_b = tree.insert(
+            row,
+            Widget::Panel {
+                bg_color: [0.0; 4],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+        );
+        tree.set_sizing(pct_b, Sizing::Percent(0.5), Sizing::Fit);
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let rpa = tree.node_rect(pct_a).unwrap();
+        let rpb = tree.node_rect(pct_b).unwrap();
+
+        // Both percent children should share remaining space equally.
+        assert!(
+            (rpa.width - rpb.width).abs() < 1.0,
+            "percent children should be equal width: {} vs {}",
+            rpa.width,
+            rpb.width
+        );
+        assert!(
+            rpa.width > 100.0,
+            "percent child should be > 100px, got {}",
+            rpa.width
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Column auto-layout (UI-101)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn column_children_stacked_with_gap() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 4.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(col, Sizing::Fixed(200.0), Sizing::Fixed(400.0));
+
+        let lh = 14.0;
+        let mut labels = Vec::new();
+        for i in 0..5 {
+            let l = tree.insert(
+                col,
+                Widget::Label {
+                    text: format!("Line {i}"),
+                    color: [1.0; 4],
+                    font_size: 14.0,
+                    font_family: FontFamily::default(),
+                },
+            );
+            labels.push(l);
+        }
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            lh,
+        );
+
+        // Each label should start where the previous one ended + gap.
+        for i in 1..labels.len() {
+            let prev = tree.node_rect(labels[i - 1]).unwrap();
+            let curr = tree.node_rect(labels[i]).unwrap();
+            let expected_y = prev.y + prev.height + 4.0;
+            assert!(
+                (curr.y - expected_y).abs() < 0.1,
+                "label {i} should start at y={expected_y}, got y={}",
+                curr.y
+            );
+        }
+    }
+
+    #[test]
+    fn column_cross_align_center() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 0.0,
+            align: CrossAlign::Center,
+        });
+        tree.set_sizing(col, Sizing::Fixed(400.0), Sizing::Fixed(200.0));
+
+        let label = tree.insert(
+            col,
+            Widget::Label {
+                text: "Hi".into(), // 2 chars → narrow
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let rl = tree.node_rect(label).unwrap();
+        // Label width ≈ 2 * 8.4 = 16.8. Column is 400 wide.
+        // Centered: x ≈ (400 - 16.8) / 2 ≈ 191.6
+        let expected_center = (400.0 - rl.width) / 2.0;
+        assert!(
+            (rl.x - expected_center).abs() < 1.0,
+            "label should be horizontally centered, x = {}, expected ≈ {}",
+            rl.x,
+            expected_center
+        );
+    }
+
+    #[test]
+    fn row_emits_no_draw_commands() {
+        let mut tree = WidgetTree::new();
+        let row = tree.insert_root(Widget::Row {
+            gap: 0.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(row, Sizing::Fixed(200.0), Sizing::Fixed(50.0));
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // Row with no children should produce no draw commands.
+        assert!(draw_list.panels.is_empty());
+        assert!(draw_list.texts.is_empty());
     }
 }

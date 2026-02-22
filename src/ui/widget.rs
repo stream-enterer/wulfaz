@@ -10,10 +10,36 @@ pub enum TooltipContent {
     Custom(Vec<(Widget, Option<TooltipContent>)>),
 }
 
+/// Cross-axis alignment for Row and Column containers (UI-100, UI-101).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum CrossAlign {
+    #[default]
+    Start,
+    Center,
+    End,
+    Stretch,
+}
+
 /// Flat enum widget identity (DD-1).
 /// Closed set — we know all widget types. No trait objects.
 #[derive(Debug, Clone)]
 pub enum Widget {
+    /// Horizontal auto-layout container (UI-100).
+    /// Children laid out left-to-right with `gap` spacing.
+    /// Row itself emits no draw commands (transparent container).
+    Row {
+        gap: f32,          // pixels between children
+        align: CrossAlign, // vertical alignment of children within row height
+    },
+
+    /// Vertical auto-layout container (UI-101).
+    /// Children laid out top-to-bottom with `gap` spacing.
+    /// Column itself emits no draw commands (transparent container).
+    Column {
+        gap: f32,          // pixels between children
+        align: CrossAlign, // horizontal alignment of children within column width
+    },
+
     /// Container with background, border, and optional inner shadow.
     Panel {
         bg_color: [f32; 4],     // sRGB RGBA
