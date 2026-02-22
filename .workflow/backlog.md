@@ -130,12 +130,12 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 |------|-------|-----------|
 | 1 — Foundation | COMPLETE | Colored text + panel backgrounds + widget tree |
 | 2 — Styled Panels | COMPLETE | Theme + mouse input |
-| 3 — Full Widget Set | 1 | Rich text + scroll list + tooltips |
+| 3 — Full Widget Set | COMPLETE | Rich text + scroll list + tooltips |
 | 4 — Game Integration | 5 (I01a-d + I02) | Real game UI replaces string rendering |
 | 5 — Polish | 2 | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-9 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+8 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -194,24 +194,16 @@ All tasks done: UI-P02 (multi-font atlas), UI-R02 (theme), UI-W02 (input routing
 
 ---
 
-### Tier 3 — Full Widget Set
+### Tier 3 — Full Widget Set — COMPLETE
 
-R01 and W03 complete. One task remaining: W04.
+All tasks done: UI-R01 (rich text), UI-W03 (scroll list), UI-W04 (tooltip system).
 
-**Available after this tier:**
+**Available:**
 - Rich text with mixed styles (bold, italic, color) in one text block via cosmic-text spans
 - Scrollable lists with virtual scrolling (hundreds of items, only visible ones measured/drawn)
 - Nested CK3-style tooltips with hover delay and recursive dismissal
 - Every widget type needed for game UI panels
-
-**UI-DEMO after Tier 3:** Previous demo plus: a ScrollList with 100 dummy items (virtual-scrolled), a rich text block mixing serif body with mono inline data and gold highlights, a button that spawns a 3-level nested tooltip chain demonstrating hover delay and recursive dismiss.
-
-- **UI-W04** — Tooltip system. Needs: UI-W01, UI-W02.
-  - `TooltipStack: Vec<TooltipEntry>` in `UiState`. Each entry: content widget tree, anchor position, hover source widget ID.
-  - Nested tooltips: when hovering a clickable/hoverable element inside tooltip N, push tooltip N+1. When cursor leaves tooltip N's rect AND is not inside tooltip N+1, pop N+1. Recursive dismissal — popping N also pops N+1..N+k.
-  - Positioning: prefer below-right of cursor. If tooltip would clip screen edge, flip to above/left. Each nesting level offsets slightly to avoid total overlap.
-  - Hover delay: ~300ms before showing (configurable). Instant show if another tooltip was recently visible (CK3 behavior — fast tooltip switching).
-  - Each tooltip renders as a Panel (background from UI-P03) containing Label/RichText children. Z-order: tooltips always render above all other panels. Tooltip N+1 renders above tooltip N.
+- Tier 3 demo: ScrollList with 100 items, rich text block, 3-level nested tooltip chain
 
 ---
 

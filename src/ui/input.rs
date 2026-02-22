@@ -1,5 +1,8 @@
-use super::widget::Widget;
-use super::{WidgetId, WidgetTree};
+use super::theme::Theme;
+use super::widget::{TooltipContent, Widget};
+use super::{Edges, Position, Size, Sizing, WidgetId, WidgetTree};
+
+use std::time::{Duration, Instant};
 
 /// Mouse button identifier (decoupled from winit).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +44,22 @@ struct ScrollDrag {
     viewport_height: f32,
 }
 
+/// Entry in the active tooltip stack (UI-W04).
+struct TooltipEntry {
+    /// Widget that triggered this tooltip.
+    source: WidgetId,
+    /// Root panel of the tooltip subtree in the widget tree.
+    root: WidgetId,
+}
+
+/// Pending tooltip awaiting hover delay (UI-W04).
+struct TooltipPending {
+    /// Widget being hovered.
+    source: WidgetId,
+    /// When hover began.
+    since: Instant,
+}
+
 /// Interaction state for the widget system. Lives on App, not World.
 pub struct UiState {
     /// Widget currently under the cursor.
@@ -63,6 +82,12 @@ pub struct UiState {
     pub cursor: (f32, f32),
     /// Active scrollbar drag (if user is dragging a scrollbar thumb).
     scroll_drag: Option<ScrollDrag>,
+    /// Active tooltip stack (UI-W04). Index 0 = shallowest, last = deepest.
+    tooltip_stack: Vec<TooltipEntry>,
+    /// Tooltip pending hover delay.
+    tooltip_pending: Option<TooltipPending>,
+    /// When the last tooltip was dismissed (for fast-show window).
+    tooltip_last_dismiss: Option<Instant>,
 }
 
 impl UiState {
@@ -77,6 +102,9 @@ impl UiState {
             dragging: false,
             cursor: (0.0, 0.0),
             scroll_drag: None,
+            tooltip_stack: Vec::new(),
+            tooltip_pending: None,
+            tooltip_last_dismiss: None,
         }
     }
 
@@ -296,6 +324,225 @@ impl UiState {
             return true;
         }
         false
+    }
+
+    // ------------------------------------------------------------------
+    // Tooltip system (UI-W04)
+    // ------------------------------------------------------------------
+
+    /// Update tooltip lifecycle. Call each frame after input handling,
+    /// before layout/draw. Manages hover delays, showing, and dismissal.
+    pub fn update_tooltips(
+        &mut self,
+        tree: &mut WidgetTree,
+        theme: &Theme,
+        screen: Size,
+        now: Instant,
+    ) {
+        // Step 1: Dismiss stale tooltips from top of stack.
+        // A tooltip stays if cursor is inside its rect or its source's rect.
+        while let Some(top) = self.tooltip_stack.last() {
+            let keep = {
+                let top_rect = tree.get(top.root).map(|n| n.rect);
+                let src_rect = tree.get(top.source).map(|n| n.rect);
+                let (cx, cy) = self.cursor;
+                top_rect.is_some_and(|r| r.contains(cx, cy))
+                    || src_rect.is_some_and(|r| r.contains(cx, cy))
+            };
+            if keep {
+                break;
+            }
+            let Some(entry) = self.tooltip_stack.pop() else {
+                break;
+            };
+            tree.remove(entry.root);
+            self.tooltip_last_dismiss = Some(now);
+        }
+
+        // Step 2: Find tooltip source for current hover.
+        let source_id = self
+            .hovered
+            .and_then(|h| Self::find_tooltip_ancestor(tree, h));
+
+        if let Some(sid) = source_id {
+            // Already showing a tooltip for this source — do nothing.
+            if self.tooltip_stack.iter().any(|e| e.source == sid) {
+                self.tooltip_pending = None;
+                return;
+            }
+
+            // Check or start pending.
+            let should_show = match &self.tooltip_pending {
+                Some(p) if p.source == sid => {
+                    let delay = self.effective_delay(theme, now);
+                    now.duration_since(p.since) >= delay
+                }
+                _ => {
+                    self.tooltip_pending = Some(TooltipPending {
+                        source: sid,
+                        since: now,
+                    });
+                    false
+                }
+            };
+
+            if should_show {
+                // Clone content before mutating tree.
+                let content = tree.get(sid).and_then(|n| n.tooltip.clone());
+                if let Some(content) = content {
+                    self.show_tooltip(tree, theme, sid, &content, screen);
+                }
+                self.tooltip_pending = None;
+            }
+        } else {
+            self.tooltip_pending = None;
+        }
+    }
+
+    /// Number of active tooltips.
+    pub fn tooltip_count(&self) -> usize {
+        self.tooltip_stack.len()
+    }
+
+    /// Dismiss all tooltips.
+    pub fn dismiss_all_tooltips(&mut self, tree: &mut WidgetTree, now: Instant) {
+        while let Some(entry) = self.tooltip_stack.pop() {
+            tree.remove(entry.root);
+        }
+        if self.tooltip_stack.is_empty() {
+            // Stack was non-empty before popping.
+        }
+        self.tooltip_last_dismiss = Some(now);
+        self.tooltip_pending = None;
+    }
+
+    /// Build and show a tooltip for the given source widget.
+    fn show_tooltip(
+        &mut self,
+        tree: &mut WidgetTree,
+        theme: &Theme,
+        source: WidgetId,
+        content: &TooltipContent,
+        screen: Size,
+    ) {
+        let line_height = theme.font_body_size;
+        let nesting = self.tooltip_stack.len();
+
+        // Build tooltip panel.
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: theme.tooltip_bg_color,
+            border_color: theme.tooltip_border_color,
+            border_width: theme.tooltip_border_width,
+            shadow_width: theme.tooltip_shadow_width,
+        });
+        tree.set_sizing(panel, Sizing::Fit, Sizing::Fit);
+        tree.set_padding(panel, Edges::all(theme.tooltip_padding));
+
+        // Populate children from content.
+        match content {
+            TooltipContent::Text(text) => {
+                tree.insert(
+                    panel,
+                    Widget::Label {
+                        text: text.clone(),
+                        color: theme.text_light,
+                        font_size: theme.font_body_size,
+                        font_family: theme.font_body_family,
+                    },
+                );
+            }
+            TooltipContent::Custom(items) => {
+                let mut y = 0.0;
+                for (widget, sub_tooltip) in items {
+                    let child = tree.insert(panel, widget.clone());
+                    tree.set_position(child, Position::Fixed { x: 0.0, y });
+
+                    if let Some(st) = sub_tooltip {
+                        tree.set_tooltip(child, Some(st.clone()));
+                    }
+
+                    let child_size = tree.measure_node(child, line_height);
+                    y += child_size.height + theme.label_gap;
+                }
+            }
+        }
+
+        // Measure panel to compute approximate size for positioning.
+        let measured = tree.measure_node(panel, line_height);
+        let tooltip_w = measured.width + theme.tooltip_padding * 2.0;
+        let tooltip_h = measured.height + theme.tooltip_padding * 2.0;
+
+        // Position: prefer below-right of cursor, flip if clipping screen.
+        let (tx, ty) = Self::compute_tooltip_position(
+            self.cursor,
+            Size {
+                width: tooltip_w,
+                height: tooltip_h,
+            },
+            screen,
+            nesting,
+            theme,
+        );
+        tree.set_position(panel, Position::Fixed { x: tx, y: ty });
+
+        self.tooltip_stack.push(TooltipEntry {
+            source,
+            root: panel,
+        });
+    }
+
+    /// Compute tooltip position with edge-flipping.
+    fn compute_tooltip_position(
+        cursor: (f32, f32),
+        tooltip_size: Size,
+        screen: Size,
+        nesting_level: usize,
+        theme: &Theme,
+    ) -> (f32, f32) {
+        let nest = nesting_level as f32;
+        let off_x = theme.tooltip_offset_x + nest * theme.tooltip_nesting_offset;
+        let off_y = theme.tooltip_offset_y + nest * theme.tooltip_nesting_offset;
+
+        let mut x = cursor.0 + off_x;
+        let mut y = cursor.1 + off_y;
+
+        // Flip horizontally if clipping right edge.
+        if x + tooltip_size.width > screen.width {
+            x = cursor.0 - tooltip_size.width - off_x;
+        }
+        // Flip vertically if clipping bottom edge.
+        if y + tooltip_size.height > screen.height {
+            y = cursor.1 - tooltip_size.height - off_y;
+        }
+
+        // Clamp to screen bounds.
+        x = x.clamp(0.0, (screen.width - tooltip_size.width).max(0.0));
+        y = y.clamp(0.0, (screen.height - tooltip_size.height).max(0.0));
+
+        (x, y)
+    }
+
+    /// Effective delay, accounting for fast-show window.
+    fn effective_delay(&self, theme: &Theme, now: Instant) -> Duration {
+        if let Some(last) = self.tooltip_last_dismiss
+            && now.duration_since(last) < Duration::from_millis(theme.tooltip_fast_window_ms)
+        {
+            return Duration::ZERO;
+        }
+        Duration::from_millis(theme.tooltip_delay_ms)
+    }
+
+    /// Walk from `start` up the parent chain to find a widget with tooltip content.
+    fn find_tooltip_ancestor(tree: &WidgetTree, start: WidgetId) -> Option<WidgetId> {
+        let mut current = Some(start);
+        while let Some(id) = current {
+            let node = tree.get(id)?;
+            if node.tooltip.is_some() {
+                return Some(id);
+            }
+            current = node.parent;
+        }
+        None
     }
 
     /// Walk from `start` up the parent chain to find a ScrollList widget.
@@ -575,5 +822,336 @@ mod tests {
         state.cursor = (0.0, 0.0);
         let consumed = state.handle_scroll(&mut tree, 1.0);
         assert!(!consumed);
+    }
+
+    // ------------------------------------------------------------------
+    // Tooltip tests (UI-W04)
+    // ------------------------------------------------------------------
+
+    fn screen() -> Size {
+        Size {
+            width: 800.0,
+            height: 600.0,
+        }
+    }
+
+    /// Helper: build a tree with a button that has a simple text tooltip.
+    fn tree_with_tooltip_button() -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new();
+        let button = tree.insert_root(Widget::Button {
+            text: "Hover me".into(),
+            color: [1.0; 4],
+            bg_color: [0.3; 4],
+            border_color: [0.8; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+        });
+        tree.set_position(button, Position::Fixed { x: 100.0, y: 100.0 });
+        tree.set_tooltip(button, Some(TooltipContent::Text("Hello tooltip".into())));
+        tree.layout(screen(), 14.0);
+        (tree, button)
+    }
+
+    #[test]
+    fn tooltip_not_shown_before_delay() {
+        let (mut tree, button) = tree_with_tooltip_button();
+        let theme = Theme::default();
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let btn_rect = tree.get(button).unwrap().rect;
+
+        // Move cursor over button.
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+
+        // Update tooltips immediately — should NOT show (delay not elapsed).
+        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        assert_eq!(state.tooltip_count(), 0);
+
+        // Update tooltips just before delay threshold — still not shown.
+        let almost = t0 + Duration::from_millis(theme.tooltip_delay_ms - 1);
+        state.update_tooltips(&mut tree, &theme, screen(), almost);
+        assert_eq!(state.tooltip_count(), 0);
+    }
+
+    #[test]
+    fn tooltip_shown_after_delay() {
+        let (mut tree, button) = tree_with_tooltip_button();
+        let theme = Theme::default();
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let btn_rect = tree.get(button).unwrap().rect;
+
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        assert_eq!(state.tooltip_count(), 0);
+
+        // Advance past delay — tooltip should appear.
+        let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        assert_eq!(state.tooltip_count(), 1);
+
+        // Tooltip is a new root in the tree.
+        assert_eq!(tree.roots().len(), 2); // button + tooltip panel
+    }
+
+    #[test]
+    fn tooltip_dismissed_on_cursor_leave() {
+        let (mut tree, button) = tree_with_tooltip_button();
+        let theme = Theme::default();
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let btn_rect = tree.get(button).unwrap().rect;
+
+        // Show tooltip.
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        assert_eq!(state.tooltip_count(), 1);
+
+        // Move cursor far away (outside button and tooltip).
+        state.handle_cursor_moved(&mut tree, 0.0, 0.0);
+        tree.layout(screen(), 14.0); // layout tooltip so it has a rect
+        let t2 = t1 + Duration::from_millis(16);
+        state.update_tooltips(&mut tree, &theme, screen(), t2);
+        assert_eq!(state.tooltip_count(), 0);
+
+        // Tooltip root removed from tree.
+        assert_eq!(tree.roots().len(), 1); // only the button remains
+    }
+
+    #[test]
+    fn tooltip_stays_when_cursor_on_source() {
+        let (mut tree, button) = tree_with_tooltip_button();
+        let theme = Theme::default();
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let btn_rect = tree.get(button).unwrap().rect;
+
+        // Show tooltip.
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        assert_eq!(state.tooltip_count(), 1);
+
+        // Move cursor to a different part of the button.
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 5.0, btn_rect.y + 5.0);
+        tree.layout(screen(), 14.0);
+        let t2 = t1 + Duration::from_millis(16);
+        state.update_tooltips(&mut tree, &theme, screen(), t2);
+        assert_eq!(state.tooltip_count(), 1); // still showing
+    }
+
+    #[test]
+    fn tooltip_stays_when_cursor_inside_tooltip() {
+        let (mut tree, button) = tree_with_tooltip_button();
+        let theme = Theme::default();
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let btn_rect = tree.get(button).unwrap().rect;
+
+        // Show tooltip.
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        assert_eq!(state.tooltip_count(), 1);
+
+        // Layout so tooltip has a rect, then move cursor into tooltip.
+        tree.layout(screen(), 14.0);
+        let tooltip_root = tree.roots()[1]; // second root = tooltip
+        let tooltip_rect = tree.get(tooltip_root).unwrap().rect;
+        state.handle_cursor_moved(&mut tree, tooltip_rect.x + 1.0, tooltip_rect.y + 1.0);
+
+        let t2 = t1 + Duration::from_millis(16);
+        state.update_tooltips(&mut tree, &theme, screen(), t2);
+        assert_eq!(state.tooltip_count(), 1); // tooltip stays
+    }
+
+    #[test]
+    fn fast_show_after_recent_dismiss() {
+        let (mut tree, button) = tree_with_tooltip_button();
+        let theme = Theme::default();
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let btn_rect = tree.get(button).unwrap().rect;
+
+        // Show and dismiss a tooltip.
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        assert_eq!(state.tooltip_count(), 1);
+
+        // Dismiss by moving away.
+        state.handle_cursor_moved(&mut tree, 0.0, 0.0);
+        tree.layout(screen(), 14.0);
+        let t2 = t1 + Duration::from_millis(16);
+        state.update_tooltips(&mut tree, &theme, screen(), t2);
+        assert_eq!(state.tooltip_count(), 0);
+
+        // Immediately hover again — should show instantly (fast window).
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        let t3 = t2 + Duration::from_millis(1); // 1ms later, well within fast window
+        state.update_tooltips(&mut tree, &theme, screen(), t3);
+        // Pending started at t3, fast delay is 0 → next update should show.
+        let t4 = t3 + Duration::from_millis(1);
+        state.update_tooltips(&mut tree, &theme, screen(), t4);
+        assert_eq!(state.tooltip_count(), 1);
+    }
+
+    #[test]
+    fn tooltip_edge_flip_right() {
+        let theme = Theme::default();
+        let tooltip_size = Size {
+            width: 100.0,
+            height: 50.0,
+        };
+        let scr = Size {
+            width: 200.0,
+            height: 200.0,
+        };
+
+        // Cursor near right edge — tooltip should flip left.
+        let (x, _) = UiState::compute_tooltip_position((180.0, 50.0), tooltip_size, scr, 0, &theme);
+        // Should flip: 180 - 100 - 8 = 72
+        assert!(x < 180.0);
+        assert!(x + tooltip_size.width <= scr.width);
+    }
+
+    #[test]
+    fn tooltip_edge_flip_bottom() {
+        let theme = Theme::default();
+        let tooltip_size = Size {
+            width: 100.0,
+            height: 50.0,
+        };
+        let scr = Size {
+            width: 200.0,
+            height: 200.0,
+        };
+
+        // Cursor near bottom edge — tooltip should flip up.
+        let (_, y) = UiState::compute_tooltip_position((50.0, 180.0), tooltip_size, scr, 0, &theme);
+        assert!(y < 180.0);
+        assert!(y + tooltip_size.height <= scr.height);
+    }
+
+    #[test]
+    fn nested_tooltip_chain() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+
+        // Source button with Custom tooltip containing a sub-tooltip label.
+        let button = tree.insert_root(Widget::Button {
+            text: "Source".into(),
+            color: [1.0; 4],
+            bg_color: [0.3; 4],
+            border_color: [0.8; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+        });
+        tree.set_position(button, Position::Fixed { x: 100.0, y: 100.0 });
+
+        let level2 = TooltipContent::Text("Level 2".into());
+        let level1 = TooltipContent::Custom(vec![
+            (
+                Widget::Label {
+                    text: "Level 1 info".into(),
+                    color: [1.0; 4],
+                    font_size: 12.0,
+                    font_family: FontFamily::default(),
+                },
+                None,
+            ),
+            (
+                Widget::Label {
+                    text: "[hover me]".into(),
+                    color: [0.8, 0.6, 0.3, 1.0],
+                    font_size: 9.0,
+                    font_family: FontFamily::default(),
+                },
+                Some(level2),
+            ),
+        ]);
+        tree.set_tooltip(button, Some(level1));
+        tree.layout(screen(), 14.0);
+
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let btn_rect = tree.get(button).unwrap().rect;
+
+        // Hover button and show level 1 tooltip.
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        assert_eq!(state.tooltip_count(), 1);
+
+        // Layout tooltip, find the hoverable child inside it.
+        tree.layout(screen(), 14.0);
+        let tooltip1_root = tree.roots()[1];
+        let tooltip1_children = tree.get(tooltip1_root).unwrap().children.clone();
+        // Second child is the one with sub-tooltip.
+        let sub_trigger = tooltip1_children[1];
+        let sub_rect = tree.get(sub_trigger).unwrap().rect;
+
+        // Hover the sub-trigger label inside tooltip 1.
+        state.handle_cursor_moved(&mut tree, sub_rect.x + 1.0, sub_rect.y + 1.0);
+        // Start pending for level 2.
+        let t2 = t1 + Duration::from_millis(16);
+        state.update_tooltips(&mut tree, &theme, screen(), t2);
+        assert_eq!(state.tooltip_count(), 1); // still just level 1 (delay not met)
+
+        // Advance past delay — level 2 should appear.
+        let t3 = t2 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree, &theme, screen(), t3);
+        assert_eq!(state.tooltip_count(), 2); // two levels!
+
+        // Move cursor away — both should be dismissed.
+        state.handle_cursor_moved(&mut tree, 0.0, 0.0);
+        tree.layout(screen(), 14.0);
+        let t4 = t3 + Duration::from_millis(16);
+        state.update_tooltips(&mut tree, &theme, screen(), t4);
+        assert_eq!(state.tooltip_count(), 0);
+    }
+
+    #[test]
+    fn dismiss_all_tooltips_clears_stack() {
+        let (mut tree, button) = tree_with_tooltip_button();
+        let theme = Theme::default();
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let btn_rect = tree.get(button).unwrap().rect;
+
+        // Show tooltip.
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        assert_eq!(state.tooltip_count(), 1);
+
+        // Dismiss all.
+        state.dismiss_all_tooltips(&mut tree, t1);
+        assert_eq!(state.tooltip_count(), 0);
+        assert_eq!(tree.roots().len(), 1);
+    }
+
+    #[test]
+    fn demo_tree_has_tooltip_button() {
+        let theme = Theme::default();
+        let tree = crate::ui::demo_tree(&theme);
+
+        // Third root is the tooltip button.
+        assert_eq!(tree.roots().len(), 3);
+
+        // The tooltip button should have tooltip content set.
+        let btn_id = tree.roots()[2];
+        let node = tree.get(btn_id).unwrap();
+        assert!(
+            node.tooltip.is_some(),
+            "demo tooltip button should have tooltip content"
+        );
     }
 }

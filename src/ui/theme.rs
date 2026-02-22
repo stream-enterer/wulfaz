@@ -59,6 +59,29 @@ pub struct Theme {
     pub scrollbar_color: [f32; 4],
     /// Default scroll list item height in pixels.
     pub scroll_item_height: f32,
+
+    // -- Tooltip defaults (UI-W04) --
+    /// Hover delay before showing tooltip (milliseconds).
+    pub tooltip_delay_ms: u64,
+    /// Fast-show window after a tooltip is dismissed (milliseconds).
+    /// Within this window, new tooltips appear instantly.
+    pub tooltip_fast_window_ms: u64,
+    /// Horizontal offset from cursor to tooltip (pixels).
+    pub tooltip_offset_x: f32,
+    /// Vertical offset from cursor to tooltip (pixels).
+    pub tooltip_offset_y: f32,
+    /// Per-nesting-level position offset (pixels).
+    pub tooltip_nesting_offset: f32,
+    /// Internal padding for tooltip panels (pixels).
+    pub tooltip_padding: f32,
+    /// Tooltip background color (sRGB RGBA).
+    pub tooltip_bg_color: [f32; 4],
+    /// Tooltip border color (sRGB RGBA).
+    pub tooltip_border_color: [f32; 4],
+    /// Tooltip border width (pixels).
+    pub tooltip_border_width: f32,
+    /// Tooltip inner shadow width (pixels).
+    pub tooltip_shadow_width: f32,
 }
 
 /// Convert a hex color (#RRGGBB) to sRGB [f32; 4] with alpha 1.0.
@@ -105,6 +128,18 @@ impl Default for Theme {
             scrollbar_width: 6.0,
             scrollbar_color: hex_a(0xC8, 0xA8, 0x50, 0.5), // gold at 50% alpha
             scroll_item_height: 20.0,                      // pixels
+
+            // Tooltip defaults (UI-W04)
+            tooltip_delay_ms: 300,
+            tooltip_fast_window_ms: 500,
+            tooltip_offset_x: 8.0,
+            tooltip_offset_y: 8.0,
+            tooltip_nesting_offset: 4.0,
+            tooltip_padding: 8.0,
+            tooltip_bg_color: hex_a(0xC0, 0xA8, 0x80, 0.98), // slightly darker parchment
+            tooltip_border_color: hex(0xC8, 0xA8, 0x50),     // gold
+            tooltip_border_width: 1.0,
+            tooltip_shadow_width: 4.0,
         }
     }
 }

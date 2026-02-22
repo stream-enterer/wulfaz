@@ -4,34 +4,34 @@
 None
 
 ## Completed
-UI-W03 — ScrollList widget — COMPLETE
+UI-W04 — Tooltip system — COMPLETE
 
-- `Widget::ScrollList` variant in `widget.rs`: bg/border, item_height, scroll_offset, scrollbar color/width
-- Theme scrollbar constants: `scrollbar_width` (6px), `scrollbar_color` (gold 50%), `scroll_item_height` (20px)
-- Virtual scrolling in `layout_node`: only visible children get measured/laid out; off-screen items get zero rects
-- `layout_scroll_item` helper: positions children in vertical stack, overrides Position/Sizing
-- `draw_node` ScrollList arm: background panel + visible children + auto-hiding scrollbar thumb
-- Scrollbar thumb size proportional to viewport/content ratio, 20px minimum
-- `max_scroll`, `set_scroll_offset`, `scroll_by`, `ensure_visible` public methods on WidgetTree
-- ScrollList is focusable (keyboard nav target)
-- Input routing: `handle_scroll` bubbles to nearest ScrollList ancestor, applies SCROLL_SPEED (40px/line)
-- Keyboard nav: ArrowUp/Down (1 item), PageUp/Down (viewport), Home/End (extremes)
-- Scrollbar drag: `ScrollDrag` state in UiState, thumb drag updates scroll_offset proportionally
-- All 4 input handlers now take `&mut WidgetTree` (was `&WidgetTree`)
-- Demo tree: 100-item ScrollList at (360, 20), 200×160px
-- 8 new tests: layout, virtual scrolling, clamping, scrollbar visibility, ensure_visible, focusable, demo
-- All 472 tests pass, zero warnings
+- `TooltipContent` enum in `widget.rs`: Text (simple label) and Custom (widget list with nested tooltips)
+- Theme tooltip constants: delay 300ms, fast window 500ms, offset 8px, nesting offset 4px, padding 8px, darker parchment bg, gold border 1px, shadow 4px
+- `tooltip: Option<TooltipContent>` field on WidgetNode, `set_tooltip()` on WidgetTree
+- `measure_node()` made public for tooltip size estimation
+- `TooltipEntry`/`TooltipPending` types in `input.rs`
+- `tooltip_stack`, `tooltip_pending`, `tooltip_last_dismiss` fields on UiState
+- `update_tooltips()`: hover delay, fast-show window, show/dismiss lifecycle
+- `show_tooltip()`: builds Panel root from TooltipContent, vertical stacking, edge-flip positioning
+- `dismiss_all_tooltips()`, `tooltip_count()` public API
+- `find_tooltip_ancestor()`: walks parent chain to find widget with tooltip content
+- `compute_tooltip_position()`: below-right of cursor, flips if clipping screen, nesting offset
+- Nested tooltips: Custom content children can have their own tooltips → stacking
+- Recursive dismissal: top of stack popped when cursor leaves both tooltip rect and source rect
+- Demo tree: button at (580,20) with 3-level nested tooltip chain (level 1 → level 2 → level 3)
+- 11 new tests: delay, show after delay, dismiss on leave, stays on source, stays inside tooltip, fast show window, edge flip (right/bottom), nested chain, dismiss all, demo tree tooltip
+- All 483 tests pass, zero warnings
 
 ## Files Modified
-- src/ui/widget.rs (ScrollList variant)
-- src/ui/theme.rs (scrollbar_width, scrollbar_color, scroll_item_height)
-- src/ui/mod.rs (measure/layout/draw/hit_test, scroll helpers, demo tree, 8 tests)
-- src/ui/input.rs (mutable tree refs, scroll bubbling, keyboard nav, scrollbar drag)
-- src/main.rs (&self.ui_tree → &mut self.ui_tree in 4 call sites)
+- src/ui/widget.rs (TooltipContent enum)
+- src/ui/theme.rs (10 tooltip constants)
+- src/ui/mod.rs (WidgetNode tooltip field, set_tooltip, pub measure_node, demo tooltip button, updated demo tests)
+- src/ui/input.rs (TooltipEntry, TooltipPending, UiState tooltip fields, update/show/dismiss/position methods, 11 tests)
 
 ## Next Action
 Pick next task from backlog. Unblocked candidates:
-- UI-W04 — Tooltip system (needs W01+W02, both done)
 - UI-I01a — Status bar (needs W01+R02, both done)
-- UI-I01c — Event log (needs W01+W03+R02, all done now)
+- UI-I01b — Hover tooltip (needs W01+W04+R02, all done now)
+- UI-I01c — Event log (needs W01+W03+R02, all done)
 - UI-I02 — Map overlay (needs P01+P03, both done)

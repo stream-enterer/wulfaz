@@ -1,5 +1,15 @@
 use super::draw::{FontFamily, TextSpan};
 
+/// Content description for a tooltip (UI-W04).
+/// Stored on WidgetNode, built into widget subtrees on hover.
+#[derive(Debug, Clone)]
+pub enum TooltipContent {
+    /// Simple text tooltip (rendered as body-font label).
+    Text(String),
+    /// Custom widget list with optional nested tooltips per child.
+    Custom(Vec<(Widget, Option<TooltipContent>)>),
+}
+
 /// Flat enum widget identity (DD-1).
 /// Closed set — we know all widget types. No trait objects.
 #[derive(Debug, Clone)]

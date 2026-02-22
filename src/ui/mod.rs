@@ -8,7 +8,8 @@ pub use draw::{DrawList, FontFamily, PanelCommand, RichTextCommand, TextCommand,
 #[allow(unused_imports)] // Public API: used by main.rs for input routing (UI-W02).
 pub use input::{MouseButton, UiEvent, UiState};
 pub use theme::Theme;
-pub use widget::Widget;
+#[allow(unused_imports)] // Public API: used by game panels setting tooltip content.
+pub use widget::{TooltipContent, Widget};
 
 use slotmap::{SlotMap, new_key_type};
 
@@ -162,6 +163,8 @@ pub(crate) struct WidgetNode {
     pub rect: Rect,
     /// Measured intrinsic size (set by measure pass).
     pub measured: Size,
+    /// Optional tooltip content shown on hover (UI-W04).
+    pub tooltip: Option<widget::TooltipContent>,
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +199,7 @@ impl WidgetTree {
             dirty: true,
             rect: Rect::default(),
             measured: Size::default(),
+            tooltip: None,
         });
         self.roots.push(id);
         id
@@ -215,6 +219,7 @@ impl WidgetTree {
             dirty: true,
             rect: Rect::default(),
             measured: Size::default(),
+            tooltip: None,
         });
         if let Some(parent_node) = self.arena.get_mut(parent) {
             parent_node.children.push(id);
@@ -300,6 +305,13 @@ impl WidgetTree {
         if let Some(node) = self.arena.get_mut(id) {
             node.margin = margin;
             node.dirty = true;
+        }
+    }
+
+    /// Set tooltip content for a widget.
+    pub fn set_tooltip(&mut self, id: WidgetId, content: Option<widget::TooltipContent>) {
+        if let Some(node) = self.arena.get_mut(id) {
+            node.tooltip = content;
         }
     }
 
@@ -526,7 +538,7 @@ impl WidgetTree {
     }
 
     /// Measure intrinsic size of a widget (content only, no padding).
-    fn measure_node(&self, id: WidgetId, line_height: f32) -> Size {
+    pub fn measure_node(&self, id: WidgetId, line_height: f32) -> Size {
         let Some(node) = self.arena.get(id) else {
             return Size::default();
         };
@@ -990,6 +1002,63 @@ pub fn demo_tree(theme: &Theme) -> WidgetTree {
             },
         );
     }
+
+    // Tooltip demo: button with 3-level nested tooltip chain (UI-W04 demo).
+    let tooltip_btn = tree.insert_root(Widget::Button {
+        text: "Hover for tooltip".into(),
+        color: theme.text_light,
+        bg_color: theme.bg_parchment,
+        border_color: theme.panel_border_color,
+        font_size: theme.font_body_size,
+        font_family: theme.font_body_family,
+    });
+    tree.set_position(tooltip_btn, Position::Fixed { x: 580.0, y: 20.0 });
+
+    // Level 3 (deepest): simple text.
+    let level3 = widget::TooltipContent::Text("Level 3: deepest tooltip".into());
+    // Level 2: custom with a hoverable label that shows level 3.
+    let level2 = widget::TooltipContent::Custom(vec![
+        (
+            Widget::Label {
+                text: "Level 2 tooltip".into(),
+                color: theme.text_light,
+                font_size: theme.font_body_size,
+                font_family: theme.font_body_family,
+            },
+            None,
+        ),
+        (
+            Widget::Label {
+                text: "[hover for level 3]".into(),
+                color: theme.gold,
+                font_size: theme.font_data_size,
+                font_family: theme.font_data_family,
+            },
+            Some(level3),
+        ),
+    ]);
+    // Level 1: custom with a hoverable label that shows level 2.
+    let level1 = widget::TooltipContent::Custom(vec![
+        (
+            Widget::Label {
+                text: "Level 1 tooltip".into(),
+                color: theme.text_light,
+                font_size: theme.font_body_size,
+                font_family: theme.font_body_family,
+            },
+            None,
+        ),
+        (
+            Widget::Label {
+                text: "[hover for level 2]".into(),
+                color: theme.gold,
+                font_size: theme.font_data_size,
+                font_family: theme.font_data_family,
+            },
+            Some(level2),
+        ),
+    ]);
+    tree.set_tooltip(tooltip_btn, Some(level1));
 
     tree
 }
@@ -1668,21 +1737,22 @@ mod tests {
             14.0,
         );
 
-        // Should have 2 roots: original panel + ScrollList.
-        assert_eq!(tree.roots().len(), 2);
+        // Should have 3 roots: panel + ScrollList + tooltip button.
+        assert_eq!(tree.roots().len(), 3);
 
         let mut dl = DrawList::new();
         tree.draw(&mut dl);
 
-        // Original panel + ScrollList bg + scrollbar thumb = 3 panels.
-        assert_eq!(dl.panels.len(), 3);
+        // Original panel + ScrollList bg + scrollbar thumb + tooltip button bg = 4 panels.
+        assert_eq!(dl.panels.len(), 4);
 
-        // 3 original labels + visible scroll items (viewport 152px / 20px ≈ 7-8).
-        assert!(dl.texts.len() > 3, "scroll items should be drawn");
+        // 3 original labels + visible scroll items + tooltip button text.
+        assert!(dl.texts.len() > 4, "scroll items + button should be drawn");
 
-        // Verify scroll items are from the list.
-        let scroll_texts: Vec<&str> = dl.texts[3..].iter().map(|t| t.text.as_str()).collect();
-        assert!(scroll_texts.contains(&"Item 1"));
+        // Verify scroll items are from the list (skip first 3 labels).
+        let after_labels: Vec<&str> = dl.texts[3..].iter().map(|t| t.text.as_str()).collect();
+        assert!(after_labels.contains(&"Item 1"));
+        assert!(after_labels.contains(&"Hover for tooltip"));
     }
 
     #[test]
