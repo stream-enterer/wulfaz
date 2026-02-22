@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use rand::rngs::StdRng;
+use smallvec::SmallVec;
 
 use crate::components::*;
 use crate::events::EventLog;
@@ -116,6 +117,10 @@ pub struct World {
     pub mind: MindTables,
     pub gis: GisTables,
 
+    // Spatial acceleration
+    /// Tile-based spatial index, rebuilt from positions each tick.
+    pub spatial_index: HashMap<(i32, i32), SmallVec<[Entity; 4]>>,
+
     // Infrastructure
     pub tiles: TileMap,
     pub events: EventLog,
@@ -137,6 +142,8 @@ impl World {
             mind: MindTables::new(),
             gis: GisTables::new(),
 
+            spatial_index: HashMap::new(),
+
             tiles: TileMap::new(64, 64), // 64m × 64m
             events: EventLog::default_capacity(),
             rng: create_rng(seed),
@@ -153,6 +160,29 @@ impl World {
         self.next_entity_id += 1;
         self.alive.insert(entity);
         entity
+    }
+
+    /// Rebuild the spatial index from current positions.
+    /// Call at the start of each tick, after run_death has cleared pending_deaths.
+    pub fn rebuild_spatial_index(&mut self) {
+        self.spatial_index.clear();
+        for (&entity, pos) in &self.body.positions {
+            if self.alive.contains(&entity) {
+                self.spatial_index
+                    .entry((pos.x, pos.y))
+                    .or_default()
+                    .push(entity);
+            }
+        }
+    }
+
+    /// Return all entities at a given tile coordinate.
+    #[allow(dead_code)] // Public API for B02 spatial query conversion
+    pub fn entities_at(&self, x: i32, y: i32) -> &[Entity] {
+        self.spatial_index
+            .get(&(x, y))
+            .map(SmallVec::as_slice)
+            .unwrap_or(&[])
     }
 
     /// Remove an entity from ALL tables. Called ONLY by run_death.
@@ -425,8 +455,72 @@ mod tests {
         assert!(world.alive.is_empty());
         assert!(world.pending_deaths.is_empty());
         assert!(world.body.positions.is_empty());
+        assert!(world.spatial_index.is_empty());
         assert_eq!(world.tick, Tick(0));
         assert_eq!(world.tiles.width(), 64);
         assert_eq!(world.tiles.height(), 64);
+    }
+
+    #[test]
+    fn spatial_index_rebuild_indexes_positions() {
+        let mut world = World::new_with_seed(42);
+        let e1 = world.spawn();
+        let e2 = world.spawn();
+        let e3 = world.spawn();
+        world.body.positions.insert(e1, Position { x: 5, y: 10 });
+        world.body.positions.insert(e2, Position { x: 5, y: 10 }); // same tile as e1
+        world.body.positions.insert(e3, Position { x: 3, y: 7 });
+
+        world.rebuild_spatial_index();
+
+        let at_5_10 = world.entities_at(5, 10);
+        assert_eq!(at_5_10.len(), 2);
+        assert!(at_5_10.contains(&e1));
+        assert!(at_5_10.contains(&e2));
+
+        let at_3_7 = world.entities_at(3, 7);
+        assert_eq!(at_3_7.len(), 1);
+        assert!(at_3_7.contains(&e3));
+
+        // Empty tile returns empty slice.
+        assert!(world.entities_at(0, 0).is_empty());
+    }
+
+    #[test]
+    fn spatial_index_excludes_dead_entities() {
+        let mut world = World::new_with_seed(42);
+        let alive = world.spawn();
+        let dead = world.spawn();
+        world.body.positions.insert(alive, Position { x: 1, y: 1 });
+        world.body.positions.insert(dead, Position { x: 1, y: 1 });
+
+        // Simulate despawn: remove from alive but leave stale position entry.
+        world.alive.remove(&dead);
+
+        world.rebuild_spatial_index();
+
+        let at_1_1 = world.entities_at(1, 1);
+        assert_eq!(at_1_1.len(), 1);
+        assert!(at_1_1.contains(&alive));
+        assert!(!at_1_1.contains(&dead));
+    }
+
+    #[test]
+    fn spatial_index_clears_on_rebuild() {
+        let mut world = World::new_with_seed(42);
+        let e = world.spawn();
+        world.body.positions.insert(e, Position { x: 2, y: 3 });
+
+        world.rebuild_spatial_index();
+        assert_eq!(world.entities_at(2, 3).len(), 1);
+
+        // Move entity to new position and rebuild.
+        world.body.positions.insert(e, Position { x: 8, y: 9 });
+        world.rebuild_spatial_index();
+
+        // Old position is now empty, new position has the entity.
+        assert!(world.entities_at(2, 3).is_empty());
+        assert_eq!(world.entities_at(8, 9).len(), 1);
+        assert!(world.entities_at(8, 9).contains(&e));
     }
 }

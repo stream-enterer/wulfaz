@@ -23,6 +23,7 @@ cosmic-text = { version = "0.18", default-features = false, features = ["std"] }
 shapefile = { version = "0.7", features = ["yore"] }
 rusqlite = { version = "0.33", features = ["bundled"] }
 slotmap = "1"
+smallvec = "1"
 
 [lints.clippy]
 unwrap_used = "deny"

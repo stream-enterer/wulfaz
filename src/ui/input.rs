@@ -409,9 +409,6 @@ impl UiState {
         while let Some(entry) = self.tooltip_stack.pop() {
             tree.remove(entry.root);
         }
-        if self.tooltip_stack.is_empty() {
-            // Stack was non-empty before popping.
-        }
         self.tooltip_last_dismiss = Some(now);
         self.tooltip_pending = None;
     }

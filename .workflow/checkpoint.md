@@ -4,27 +4,20 @@
 None
 
 ## Completed
-UI-DEMO — Widget showcase — COMPLETE
+SCALE-B01 — Spatial index — COMPLETE
 
-- New file: `src/ui/demo.rs` — `build_demo()` function, `DemoLiveData` struct, 3 tests
-- F11 toggles demo panel, `--ui-demo` CLI flag activates at startup
-- `ToggleDemo` action added to keybindings (F11 default)
-- Demo panel (400px, left side) showcases all 5 UI tiers:
-  - Tier 1: Typography (header/body/data/warning/disabled)
-  - Tier 3: Rich text (mixed fonts/colors), ScrollList (50 items), 3-level tooltip chain
-  - Tier 4: Live entity data (tick, population, first entity stats with severity colors)
-  - Tier 5: Buttons with keybinding labels (Pause/Speed/Close), animated slide-in
-- Slide-in animation on open, Esc closes demo (added to CloseTopmost priority)
-- Old `demo_tree()` in mod.rs removed, 4 tests updated to use new `demo::build_demo()`
-- All 540 tests pass (214 lib + 315 main + 5 determinism + 6 invariant), zero warnings
+- Added `smallvec = "1"` dependency
+- New field on World: `spatial_index: HashMap<(i32,i32), SmallVec<[Entity; 4]>>`
+- `rebuild_spatial_index()` — clears and rebuilds from `body.positions`, filters by `alive`
+- `entities_at(x, y)` — O(1) lookup returning `&[Entity]`
+- Called at start of every tick in `run_one_tick()`, before Phase 1
+- 3 new tests: rebuild indexes positions, excludes dead entities, clears on rebuild
+- All 329 tests pass (318 lib + 5 determinism + 6 invariant), zero warnings (except expected dead_code for entities_at until B02)
 
 ## Files Modified
-- src/ui/demo.rs (NEW — build_demo, DemoLiveData, 3 tests)
-- src/ui/mod.rs (module wire-up, removed old demo_tree, 3 tests updated)
-- src/ui/keybindings.rs (ToggleDemo action, F11 default binding)
-- src/ui/input.rs (1 test updated)
-- src/main.rs (show_demo field, ToggleDemo handler, demo building in render, --ui-demo flag)
+- Cargo.toml (smallvec dep)
+- src/world.rs (spatial_index field, rebuild method, query method, 3 tests)
+- src/main.rs (rebuild call at tick start)
 
 ## Next Action
-Pick next task from backlog. All UI tasks complete. Remaining:
-- Phase A (SCALE-A09), Phase B, Phase C, Phase D, SIM-*, GROW-*
+SCALE-B02 — Convert spatial queries in combat, eating, decisions to use spatial index.

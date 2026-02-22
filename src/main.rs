@@ -204,6 +204,7 @@ enum PlayerAction {
 }
 
 fn run_one_tick(world: &mut World) {
+    world.rebuild_spatial_index();
     let tick = world.tick;
     run_temperature(world, tick);
     run_hunger(world, tick);
@@ -778,7 +779,8 @@ impl ApplicationHandler for App {
                             let (mcw, mch) = font.map_cell();
                             let map_y = status_bar_h + padding;
                             let map_pixel_h =
-                                screen_h as f32 - status_bar_h - event_log_h - padding * 3.0;
+                                (screen_h as f32 - status_bar_h - event_log_h - padding * 3.0)
+                                    .max(0.0);
                             let map_pixel_w = screen_w as f32 - padding * 2.0;
 
                             let viewport_cols = (map_pixel_w / mcw).floor().max(1.0) as usize;
@@ -857,7 +859,6 @@ impl ApplicationHandler for App {
 
                             // Build entity inspector if selected (UI-I01d).
                             self.inspector_close_id = None;
-                            let mut _inspector_panel_id = None;
                             if let Some(entity) = self.selected_entity {
                                 if let Some(info) = ui::collect_inspector_info(entity, &self.world)
                                 {
@@ -880,7 +881,6 @@ impl ApplicationHandler for App {
                                         &mut self.ui_tree,
                                         &self.ui_theme,
                                         &info,
-                                        screen_h as f32,
                                     );
 
                                     // Apply slide-in offset (UI-W05).
@@ -896,7 +896,6 @@ impl ApplicationHandler for App {
                                         },
                                     );
                                     self.inspector_close_id = Some(close_id);
-                                    _inspector_panel_id = Some(inspector_id);
                                 } else {
                                     // Entity died or lost position — auto-close.
                                     self.selected_entity = None;

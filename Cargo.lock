@@ -3139,6 +3139,7 @@ dependencies = [
  "serde",
  "shapefile",
  "slotmap",
+ "smallvec",
  "wgpu",
  "winit",
  "zstd",

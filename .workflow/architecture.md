@@ -202,6 +202,54 @@ struct District {
 
 **Dehydrate** (active → statistical): Collapse entity stats back into district averages. Remove from property tables. Nearby zone buffers the transition — entities simplify for ~200 ticks before collapsing.
 
+## UI Layer (CK3-Style Widget System)
+
+Retained-mode widget layer on wgpu. cosmic-text for shaping/layout, FreeType for glyph rasterization, custom widget tree for CK3 parchment+gold aesthetic. Lives on `App` in main.rs, not on `World` — UI is not simulation state.
+
+### Architecture
+
+- **WidgetTree** — slotmap arena of `WidgetNode`. Multiple roots (panels, tooltips). Rebuilt every frame (DD-5: full rebuild, ~50-100 widgets, trivial cost).
+- **Widget** — flat enum: `Panel`, `Label`, `Button`, `RichText`, `ScrollList`. No trait objects (DD-1).
+- **DrawList** — intermediate commands (`PanelCommand`, `TextCommand`, `RichTextCommand`). Decouples widget tree from GPU renderers. Tree emits commands; `PanelRenderer` and `FontRenderer` consume independently.
+- **Theme** — single global `Theme` struct with DD-2 CK3 palette (parchment, gold, white, dark, red, grey), font sizes (9/12/16pt), spacing constants, animation durations.
+- **UiState** — interaction state: hover, focus, pressed, captured, drag, tooltip stack. Lives on App.
+- **Animator** — wall-clock f32 interpolation keyed by string. Easing: Linear, EaseOut, EaseInOut. Used for tooltip fade, inspector slide, button hover highlight, demo slide.
+- **KeyBindings** — `HashMap<KeyCombo, Action>`. Defaults: Space=pause, Esc=close, F11=demo, 1-5=speed. Reverse map for display labels.
+
+### Rendering Pipeline
+
+1. `WidgetTree::draw()` emits `DrawList` (panels + texts + rich_texts)
+2. Map overlays (hover/selection/path tile highlights) added directly to `PanelRenderer`
+3. `PanelRenderer` consumes `PanelCommand`s → panel.wgsl (SDF borders + inner shadow)
+4. `FontRenderer` consumes `TextCommand`s → `prepare_text_with_font()` (single style per call)
+5. `FontRenderer` consumes `RichTextCommand`s → `prepare_rich_text()` (per-span color/font via cosmic-text)
+6. Map text rendered via `prepare_map()` (mono font, codepoint-based cache)
+7. Render order: map glyphs → map overlays → UI panels → UI text → tooltips (on top)
+
+### Multi-Font Atlas
+
+Single shared R8Unorm atlas (512×4096). Composite key: `(fontdb::ID, font_size_bits, glyph_id)`. Two fonts: Libertinus Mono (data/terminal) + Libertinus Serif (body/headers). On-demand FreeType rasterization with shelf-packing. Per-vertex color in `TextVertex` → sRGB-to-linear conversion in text.wgsl fragment shader.
+
+### Input Dispatch Order
+
+1. Global keybindings (UI-I03) — before widget focus
+2. Widget focus dispatch (Tab, ScrollList nav, click)
+3. Game keys (WASD camera, numpad movement, roguelike controls)
+
+### Game Panels
+
+| Panel | Builder | Lifecycle | Location |
+|-------|---------|-----------|----------|
+| Status bar | `build_status_bar()` | Permanent, rebuilt every frame | Top of screen |
+| Hover tooltip | `build_hover_tooltip()` | Created on map hover, destroyed on leave | Cursor-anchored |
+| Event log | `build_event_log()` | Permanent, rebuilt every frame | Bottom of screen |
+| Entity inspector | `build_entity_inspector()` | Created on entity click, Esc closes | Right side |
+| Widget showcase | `demo::build_demo()` | Toggled via F11 or `--ui-demo` | Left side |
+
+### Data Extraction Pattern
+
+Plain structs (`StatusBarInfo`, `HoverInfo`, `EventLogEntry`, `EntityInspectorInfo`, `DemoLiveData`) are collected from `World` in main.rs, then passed to builder functions. Zero references to `World` inside widget builders.
+
 ## Project Structure
 
 ```
@@ -221,8 +269,8 @@ data/
   paris.ron.zst          # intermediate GIS polygon data (zstd-compressed RON, fallback rasterization)
   utility.ron            # preprocessor utility data
 src/
-  main.rs                # phased main loop + wgpu renderer
-  lib.rs                 # crate root
+  main.rs                # phased main loop + wgpu renderer + UI integration
+  lib.rs                 # crate root (sim-only: world, components, events, systems)
   world.rs               # World struct, spawn, despawn, validate
   events.rs              # Event enum + EventLog ring buffer
   components.rs          # property structs (Position, Hunger, etc.)
@@ -230,9 +278,22 @@ src/
   registry.rs            # BuildingRegistry, BlockRegistry, BuildingData, Address, Occupant
   loading.rs             # KDL parsing, entity spawning (small test map)
   loading_gis.rs         # GIS shapefile parsing, rasterization, binary load
-  render.rs              # terminal/debug display output
-  font.rs                # cosmic-text shaping + FreeType rasterization + wgpu atlas
+  render.rs              # string-based debug rendering (map, status) + render_world_to_string
+  font.rs                # FontRenderer — cosmic-text shaping, FreeType rasterization, multi-font wgpu atlas
+  panel.rs               # PanelRenderer — colored quads with SDF borders + inner shadow
+  text.wgsl              # text glyph shader — per-vertex color, sRGB-to-linear, alpha compositing
+  panel.wgsl             # panel quad shader — SDF border + inner shadow from uniforms
+  linebreak_table.rs     # Unicode line-break property table (generated, used by cosmic-text)
   rng.rs                 # deterministic seeded RNG wrapper
+  ui/
+    mod.rs               # WidgetTree, layout, draw, game panels (status bar, hover, event log, inspector)
+    widget.rs            # Widget enum (Panel, Label, Button, RichText, ScrollList) + TooltipContent
+    draw.rs              # DrawList, PanelCommand, TextCommand, RichTextCommand, FontFamily, TextSpan
+    theme.rs             # Theme struct — DD-2 CK3 palette, font sizes, spacing, animation durations
+    animation.rs         # Animator — wall-clock f32 interpolation with easing
+    input.rs             # UiState — hit testing, focus, drag, mouse capture, tooltip system
+    keybindings.rs       # KeyBindings — configurable shortcut map, KeyCombo, Action enum
+    demo.rs              # Widget showcase panel (F11 toggle, --ui-demo flag)
   bin/
     preprocess.rs        # offline GIS → binary pipeline (generates tiles + bincode meta + RON debug)
     water_diag.rs        # diagnostic tool for water rasterization + bridge detection

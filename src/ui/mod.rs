@@ -1584,7 +1584,6 @@ pub fn build_entity_inspector(
     tree: &mut WidgetTree,
     theme: &Theme,
     info: &EntityInspectorInfo,
-    _screen_height: f32,
 ) -> (WidgetId, WidgetId) {
     let panel = tree.insert_root(Widget::Panel {
         bg_color: theme.tooltip_bg_color,
@@ -3294,7 +3293,7 @@ mod tests {
             action: None,
             gait: None,
         };
-        let (panel_id, _close_id) = build_entity_inspector(&mut tree, &theme, &info, 600.0);
+        let (panel_id, _close_id) = build_entity_inspector(&mut tree, &theme, &info);
 
         let node = tree.get(panel_id).expect("panel exists");
         assert!(matches!(node.widget, Widget::Panel { .. }));
@@ -3315,7 +3314,7 @@ mod tests {
             action: None,
             gait: None,
         };
-        let (panel_id, close_id) = build_entity_inspector(&mut tree, &theme, &info, 600.0);
+        let (panel_id, close_id) = build_entity_inspector(&mut tree, &theme, &info);
 
         // Close button is a child of the panel.
         let panel_node = tree.get(panel_id).expect("panel");
@@ -3342,7 +3341,7 @@ mod tests {
             action: None,
             gait: None,
         };
-        let (panel_id, _) = build_entity_inspector(&mut tree, &theme, &info_low, 600.0);
+        let (panel_id, _) = build_entity_inspector(&mut tree, &theme, &info_low);
 
         // Find the HP RichText child (has "HP " span).
         let panel_node = tree.get(panel_id).expect("panel");
@@ -3372,7 +3371,7 @@ mod tests {
             action: None,
             gait: None,
         };
-        let (panel_id2, _) = build_entity_inspector(&mut tree2, &theme, &info_high, 600.0);
+        let (panel_id2, _) = build_entity_inspector(&mut tree2, &theme, &info_high);
         let panel_node2 = tree2.get(panel_id2).expect("panel");
         let mut found_light = false;
         for &child_id in &panel_node2.children {
@@ -3403,7 +3402,7 @@ mod tests {
             action: Some("Idle".into()),
             gait: Some("Walk".into()),
         };
-        let (panel_id, _) = build_entity_inspector(&mut tree, &theme, &info, 600.0);
+        let (panel_id, _) = build_entity_inspector(&mut tree, &theme, &info);
 
         tree.layout(
             Size {
