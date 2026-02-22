@@ -1,3 +1,23 @@
+/// Font family selection for multi-font rendering (DD-2, DD-3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum FontFamily {
+    /// Libertinus Mono — data, terminal, map grid.
+    #[default]
+    Mono,
+    /// Libertinus Serif — body text, headers.
+    Serif,
+}
+
+impl FontFamily {
+    /// cosmic-text family name for Attrs.
+    pub fn family_name(self) -> &'static str {
+        match self {
+            FontFamily::Mono => "Libertinus Mono",
+            FontFamily::Serif => "Libertinus Serif",
+        }
+    }
+}
+
 /// Intermediate draw command for a panel quad.
 /// Consumed by `PanelRenderer::add_panel()`.
 #[derive(Debug, Clone)]
@@ -21,6 +41,7 @@ pub struct TextCommand {
     pub y: f32,
     pub color: [f32; 4], // sRGB RGBA
     pub font_size: f32,
+    pub font_family: FontFamily,
 }
 
 /// Collects draw commands from the widget tree.

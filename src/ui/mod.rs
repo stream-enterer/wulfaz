@@ -1,7 +1,7 @@
 mod draw;
 mod widget;
 
-pub use draw::{DrawList, PanelCommand, TextCommand};
+pub use draw::{DrawList, FontFamily, PanelCommand, TextCommand};
 pub use widget::Widget;
 
 use slotmap::{SlotMap, new_key_type};
@@ -391,10 +391,10 @@ impl WidgetTree {
             Widget::Label {
                 text, font_size, ..
             } => {
-                // Approximate: char count * cell_width, one line height.
+                // Approximate: char count * estimated glyph width, one line height.
                 // Font size ratio relative to base line_height.
                 let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale; // rough monospace estimate
+                let char_w = line_height * 0.6 * scale; // rough estimate
                 let h = line_height * scale;
                 Size {
                     width: text.len() as f32 * char_w,
@@ -482,6 +482,7 @@ impl WidgetTree {
                 text,
                 color,
                 font_size,
+                font_family,
             } => {
                 draw_list.texts.push(TextCommand {
                     text: text.clone(),
@@ -489,6 +490,7 @@ impl WidgetTree {
                     y: node.rect.y,
                     color: *color,
                     font_size: *font_size,
+                    font_family: *font_family,
                 });
             }
             Widget::Button {
@@ -497,6 +499,7 @@ impl WidgetTree {
                 bg_color,
                 border_color,
                 font_size,
+                font_family,
             } => {
                 // Button = panel background + centered text.
                 draw_list.panels.push(PanelCommand {
@@ -516,6 +519,7 @@ impl WidgetTree {
                     y: node.rect.y + 4.0,
                     color: *color,
                     font_size: *font_size,
+                    font_family: *font_family,
                 });
             }
         }
@@ -547,24 +551,26 @@ pub fn demo_tree(line_height: f32) -> WidgetTree {
     tree.set_sizing(panel, Sizing::Fixed(260.0), Sizing::Fixed(120.0));
     tree.set_padding(panel, Edges::all(12.0));
 
-    // Gold header
+    // Gold header — Serif 16pt style
     let header = tree.insert(
         panel,
         Widget::Label {
             text: "Header".into(),
             color: [0.78, 0.66, 0.31, 1.0], // CK3 gold
             font_size: line_height,
+            font_family: FontFamily::Serif,
         },
     );
     tree.set_position(header, Position::Fixed { x: 0.0, y: 0.0 });
 
-    // White body text
+    // White body text — Serif
     let body = tree.insert(
         panel,
         Widget::Label {
             text: "Body text".into(),
             color: [0.94, 0.90, 0.82, 1.0], // warm white
             font_size: line_height,
+            font_family: FontFamily::Serif,
         },
     );
     tree.set_position(
@@ -575,13 +581,14 @@ pub fn demo_tree(line_height: f32) -> WidgetTree {
         },
     );
 
-    // Red warning
+    // Red warning — Mono for data/terminal style
     let warning = tree.insert(
         panel,
         Widget::Label {
             text: "Warning".into(),
             color: [0.75, 0.25, 0.25, 1.0], // danger red
             font_size: line_height,
+            font_family: FontFamily::Mono,
         },
     );
     tree.set_position(
@@ -620,6 +627,7 @@ mod tests {
                 text: "Hello".into(),
                 color: [1.0; 4],
                 font_size: 14.0,
+                font_family: FontFamily::default(),
             },
         );
         let root_node = tree.get(root).expect("root exists");
@@ -645,6 +653,7 @@ mod tests {
                 text: "A".into(),
                 color: [1.0; 4],
                 font_size: 14.0,
+                font_family: FontFamily::default(),
             },
         );
         let grandchild = tree.insert(
@@ -653,6 +662,7 @@ mod tests {
                 text: "B".into(),
                 color: [1.0; 4],
                 font_size: 14.0,
+                font_family: FontFamily::default(),
             },
         );
 
@@ -681,6 +691,7 @@ mod tests {
                 text: "X".into(),
                 color: [1.0; 4],
                 font_size: 14.0,
+                font_family: FontFamily::default(),
             },
         );
 
@@ -720,6 +731,7 @@ mod tests {
                 text: "Hello".into(),
                 color: [1.0; 4],
                 font_size: 14.0,
+                font_family: FontFamily::default(),
             },
         );
         tree.set_position(label, Position::Fixed { x: 0.0, y: 0.0 });
@@ -787,6 +799,7 @@ mod tests {
                 text: "Gold Header".into(),
                 color: [0.78, 0.66, 0.31, 1.0],
                 font_size: 16.0,
+                font_family: FontFamily::Serif,
             },
         );
 
@@ -805,5 +818,67 @@ mod tests {
         assert_eq!(dl.texts.len(), 1);
         assert!((dl.panels[0].border_width - 2.0).abs() < 0.01);
         assert_eq!(dl.texts[0].text, "Gold Header");
+        assert_eq!(dl.texts[0].font_family, FontFamily::Serif);
+    }
+
+    #[test]
+    fn draw_list_multi_font() {
+        let mut tree = WidgetTree::new();
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: [0.5, 0.5, 0.5, 0.9],
+            border_color: [1.0, 0.8, 0.2, 1.0],
+            border_width: 2.0,
+            shadow_width: 0.0,
+        });
+        tree.set_position(panel, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(panel, Sizing::Fixed(400.0), Sizing::Fixed(200.0));
+        tree.set_padding(panel, Edges::all(8.0));
+
+        // Serif label
+        let _serif = tree.insert(
+            panel,
+            Widget::Label {
+                text: "Serif Text".into(),
+                color: [1.0; 4],
+                font_size: 16.0,
+                font_family: FontFamily::Serif,
+            },
+        );
+
+        // Mono label
+        let mono = tree.insert(
+            panel,
+            Widget::Label {
+                text: "Mono Data".into(),
+                color: [0.8, 0.8, 0.8, 1.0],
+                font_size: 9.0,
+                font_family: FontFamily::Mono,
+            },
+        );
+        tree.set_position(mono, Position::Fixed { x: 0.0, y: 20.0 });
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        // Panel + two text commands
+        assert_eq!(dl.panels.len(), 1);
+        assert_eq!(dl.texts.len(), 2);
+
+        // Verify font families are preserved in draw commands
+        assert_eq!(dl.texts[0].font_family, FontFamily::Serif);
+        assert_eq!(dl.texts[0].text, "Serif Text");
+        assert!((dl.texts[0].font_size - 16.0).abs() < 0.01);
+
+        assert_eq!(dl.texts[1].font_family, FontFamily::Mono);
+        assert_eq!(dl.texts[1].text, "Mono Data");
+        assert!((dl.texts[1].font_size - 9.0).abs() < 0.01);
     }
 }

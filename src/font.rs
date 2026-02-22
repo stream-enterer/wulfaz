@@ -60,8 +60,17 @@ struct PendingGlyphUpload {
     pixels: Vec<u8>,
 }
 
+/// Composite glyph cache key per DD-3: (font_id, font_size_bits, glyph_id).
+/// Single shared atlas — one key uniquely identifies a rasterized glyph.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct GlyphCacheKey {
+    font_id: cosmic_text::fontdb::ID,
+    font_size_bits: u32, // f32::to_bits() of font_size_px
+    glyph_id: u16,
+}
+
 pub struct FontRenderer {
-    // Codepoint-keyed glyph cache (used by prepare_map / build_vertices)
+    // Codepoint-keyed glyph cache (used by prepare_map / build_vertices — mono only)
     glyphs: HashMap<u32, GlyphInfo>,
     metrics: FontMetrics,
     pipeline: wgpu::RenderPipeline,
@@ -71,17 +80,18 @@ pub struct FontRenderer {
     vertex_capacity: usize,
     frame_vertices: Vec<TextVertex>,
 
-    // cosmic-text layout engine
+    // cosmic-text layout engine (shared fontdb with all loaded fonts)
     font_system: FontSystem,
-    font_size_px: f32,
+    font_size_px: f32, // base size (mono 9pt) for map/status rendering
 
-    // Glyph cache keyed by glyph_id (for cosmic-text shaped output)
-    shaped_glyphs: HashMap<u32, GlyphInfo>,
+    // Glyph cache keyed by (font_id, size_bits, glyph_id) for multi-font shaped text
+    shaped_glyphs: HashMap<GlyphCacheKey, GlyphInfo>,
 
-    // FreeType context (kept alive for on-demand rasterization)
+    // FreeType context — multiple faces for multi-font rendering
     _ft_lib: Library,
-    ft_face: freetype::Face,
+    ft_faces: HashMap<cosmic_text::fontdb::ID, freetype::Face>,
     ft_load_flags: LoadFlag,
+    dpi: u32, // stored for set_char_size calls at different sizes
 
     // Atlas management for dynamic glyph addition
     atlas_texture: wgpu::Texture,
@@ -102,28 +112,36 @@ impl FontRenderer {
         font_size_pts: f32,
         scale_factor: f64,
     ) -> Self {
-        let (font_path, hinting_flags) = find_font_with_hinting();
+        let hinting_flags = find_hinting_flags();
         let dpi = (scale_factor * 96.0) as u32;
 
-        // Load font bytes into memory
-        let font_bytes = std::fs::read(&font_path).expect("failed to read font file");
+        // Load all bundled font files
+        let font_paths = bundled_font_paths();
+        let mut font_bytes_list: Vec<(String, Vec<u8>)> = Vec::new();
+        for path in &font_paths {
+            let bytes = std::fs::read(path)
+                .unwrap_or_else(|e| panic!("failed to read font file {}: {}", path, e));
+            font_bytes_list.push((path.clone(), bytes));
+        }
 
-        // Create persistent FreeType state
+        // Create persistent FreeType library
         let ft_lib = Library::init().expect("freetype init failed");
-        let ft_face = ft_lib
-            .new_memory_face(Rc::new(font_bytes.clone()), 0)
-            .expect("failed to load font face");
-
-        let size_26_6 = (font_size_pts * 64.0).ceil() as isize;
-        ft_face
-            .set_char_size(0, size_26_6, dpi, dpi)
-            .expect("failed to set char size");
         let ft_load_flags = LoadFlag::RENDER | hinting_flags;
 
-        // Rasterize initial glyphs into atlas
+        // Use the first font (Mono) for initial atlas rasterization + map metrics
+        let mono_bytes = &font_bytes_list[0].1;
+        let mono_face = ft_lib
+            .new_memory_face(Rc::new(mono_bytes.clone()), 0)
+            .expect("failed to load mono font face");
+
+        let size_26_6 = (font_size_pts * 64.0).ceil() as isize;
+        mono_face
+            .set_char_size(0, size_26_6, dpi, dpi)
+            .expect("failed to set char size");
+
+        // Rasterize initial mono glyphs into atlas (ASCII + Latin-1 for map rendering)
         let (
             glyphs,
-            shaped_glyphs,
             metrics,
             atlas_data,
             atlas_width,
@@ -131,16 +149,69 @@ impl FontRenderer {
             shelf_x,
             shelf_y,
             shelf_height,
-        ) = rasterize_glyphs(&ft_face, hinting_flags);
+        ) = rasterize_glyphs(&mono_face, hinting_flags);
 
-        // Compute font_size_px from FreeType's y_ppem
-        let size_metrics = ft_face.size_metrics().expect("no size metrics");
+        // Compute base font_size_px from FreeType's y_ppem
+        let size_metrics = mono_face.size_metrics().expect("no size metrics");
         let font_size_px = size_metrics.y_ppem as f32;
 
-        // Build cosmic-text FontSystem with our single font
+        // Build cosmic-text FontSystem with all fonts
         let mut db = cosmic_text::fontdb::Database::new();
-        db.load_font_data(font_bytes);
+        for (_path, bytes) in &font_bytes_list {
+            db.load_font_data(bytes.clone());
+        }
         let font_system = FontSystem::new_with_locale_and_db("en-US".to_string(), db);
+
+        // Create FreeType faces for each font, mapped by fontdb::ID.
+        // Match fontdb faces to font files by family name.
+        let family_names = ["Libertinus Mono", "Libertinus Serif"];
+        let mut ft_faces: HashMap<cosmic_text::fontdb::ID, freetype::Face> = HashMap::new();
+        for (i, family) in family_names.iter().enumerate() {
+            if i >= font_bytes_list.len() {
+                break;
+            }
+            let bytes = &font_bytes_list[i].1;
+            // Find fontdb::ID for this family
+            for face_info in font_system.db().faces() {
+                if face_info.families.iter().any(|(name, _)| name == *family) {
+                    ft_faces.entry(face_info.id).or_insert_with(|| {
+                        let f = ft_lib
+                            .new_memory_face(Rc::new(bytes.clone()), 0)
+                            .expect("failed to load font face");
+                        f.set_char_size(0, size_26_6, dpi, dpi)
+                            .expect("failed to set char size");
+                        f
+                    });
+                }
+            }
+        }
+
+        // Pre-populate shaped glyph cache with mono glyphs from initial rasterization
+        let mut shaped_glyphs: HashMap<GlyphCacheKey, GlyphInfo> = HashMap::new();
+        let mono_font_id = font_system
+            .db()
+            .faces()
+            .find(|f| f.families.iter().any(|(name, _)| name == "Libertinus Mono"))
+            .map(|f| f.id);
+
+        if let Some(mono_id) = mono_font_id {
+            let base_size_bits = font_size_px.to_bits();
+            // Populate from the codepoint→glyph_id mapping
+            for &cp in glyphs.keys() {
+                if let Some(glyph_id) = mono_face.get_char_index(cp as usize)
+                    && let Some(info) = glyphs.get(&cp)
+                {
+                    shaped_glyphs.insert(
+                        GlyphCacheKey {
+                            font_id: mono_id,
+                            font_size_bits: base_size_bits,
+                            glyph_id: glyph_id as u16,
+                        },
+                        *info,
+                    );
+                }
+            }
+        }
 
         // Create atlas texture (fixed 512x4096)
         let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -328,8 +399,9 @@ impl FontRenderer {
             font_size_px,
             shaped_glyphs,
             _ft_lib: ft_lib,
-            ft_face,
+            ft_faces,
             ft_load_flags,
+            dpi,
             atlas_texture,
             atlas_data,
             atlas_width,
@@ -381,8 +453,23 @@ impl FontRenderer {
     }
 
     /// Append text vertices using cosmic-text shaping (for status/event log).
+    /// Uses the default mono font at base size.
     pub fn prepare_text(&mut self, text: &str, x: f32, y: f32, color: [f32; 4]) {
-        self.prepare_text_shaped(text, x, y, color);
+        self.prepare_text_shaped(text, x, y, color, "Libertinus Mono", self.font_size_px);
+    }
+
+    /// Append text vertices with a specific font family and size.
+    /// Used by UI widget text commands.
+    pub fn prepare_text_with_font(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        color: [f32; 4],
+        family_name: &str,
+        font_size_px: f32,
+    ) {
+        self.prepare_text_shaped(text, x, y, color, family_name, font_size_px);
     }
 
     /// Map cell dimensions (width, height). Square cells for uniform grid.
@@ -455,21 +542,43 @@ impl FontRenderer {
         vertex_count
     }
 
-    /// Rasterize a single glyph by glyph_id into the atlas on demand.
-    fn rasterize_glyph_on_demand(&mut self, glyph_id: u32) -> Option<GlyphInfo> {
-        if let Some(info) = self.shaped_glyphs.get(&glyph_id) {
+    /// Rasterize a single glyph into the shared atlas on demand.
+    /// Uses composite key (font_id, font_size_bits, glyph_id) per DD-3.
+    fn rasterize_glyph_on_demand(
+        &mut self,
+        font_id: cosmic_text::fontdb::ID,
+        font_size_px: f32,
+        glyph_id: u16,
+    ) -> Option<GlyphInfo> {
+        let cache_key = GlyphCacheKey {
+            font_id,
+            font_size_bits: font_size_px.to_bits(),
+            glyph_id,
+        };
+
+        if let Some(info) = self.shaped_glyphs.get(&cache_key) {
             return Some(*info);
         }
 
-        if self
-            .ft_face
-            .load_glyph(glyph_id, self.ft_load_flags)
+        let ft_face = self.ft_faces.get(&font_id)?;
+
+        // Set the face to the requested size before rasterizing
+        let size_26_6 = (font_size_px * 64.0 / (self.dpi as f32 / 72.0)).ceil() as isize;
+        if ft_face
+            .set_char_size(0, size_26_6, self.dpi, self.dpi)
             .is_err()
         {
             return None;
         }
 
-        let glyph_slot = self.ft_face.glyph();
+        if ft_face
+            .load_glyph(glyph_id as u32, self.ft_load_flags)
+            .is_err()
+        {
+            return None;
+        }
+
+        let glyph_slot = ft_face.glyph();
         let bitmap = glyph_slot.bitmap();
         let w = bitmap.width() as u32;
         let h = bitmap.rows() as u32;
@@ -485,7 +594,7 @@ impl FontRenderer {
                 u1: 0.0,
                 v1: 0.0,
             };
-            self.shaped_glyphs.insert(glyph_id, info);
+            self.shaped_glyphs.insert(cache_key, info);
             return Some(info);
         }
 
@@ -499,7 +608,11 @@ impl FontRenderer {
         }
 
         if self.atlas_shelf_y + h > self.atlas_height {
-            log::warn!("glyph atlas full, cannot add glyph_id {}", glyph_id);
+            log::warn!(
+                "glyph atlas full, cannot add glyph_id {} for font {:?}",
+                glyph_id,
+                font_id
+            );
             return None;
         }
 
@@ -553,25 +666,42 @@ impl FontRenderer {
             u1: (pos_x + w) as f32 / aw,
             v1: (pos_y + h) as f32 / ah,
         };
-        self.shaped_glyphs.insert(glyph_id, info);
+        self.shaped_glyphs.insert(cache_key, info);
         Some(info)
     }
 
     /// Layout and shape text using cosmic-text, then build vertices.
-    fn prepare_text_shaped(&mut self, text: &str, x: f32, y: f32, color: [f32; 4]) {
-        let cosmic_metrics = CosmicMetrics::new(self.font_size_px, self.metrics.line_height);
+    /// Supports any font loaded into the fontdb and any pixel size.
+    fn prepare_text_shaped(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        color: [f32; 4],
+        family_name: &str,
+        font_size_px: f32,
+    ) {
+        // Estimate line_height proportional to font size
+        let line_height = (font_size_px * self.metrics.line_height / self.font_size_px).ceil();
+        let cosmic_metrics = CosmicMetrics::new(font_size_px, line_height);
         let mut buffer = Buffer::new(&mut self.font_system, cosmic_metrics);
         buffer.set_size(&mut self.font_system, None, None);
-        let attrs = Attrs::new().family(Family::Name("Libertinus Mono"));
+        let attrs = Attrs::new().family(Family::Name(family_name));
         buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.font_system, false);
 
-        // Collect glyph positions to avoid borrow conflicts with self
-        let mut glyph_positions: Vec<(u16, i32, i32)> = Vec::new();
+        // Collect glyph positions with font_id for multi-font cache lookup
+        let mut glyph_positions: Vec<(cosmic_text::fontdb::ID, u16, f32, i32, i32)> = Vec::new();
         for run in buffer.layout_runs() {
             for glyph in run.glyphs.iter() {
                 let physical = glyph.physical((x, y + run.line_y), 1.0);
-                glyph_positions.push((physical.cache_key.glyph_id, physical.x, physical.y));
+                glyph_positions.push((
+                    physical.cache_key.font_id,
+                    physical.cache_key.glyph_id,
+                    f32::from_bits(physical.cache_key.font_size_bits),
+                    physical.x,
+                    physical.y,
+                ));
             }
         }
         drop(buffer);
@@ -579,22 +709,26 @@ impl FontRenderer {
         // Fallback glyph for .notdef (glyph_id 0)
         let question = self.glyphs.get(&(b'?' as u32)).copied();
 
-        for &(glyph_id_u16, px, py) in &glyph_positions {
-            let gid = glyph_id_u16 as u32;
+        for &(font_id, glyph_id, glyph_font_size, px, py) in &glyph_positions {
+            let cache_key = GlyphCacheKey {
+                font_id,
+                font_size_bits: glyph_font_size.to_bits(),
+                glyph_id,
+            };
 
             // Ensure glyph exists in shaped cache
-            if !self.shaped_glyphs.contains_key(&gid) && gid != 0 {
-                self.rasterize_glyph_on_demand(gid);
+            if !self.shaped_glyphs.contains_key(&cache_key) && glyph_id != 0 {
+                self.rasterize_glyph_on_demand(font_id, glyph_font_size, glyph_id);
             }
 
-            let info = if gid == 0 {
+            let info = if glyph_id == 0 {
                 // .notdef — fall back to '?'
                 match question {
                     Some(g) => g,
                     None => continue,
                 }
             } else {
-                match self.shaped_glyphs.get(&gid) {
+                match self.shaped_glyphs.get(&cache_key) {
                     Some(g) => *g,
                     None => match question {
                         Some(g) => g,
@@ -829,39 +963,52 @@ fn hinting_load_flags(config: &HintingConfig) -> LoadFlag {
     }
 }
 
-/// Bundled font path relative to the project root.
-const BUNDLED_FONT: &str = "fonts/libertinus/LibertinusMono-Regular.otf";
+/// Bundled font paths relative to the project root.
+/// Order: Mono first (index 0 = base font for map rendering), then Serif.
+const BUNDLED_FONTS: &[&str] = &[
+    "fonts/libertinus/LibertinusMono-Regular.otf",
+    "fonts/libertinus/LibertinusSerif-Regular.otf",
+];
 
-/// Find font path and hinting config. Uses the bundled font with system hinting preferences.
-fn find_font_with_hinting() -> (String, LoadFlag) {
-    // Query fontconfig for system hinting preferences (font path is ignored)
-    let hinting_flags = query_fontconfig(&["monospace"])
+/// Get hinting flags from system fontconfig.
+fn find_hinting_flags() -> LoadFlag {
+    query_fontconfig(&["monospace"])
         .map(|config| hinting_load_flags(&config))
-        .unwrap_or(LoadFlag::TARGET_LIGHT);
+        .unwrap_or(LoadFlag::TARGET_LIGHT)
+}
 
-    // Use bundled font relative to the executable's directory first, then working directory
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let path = dir.join(BUNDLED_FONT);
-        if path.exists() {
-            return (path.to_string_lossy().into_owned(), hinting_flags);
-        }
-    }
-    if std::path::Path::new(BUNDLED_FONT).exists() {
-        return (BUNDLED_FONT.to_string(), hinting_flags);
-    }
-    panic!("bundled font not found: {}", BUNDLED_FONT);
+/// Resolve bundled font paths (tries exe directory first, then working directory).
+fn bundled_font_paths() -> Vec<String> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.to_path_buf()));
+
+    BUNDLED_FONTS
+        .iter()
+        .map(|rel| {
+            // Try exe directory first
+            if let Some(dir) = &exe_dir {
+                let path = dir.join(rel);
+                if path.exists() {
+                    return path.to_string_lossy().into_owned();
+                }
+            }
+            // Fall back to working directory
+            if std::path::Path::new(rel).exists() {
+                return rel.to_string();
+            }
+            panic!("bundled font not found: {}", rel);
+        })
+        .collect()
 }
 
 /// Rasterize glyphs for ASCII + Latin-1 Supplement + extras and pack into a glyph atlas.
-/// Returns (codepoint_glyphs, glyph_id_glyphs, metrics, atlas_pixels, atlas_w, atlas_h, shelf_x, shelf_y, shelf_h).
+/// Returns (codepoint_glyphs, metrics, atlas_pixels, atlas_w, atlas_h, shelf_x, shelf_y, shelf_h).
 #[allow(clippy::type_complexity)]
 fn rasterize_glyphs(
     face: &freetype::Face,
     hinting_flags: LoadFlag,
 ) -> (
-    HashMap<u32, GlyphInfo>,
     HashMap<u32, GlyphInfo>,
     FontMetrics,
     Vec<u8>,
@@ -996,7 +1143,6 @@ fn rasterize_glyphs(
     // Blit glyphs into atlas
     let mut atlas_data = vec![0u8; (atlas_width * atlas_height) as usize];
     let mut glyphs_map = HashMap::new();
-    let mut shaped_map = HashMap::new();
 
     for (i, g) in raw_glyphs.iter().enumerate() {
         let pos = &positions[i];
@@ -1024,16 +1170,10 @@ fn rasterize_glyphs(
             v1: (pos.y + g.height) as f32 / ah,
         };
         glyphs_map.insert(g.cp, info);
-
-        // Also insert by glyph_id for shaped text lookup
-        if let Some(glyph_id) = face.get_char_index(g.cp as usize) {
-            shaped_map.insert(glyph_id, info);
-        }
     }
 
     (
         glyphs_map,
-        shaped_map,
         metrics,
         atlas_data,
         atlas_width,

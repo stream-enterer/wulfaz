@@ -129,13 +129,13 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 | Tier | Tasks | Milestone |
 |------|-------|-----------|
 | 1 — Foundation | COMPLETE | Colored text + panel backgrounds + widget tree |
-| 2 — Styled Panels | 3 | Multi-font + theme + mouse input |
+| 2 — Styled Panels | 2 | Theme + mouse input |
 | 3 — Full Widget Set | 3 | Rich text + scroll list + tooltips |
 | 4 — Game Integration | 5 (I01a-d + I02) | Real game UI replaces string rendering |
 | 5 — Polish | 2 | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-14 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+13 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -182,22 +182,15 @@ All three tasks done: UI-P01 (per-vertex color), UI-P03 (panel renderer), UI-W01
 
 ### Tier 2 — Styled Panels
 
-P02 can start once P01 is done. W02 can start once W01 is done. R02 can start once both P02 and P03 are done. Practical order: start P02 and W02 in parallel as soon as their deps land, then R02 once P02 finishes.
+W02 can start now (W01 done). R02 can start now (P02 + P03 done). Both unblocked.
 
 **Available after this tier:**
-- Multiple fonts (serif + mono) rendered from a shared atlas
+- Multiple fonts (serif + mono) rendered from a shared atlas — DONE (UI-P02)
 - `Theme` struct centralizing all colors, fonts, and spacing constants
 - Mouse hover and click dispatched to widgets (buttons respond to clicks)
 - Focus management (Tab to cycle, keyboard events to focused widget)
 
 **UI-DEMO after Tier 2:** Previous test panel now uses Libertinus Serif 16pt for header, Libertinus Mono 9pt for data labels. Theme colors applied from `Theme` struct. A clickable button toggles a label's text. Mouse hover highlights the button.
-
-- **UI-P02** — Multi-font atlas support. Needs: UI-P01. Decisions resolved by DD-3.
-  - Current atlas and `FontRenderer` assume one font (Libertinus Mono) at one size.
-  - Single shared atlas (per DD-3): key = `(fontdb::ID, u16, u32)` (font_id, size_bits, glyph_id). One texture, one bind group, one draw call.
-  - Font roster (per DD-2): Libertinus Mono + Libertinus Serif. Fixed sizes: 9pt, 12pt, 16pt.
-  - cosmic-text: add font files to `fontdb::Database`, select via `Attrs::new().family(Family::Name("Libertinus Serif"))` per span. Shaping side is free.
-  - FreeType rasterization: `rasterize_glyph_on_demand()` handles multiple `ft_face` instances. Store `HashMap<fontdb::ID, freetype::Face>` instead of a single `ft_face`.
 
 - **UI-R02** — Theme and visual style. Needs: UI-P02, UI-P03. Decisions resolved by DD-2.
   - `Theme` struct holding: color palette constants (parchment, gold, white, dark, red, grey per DD-2), font family names, panel border style, margin/padding defaults.

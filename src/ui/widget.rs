@@ -1,3 +1,5 @@
+use super::draw::FontFamily;
+
 /// Flat enum widget identity (DD-1).
 /// Closed set — we know all widget types. No trait objects.
 #[derive(Debug, Clone)]
@@ -15,6 +17,7 @@ pub enum Widget {
         text: String,
         color: [f32; 4], // sRGB RGBA
         font_size: f32,  // pixels
+        font_family: FontFamily,
     },
 
     /// Clickable element with text and background.
@@ -24,5 +27,6 @@ pub enum Widget {
         bg_color: [f32; 4],     // background sRGB RGBA
         border_color: [f32; 4], // border sRGB RGBA
         font_size: f32,         // pixels
+        font_family: FontFamily,
     },
 }

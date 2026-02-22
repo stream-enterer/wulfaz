@@ -581,9 +581,16 @@ impl ApplicationHandler for App {
 
                             // Text (on top)
                             font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
-                            // UI widget text commands
+                            // UI widget text commands (multi-font via font_family + font_size)
                             for cmd in &draw_list.texts {
-                                font.prepare_text(&cmd.text, cmd.x, cmd.y, cmd.color);
+                                font.prepare_text_with_font(
+                                    &cmd.text,
+                                    cmd.x,
+                                    cmd.y,
+                                    cmd.color,
+                                    cmd.font_family.family_name(),
+                                    cmd.font_size,
+                                );
                             }
                             let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
                             font.prepare_text(&status, padding, padding, fg4);
