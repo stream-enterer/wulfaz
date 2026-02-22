@@ -90,6 +90,14 @@ pub struct Theme {
     pub tooltip_border_width: f32,
     /// Tooltip inner shadow width (pixels).
     pub tooltip_shadow_width: f32,
+
+    // -- Map overlay defaults (UI-I02) --
+    /// Hover tile highlight color (semi-transparent).
+    pub overlay_hover: [f32; 4],
+    /// Selected entity tile highlight color (semi-transparent).
+    pub overlay_selection: [f32; 4],
+    /// Wander target tile highlight color (semi-transparent).
+    pub overlay_path: [f32; 4],
 }
 
 /// Convert a hex color (#RRGGBB) to sRGB [f32; 4] with alpha 1.0.
@@ -153,6 +161,11 @@ impl Default for Theme {
             tooltip_border_color: hex(0xC8, 0xA8, 0x50),     // gold
             tooltip_border_width: 1.0,
             tooltip_shadow_width: 4.0,
+
+            // Map overlay defaults (UI-I02)
+            overlay_hover: hex_a(0xF0, 0xE6, 0xD2, 0.15), // light parchment, subtle
+            overlay_selection: hex_a(0xC8, 0xA8, 0x50, 0.35), // gold, prominent
+            overlay_path: hex_a(0x60, 0xA0, 0x60, 0.25),  // muted green
         }
     }
 }
@@ -212,5 +225,15 @@ mod tests {
 
         let half_alpha = hex_a(0x80, 0x80, 0x80, 0.5);
         assert!((half_alpha[3] - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn overlay_colors_are_semi_transparent() {
+        let t = Theme::default();
+        assert!(t.overlay_hover[3] > 0.0 && t.overlay_hover[3] < 1.0);
+        assert!(t.overlay_selection[3] > 0.0 && t.overlay_selection[3] < 1.0);
+        assert!(t.overlay_path[3] > 0.0 && t.overlay_path[3] < 1.0);
+        // Selection should be more visible than hover.
+        assert!(t.overlay_selection[3] > t.overlay_hover[3]);
     }
 }

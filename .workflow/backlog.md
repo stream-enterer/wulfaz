@@ -131,11 +131,11 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 | 1 — Foundation | COMPLETE | Colored text + panel backgrounds + widget tree |
 | 2 — Styled Panels | COMPLETE | Theme + mouse input |
 | 3 — Full Widget Set | COMPLETE | Rich text + scroll list + tooltips |
-| 4 — Game Integration | 2 (I01d + I02) | Real game UI replaces string rendering |
+| 4 — Game Integration | COMPLETE | Real game UI replaces string rendering |
 | 5 — Polish | 2 | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-5 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+3 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -207,30 +207,16 @@ All tasks done: UI-R01 (rich text), UI-W03 (scroll list), UI-W04 (tooltip system
 
 ---
 
-### Tier 4 — Game Integration
+### Tier 4 — Game Integration — COMPLETE
 
-Sub-panels ordered simplest to most complex — each proves more of the pipeline. I01a only needs W01+R02 and can start as early as mid-Tier 2. I02 only needs P01+P03 and can start right after Tier 1. Per-task `Needs:` lines are the real gates.
+All tasks done: UI-I01a (status bar), UI-I01b (hover tooltip), UI-I01c (event log), UI-I01d (entity inspector), UI-I02 (map overlays).
 
-**Available after this tier:**
-- Real game panels replacing current string-based `render_status()`/`render_hover_info()`/`render_recent_events()`
-- Map overlays: tile highlight, movement path visualization
-- Complete player-facing UI
+**Available:**
+- Real game panels replacing string-based rendering
+- Map overlays: hover tile highlight, selection highlight, wander target highlight
+- Complete player-facing UI with entity inspector, tooltips, event log
 - `UiState` struct on `App` (not on `World` — UI is not simulation state)
-
-**UI-DEMO after Tier 4:** Retired — the game itself is the demo. The showcase code remains as a developer reference panel (F11), but the live game UI with status bar, inspector, event log, tooltip, and map overlays is the real verification.
-
-- **UI-I01d** — Entity inspector. Needs: UI-W01, UI-W02, UI-W03, UI-R01.
-  - Side panel on entity click: name, occupation, needs bars, inventory list.
-  - Most complex panel — tests creation/destruction lifecycle, rich text (R01), multiple widget types composed together.
-  - Created on entity click, destroyed on close button or Escape (per DD-5).
-  - Rich text for entity description (name in gold, occupation in serif, stats in mono).
-
-- **UI-I02 ||** — Map overlay integration. Needs: UI-P01, UI-P03. (Can build in parallel with I01 sub-panels.)
-  - UI elements that composite with the world-space map: tile selection highlight, movement path lines, area-of-effect indicators, entity health bars above map glyphs.
-  - Render order: (1) map glyphs (`prepare_map`), (2) map overlays (highlights, paths — same coordinate space as map), (3) UI panels (screen-space, on top of everything), (4) tooltips (above panels).
-  - Tile highlight: colored semi-transparent quad drawn at the hovered tile's screen position. Uses the panel renderer (a single untextured colored quad) or a dedicated overlay pass.
-  - Scissor rects: UI panels that overlap the map viewport clip the map render beneath them. Requires `set_scissor_rect()` on the render pass, or stencil buffer, or simply rendering panels as opaque backgrounds that occlude the map.
-  - Path visualization: line segments between tile centers for A* paths. Could be a simple line renderer (2 vertices per segment) or a series of highlight quads on each tile in the path.
+- Overlay colors configurable via Theme
 
 ---
 

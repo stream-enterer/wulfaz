@@ -306,6 +306,9 @@ struct App {
     ui_state: ui::UiState,
     ui_tree: ui::WidgetTree,
     ui_theme: ui::Theme,
+    // Entity inspector (UI-I01d)
+    selected_entity: Option<components::Entity>,
+    inspector_close_id: Option<ui::WidgetId>,
 }
 
 impl ApplicationHandler for App {
@@ -380,7 +383,13 @@ impl ApplicationHandler for App {
                             return;
                         }
                         match event.physical_key {
-                            PhysicalKey::Code(KeyCode::Escape) => event_loop.exit(),
+                            PhysicalKey::Code(KeyCode::Escape) => {
+                                if self.selected_entity.is_some() {
+                                    self.selected_entity = None;
+                                } else {
+                                    event_loop.exit();
+                                }
+                            }
                             // Camera: WASD + arrows (realtime mode only)
                             PhysicalKey::Code(KeyCode::KeyW | KeyCode::ArrowUp)
                                 if self.world.player.is_none() =>
@@ -466,6 +475,16 @@ impl ApplicationHandler for App {
                             px,
                             py,
                         ) {
+                            // Check if the close button was clicked (UI-I01d).
+                            if pressed
+                                && button == MouseButton::Left
+                                && self.inspector_close_id.is_some()
+                            {
+                                let hit = self.ui_tree.hit_test(px, py);
+                                if hit == self.inspector_close_id {
+                                    self.selected_entity = None;
+                                }
+                            }
                             return;
                         }
 
@@ -505,6 +524,36 @@ impl ApplicationHandler for App {
                                         self.world.mind.wander_targets.remove(&e);
                                     }
                                 }
+                            }
+                        }
+
+                        // Game: plain left-click selects entity for inspector (UI-I01d).
+                        if pressed
+                            && button == MouseButton::Left
+                            && !self.modifiers.shift_key()
+                            && self.map_cell_w > 0.0
+                        {
+                            let vx = (px - self.map_origin.0) / self.map_cell_w;
+                            let vy = (py - self.map_origin.1) / self.map_cell_h;
+                            if vx >= 0.0 && vy >= 0.0 {
+                                let tile_x = self.camera.x + vx as i32;
+                                let tile_y = self.camera.y + vy as i32;
+                                let mut candidates: Vec<components::Entity> = self
+                                    .world
+                                    .body
+                                    .positions
+                                    .iter()
+                                    .filter(|(e, p)| {
+                                        p.x == tile_x
+                                            && p.y == tile_y
+                                            && self.world.alive.contains(e)
+                                    })
+                                    .map(|(e, _)| *e)
+                                    .collect();
+                                candidates.sort_by_key(|e| e.0);
+                                self.selected_entity = candidates.first().copied();
+                            } else {
+                                self.selected_entity = None;
                             }
                         }
                     }
@@ -720,7 +769,32 @@ impl ApplicationHandler for App {
                                 }
                             }
 
-                            // Re-layout tree with hover tooltip included.
+                            // Build entity inspector if selected (UI-I01d).
+                            self.inspector_close_id = None;
+                            if let Some(entity) = self.selected_entity {
+                                if let Some(info) = ui::collect_inspector_info(entity, &self.world)
+                                {
+                                    let (inspector_id, close_id) = ui::build_entity_inspector(
+                                        &mut self.ui_tree,
+                                        &self.ui_theme,
+                                        &info,
+                                        screen_h as f32,
+                                    );
+                                    self.ui_tree.set_position(
+                                        inspector_id,
+                                        ui::Position::Fixed {
+                                            x: screen_w as f32 - 220.0 - padding,
+                                            y: status_bar_h + padding,
+                                        },
+                                    );
+                                    self.inspector_close_id = Some(close_id);
+                                } else {
+                                    // Entity died or lost position — auto-close.
+                                    self.selected_entity = None;
+                                }
+                            }
+
+                            // Re-layout tree with all widgets included.
                             self.ui_tree.layout(screen_size, m.line_height);
 
                             let map_text = render::render_world_to_string(
@@ -735,8 +809,86 @@ impl ApplicationHandler for App {
                             let mut draw_list = ui::DrawList::new();
                             self.ui_tree.draw(&mut draw_list);
 
-                            // Panels (backgrounds first)
+                            // Panels: map overlays first, then UI panels on top.
                             panel.begin_frame(&gpu.queue, screen_w, screen_h);
+                            let no_border = [0.0_f32; 4];
+
+                            // Map overlay: hover tile highlight (UI-I02).
+                            {
+                                let px = self.cursor_pos.x as f32;
+                                let py = self.cursor_pos.y as f32;
+                                let vx = (px - self.map_origin.0) / mcw;
+                                let vy = (py - self.map_origin.1) / mch;
+                                if vx >= 0.0
+                                    && vy >= 0.0
+                                    && (vx as usize) < viewport_cols
+                                    && (vy as usize) < viewport_rows
+                                {
+                                    let ox = self.map_origin.0 + (vx.floor()) * mcw;
+                                    let oy = self.map_origin.1 + (vy.floor()) * mch;
+                                    panel.add_panel(
+                                        ox,
+                                        oy,
+                                        mcw,
+                                        mch,
+                                        self.ui_theme.overlay_hover,
+                                        no_border,
+                                        0.0,
+                                        0.0,
+                                    );
+                                }
+                            }
+
+                            // Map overlay: selected entity highlight (UI-I02).
+                            if let Some(entity) = self.selected_entity
+                                && let Some(pos) = self.world.body.positions.get(&entity)
+                            {
+                                let vx = pos.x - self.camera.x;
+                                let vy = pos.y - self.camera.y;
+                                if vx >= 0
+                                    && vy >= 0
+                                    && (vx as usize) < viewport_cols
+                                    && (vy as usize) < viewport_rows
+                                {
+                                    let ox = self.map_origin.0 + vx as f32 * mcw;
+                                    let oy = self.map_origin.1 + vy as f32 * mch;
+                                    panel.add_panel(
+                                        ox,
+                                        oy,
+                                        mcw,
+                                        mch,
+                                        self.ui_theme.overlay_selection,
+                                        no_border,
+                                        0.0,
+                                        0.0,
+                                    );
+                                }
+
+                                // Wander target highlight.
+                                if let Some(target) = self.world.mind.wander_targets.get(&entity) {
+                                    let tx = target.goal_x - self.camera.x;
+                                    let ty = target.goal_y - self.camera.y;
+                                    if tx >= 0
+                                        && ty >= 0
+                                        && (tx as usize) < viewport_cols
+                                        && (ty as usize) < viewport_rows
+                                    {
+                                        let ox = self.map_origin.0 + tx as f32 * mcw;
+                                        let oy = self.map_origin.1 + ty as f32 * mch;
+                                        panel.add_panel(
+                                            ox,
+                                            oy,
+                                            mcw,
+                                            mch,
+                                            self.ui_theme.overlay_path,
+                                            no_border,
+                                            0.0,
+                                            0.0,
+                                        );
+                                    }
+                                }
+                            }
+
                             for cmd in &draw_list.panels {
                                 panel.add_panel(
                                     cmd.x,
@@ -838,6 +990,8 @@ fn main() {
         ui_state: ui::UiState::new(),
         ui_tree: ui::WidgetTree::new(),
         ui_theme,
+        selected_entity: None,
+        inspector_close_id: None,
     };
     event_loop.run_app(&mut app).expect("run event loop");
 }
