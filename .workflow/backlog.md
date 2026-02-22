@@ -123,15 +123,6 @@ Manager structs (ModalStack, NotificationManager, PanelManager, ContextMenu) eac
   - Test: push 3 notifications, advance time past duration of first, assert first is dismissed and remaining 2 shift up.
 
 
-- **UI-306** — Panel stack / window management. Needs: UI-305 (callback dispatch for close buttons), UI-307 (z-order tiers). Blocks: UI-400, UI-402, UI-405, UI-412, UI-413, UI-415.
-  - Multiple panels open simultaneously (character panel, outliner, event log — all visible in CK3).
-  - Add `PanelManager` struct to `src/ui/panel_manager.rs`: tracks open panels by name (`HashMap<String, WidgetId>`), draw order (`Vec<String>`), and closeable flag.
-  - Opening a panel: builder creates widget subtree, registers with `PanelManager`. Panel gets a close button (top-right X) with callback key `"panel_close:<name>"`.
-  - Clicking a panel brings it to front: `PanelManager::raise(name)` reorders the draw list so it is the last root (topmost).
-  - Closing a panel: removes its subtree via `WidgetTree::remove()` and deregisters from PanelManager.
-  - Z-order: panels draw in `draw_order` sequence. Modals (UI-300) always draw above all panels.
-  - Escape closes the topmost non-modal panel (extend `Action::CloseTopmost` logic).
-  - Test: open 3 panels, raise panel 1, assert it is last in draw order. Close panel 2, assert its subtree is removed.
 
 ## Phase UI-4 — Game Screens
 
