@@ -485,6 +485,19 @@ impl ApplicationHandler for App {
                                         event_loop.exit();
                                     }
                                 }
+                                // Phase UI-4: new keybinding actions (stubs for now).
+                                ui::Action::ToggleFinder => {
+                                    // TODO: toggle character finder panel (UI-402)
+                                }
+                                ui::Action::ToggleOutliner => {
+                                    // TODO: toggle outliner panel (UI-405)
+                                }
+                                ui::Action::QuickSave => {
+                                    // TODO: quick save (UI-412)
+                                }
+                                ui::Action::QuickLoad => {
+                                    // TODO: quick load (UI-412)
+                                }
                             }
                             return;
                         }

@@ -1,34 +1,71 @@
 mod animation;
+pub(crate) mod character_finder;
+pub(crate) mod character_panel;
 mod context_menu;
 pub(crate) mod demo;
 mod draw;
+pub(crate) mod event_popup;
 mod input;
 mod keybindings;
+pub(crate) mod loading_screen;
+pub(crate) mod main_menu;
+pub(crate) mod map_mode;
+pub(crate) mod minimap;
 mod modal;
 mod notification;
+pub(crate) mod opinion_view;
+pub(crate) mod outliner;
 mod panel_manager;
+pub(crate) mod save_load;
+pub(crate) mod settings;
 pub(crate) mod sprite;
 mod theme;
 mod widget;
 
 #[allow(unused_imports)] // Public API: used by main.rs for animation (UI-W05).
 pub use animation::{Animator, Easing};
+#[allow(unused_imports)] // Public API: used by main.rs for character finder (UI-402).
+pub use character_finder::{
+    CharacterFinderInfo, FinderEntry, FinderSort, build_character_finder, collect_finder_entries,
+};
+#[allow(unused_imports)] // Public API: used by main.rs for character panel (UI-400).
+pub use character_panel::{CharacterPanelInfo, build_character_panel, collect_character_info};
 #[allow(unused_imports)] // Public API: used by main.rs for context menus (UI-303).
 pub use context_menu::{ContextMenu, MenuItem};
 #[allow(unused_imports)] // Public API: used by game panels constructing widgets.
 pub use draw::{
     DrawList, FontFamily, PanelCommand, RichTextCommand, SpriteCommand, TextCommand, TextSpan,
 };
+#[allow(unused_imports)] // Public API: used by main.rs for event popups (UI-401).
+pub use event_popup::{EventChoice, NarrativeEvent, build_event_popup};
 #[allow(unused_imports)] // Public API: used by main.rs for input routing (UI-W02).
 pub use input::{MapClick, MouseButton, UiEvent, UiState};
 #[allow(unused_imports)] // Public API: used by main.rs for keyboard shortcuts (UI-I03).
 pub use keybindings::{Action, KeyBindings, KeyCombo, ModifierFlags};
+#[allow(unused_imports)] // Public API: used by main.rs for loading screen (UI-414).
+pub use loading_screen::{LoadingScreenInfo, LoadingStage, build_loading_screen};
+#[allow(unused_imports)] // Public API: used by main.rs for main menu (UI-415).
+pub use main_menu::{AppState, MainMenuInfo, build_main_menu};
+#[allow(unused_imports)] // Public API: used by main.rs for map mode selector (UI-403).
+pub use map_mode::{MapMode, MapModeInfo, build_map_mode_selector};
+#[allow(unused_imports)] // Public API: used by main.rs for minimap (UI-407).
+pub use minimap::{MinimapInfo, build_minimap, minimap_click_to_world};
 #[allow(unused_imports)] // Public API: used by main.rs for modal management (UI-300).
 pub use modal::ModalStack;
 #[allow(unused_imports)] // Public API: used by main.rs for notification system (UI-302).
 pub use notification::{NotificationManager, NotificationPriority};
+#[allow(unused_imports)] // Public API: used by main.rs for opinion view (UI-406).
+pub use opinion_view::{OpinionModifier, OpinionViewInfo, Sentiment, build_opinion_view};
+#[allow(unused_imports)] // Public API: used by main.rs for outliner (UI-405).
+pub use outliner::{
+    ActiveEvent, AlertEntry, AlertPriority, OutlinerInfo, PinnedCharacter, build_outliner,
+};
 #[allow(unused_imports)] // Public API: used by main.rs for panel management (UI-306).
 pub use panel_manager::PanelManager;
+#[allow(unused_imports)] // Public API: used by main.rs for save/load screen (UI-412).
+pub use save_load::{SaveFileEntry, SaveLoadInfo, build_save_load_screen};
+#[allow(unused_imports)] // Public API: used by main.rs for settings screen (UI-413).
+pub use settings::{SettingsInfo, build_settings_screen};
 #[allow(unused_imports)] // Public API: used by sprite renderer (UI-202b).
 pub use sprite::{SpriteAtlas, SpriteRect};
 pub use theme::Theme;

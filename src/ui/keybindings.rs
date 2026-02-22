@@ -46,6 +46,14 @@ pub enum Action {
     CloseTopmost,
     /// Toggle the widget showcase (UI-DEMO).
     ToggleDemo,
+    /// Toggle the character finder panel (UI-402).
+    ToggleFinder,
+    /// Toggle the outliner panel (UI-405).
+    ToggleOutliner,
+    /// Quick save (UI-412).
+    QuickSave,
+    /// Quick load (UI-412).
+    QuickLoad,
 }
 
 /// Configurable keyboard shortcut map.
@@ -68,6 +76,23 @@ impl KeyBindings {
         map.insert(KeyCombo::plain(KeyCode::Digit3), Action::SpeedSet(3));
         map.insert(KeyCombo::plain(KeyCode::Digit4), Action::SpeedSet(4));
         map.insert(KeyCombo::plain(KeyCode::Digit5), Action::SpeedSet(5));
+        // UI-402: Ctrl+F opens character finder.
+        map.insert(
+            KeyCombo {
+                modifiers: ModifierFlags {
+                    shift: false,
+                    ctrl: true,
+                    alt: false,
+                },
+                key: KeyCode::KeyF,
+            },
+            Action::ToggleFinder,
+        );
+        // UI-405: O toggles outliner.
+        map.insert(KeyCombo::plain(KeyCode::KeyO), Action::ToggleOutliner);
+        // UI-412: F5 = quick save, F9 = quick load.
+        map.insert(KeyCombo::plain(KeyCode::F5), Action::QuickSave);
+        map.insert(KeyCombo::plain(KeyCode::F9), Action::QuickLoad);
 
         let reverse = Self::build_reverse(&map);
         Self { map, reverse }
