@@ -44,6 +44,8 @@ pub enum Action {
     SpeedSet(u32),
     /// Close topmost overlay (tooltip → inspector → exit).
     CloseTopmost,
+    /// Toggle the widget showcase (UI-DEMO).
+    ToggleDemo,
 }
 
 /// Configurable keyboard shortcut map.
@@ -60,6 +62,7 @@ impl KeyBindings {
 
         map.insert(KeyCombo::plain(KeyCode::Space), Action::PauseSim);
         map.insert(KeyCombo::plain(KeyCode::Escape), Action::CloseTopmost);
+        map.insert(KeyCombo::plain(KeyCode::F11), Action::ToggleDemo);
         map.insert(KeyCombo::plain(KeyCode::Digit1), Action::SpeedSet(1));
         map.insert(KeyCombo::plain(KeyCode::Digit2), Action::SpeedSet(2));
         map.insert(KeyCombo::plain(KeyCode::Digit3), Action::SpeedSet(3));

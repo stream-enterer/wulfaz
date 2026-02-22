@@ -1,4 +1,5 @@
 mod animation;
+pub(crate) mod demo;
 mod draw;
 mod input;
 mod keybindings;
@@ -956,196 +957,6 @@ impl WidgetTree {
             }
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Tier 3 UI-DEMO: themed panel with multi-font labels + rich text
-// ---------------------------------------------------------------------------
-
-/// Build the demo widget tree using Theme constants.
-/// Tier 3: parchment panel with themed colors, Serif header (16pt),
-/// Serif body (12pt), Mono warning (9pt), and a rich text block
-/// mixing serif body with mono inline data and gold highlights.
-pub fn demo_tree(theme: &Theme) -> WidgetTree {
-    let mut tree = WidgetTree::new();
-
-    // Themed parchment panel
-    let panel = tree.insert_root(Widget::Panel {
-        bg_color: theme.bg_parchment,
-        border_color: theme.panel_border_color,
-        border_width: theme.panel_border_width,
-        shadow_width: theme.panel_shadow_width,
-    });
-    tree.set_position(panel, Position::Fixed { x: 20.0, y: 20.0 });
-    tree.set_sizing(panel, Sizing::Fixed(320.0), Sizing::Fixed(160.0));
-    tree.set_padding(panel, Edges::all(theme.panel_padding));
-
-    // Gold header — Serif, header size
-    let header = tree.insert(
-        panel,
-        Widget::Label {
-            text: "Header".into(),
-            color: theme.gold,
-            font_size: theme.font_header_size,
-            font_family: theme.font_header_family,
-        },
-    );
-    tree.set_position(header, Position::Fixed { x: 0.0, y: 0.0 });
-
-    // Light body text — Serif, body size
-    let body = tree.insert(
-        panel,
-        Widget::Label {
-            text: "Body text".into(),
-            color: theme.text_light,
-            font_size: theme.font_body_size,
-            font_family: theme.font_body_family,
-        },
-    );
-    tree.set_position(
-        body,
-        Position::Fixed {
-            x: 0.0,
-            y: theme.font_header_size + theme.label_gap,
-        },
-    );
-
-    // Red warning — Mono, data size
-    let warning = tree.insert(
-        panel,
-        Widget::Label {
-            text: "Warning".into(),
-            color: theme.danger,
-            font_size: theme.font_data_size,
-            font_family: theme.font_data_family,
-        },
-    );
-    let warning_y =
-        theme.font_header_size + theme.label_gap + theme.font_body_size + theme.label_gap;
-    tree.set_position(
-        warning,
-        Position::Fixed {
-            x: 0.0,
-            y: warning_y,
-        },
-    );
-
-    // Rich text — mixed serif body + mono data + gold highlight (UI-R01)
-    let rich = tree.insert(
-        panel,
-        Widget::RichText {
-            spans: vec![
-                TextSpan {
-                    text: "Population: ".into(),
-                    color: theme.text_light,
-                    font_family: FontFamily::Serif,
-                },
-                TextSpan {
-                    text: "1,034,196".into(),
-                    color: theme.gold,
-                    font_family: FontFamily::Mono,
-                },
-                TextSpan {
-                    text: " souls".into(),
-                    color: theme.text_light,
-                    font_family: FontFamily::Serif,
-                },
-            ],
-            font_size: theme.font_body_size,
-        },
-    );
-    tree.set_position(
-        rich,
-        Position::Fixed {
-            x: 0.0,
-            y: warning_y + theme.font_data_size + theme.label_gap,
-        },
-    );
-
-    // ScrollList with 100 items (UI-W03 demo).
-    let scroll_list = tree.insert_root(Widget::ScrollList {
-        bg_color: theme.bg_parchment,
-        border_color: theme.panel_border_color,
-        border_width: theme.panel_border_width,
-        item_height: theme.scroll_item_height,
-        scroll_offset: 0.0,
-        scrollbar_color: theme.scrollbar_color,
-        scrollbar_width: theme.scrollbar_width,
-    });
-    tree.set_position(scroll_list, Position::Fixed { x: 360.0, y: 20.0 });
-    tree.set_sizing(scroll_list, Sizing::Fixed(200.0), Sizing::Fixed(160.0));
-    tree.set_padding(scroll_list, Edges::all(4.0));
-
-    for i in 0..100 {
-        tree.insert(
-            scroll_list,
-            Widget::Label {
-                text: format!("Item {}", i + 1),
-                color: theme.text_dark,
-                font_size: theme.font_data_size,
-                font_family: theme.font_data_family,
-            },
-        );
-    }
-
-    // Tooltip demo: button with 3-level nested tooltip chain (UI-W04 demo).
-    let tooltip_btn = tree.insert_root(Widget::Button {
-        text: "Hover for tooltip".into(),
-        color: theme.text_light,
-        bg_color: theme.bg_parchment,
-        border_color: theme.panel_border_color,
-        font_size: theme.font_body_size,
-        font_family: theme.font_body_family,
-    });
-    tree.set_position(tooltip_btn, Position::Fixed { x: 580.0, y: 20.0 });
-
-    // Level 3 (deepest): simple text.
-    let level3 = widget::TooltipContent::Text("Level 3: deepest tooltip".into());
-    // Level 2: custom with a hoverable label that shows level 3.
-    let level2 = widget::TooltipContent::Custom(vec![
-        (
-            Widget::Label {
-                text: "Level 2 tooltip".into(),
-                color: theme.text_light,
-                font_size: theme.font_body_size,
-                font_family: theme.font_body_family,
-            },
-            None,
-        ),
-        (
-            Widget::Label {
-                text: "[hover for level 3]".into(),
-                color: theme.gold,
-                font_size: theme.font_data_size,
-                font_family: theme.font_data_family,
-            },
-            Some(level3),
-        ),
-    ]);
-    // Level 1: custom with a hoverable label that shows level 2.
-    let level1 = widget::TooltipContent::Custom(vec![
-        (
-            Widget::Label {
-                text: "Level 1 tooltip".into(),
-                color: theme.text_light,
-                font_size: theme.font_body_size,
-                font_family: theme.font_body_family,
-            },
-            None,
-        ),
-        (
-            Widget::Label {
-                text: "[hover for level 2]".into(),
-                color: theme.gold,
-                font_size: theme.font_data_size,
-                font_family: theme.font_data_family,
-            },
-            Some(level2),
-        ),
-    ]);
-    tree.set_tooltip(tooltip_btn, Some(level1));
-
-    tree
 }
 
 /// Build the status bar panel at the top of the screen (UI-I01a).
@@ -2237,38 +2048,43 @@ mod tests {
     #[test]
     fn demo_tree_uses_theme() {
         let theme = Theme::default();
-        let mut tree = demo_tree(&theme);
-        tree.layout(
-            Size {
-                width: 800.0,
-                height: 600.0,
-            },
-            14.0,
-        );
+        let kb = keybindings::KeyBindings::defaults();
+        let live = demo::DemoLiveData {
+            entity_info: None,
+            tick: 0,
+            population: 0,
+        };
+        let screen = Size {
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut tree = WidgetTree::new();
+        demo::build_demo(&mut tree, &theme, &kb, &live, screen);
+        tree.layout(screen, 14.0);
 
         let mut dl = DrawList::new();
         tree.draw(&mut dl);
 
-        // First panel is the themed parchment panel, second is the ScrollList bg.
-        assert!(dl.panels.len() >= 2);
+        // Root panel uses theme parchment background.
+        assert!(!dl.panels.is_empty());
         assert_eq!(dl.panels[0].bg_color, theme.bg_parchment);
         assert_eq!(dl.panels[0].border_color, theme.panel_border_color);
         assert!((dl.panels[0].border_width - theme.panel_border_width).abs() < 0.01);
 
-        // First 3 texts are labels: gold header, light body, red warning.
-        // Remaining texts are visible ScrollList items.
-        assert!(dl.texts.len() >= 3);
-        assert_eq!(dl.texts[0].color, theme.gold);
-        assert_eq!(dl.texts[0].font_family, theme.font_header_family);
-        assert!((dl.texts[0].font_size - theme.font_header_size).abs() < 0.01);
-
-        assert_eq!(dl.texts[1].color, theme.text_light);
-        assert_eq!(dl.texts[1].font_family, theme.font_body_family);
-        assert!((dl.texts[1].font_size - theme.font_body_size).abs() < 0.01);
-
-        assert_eq!(dl.texts[2].color, theme.danger);
-        assert_eq!(dl.texts[2].font_family, theme.font_data_family);
-        assert!((dl.texts[2].font_size - theme.font_data_size).abs() < 0.01);
+        // Demo uses all theme font families and sizes.
+        assert!(
+            dl.texts
+                .iter()
+                .any(|t| t.font_family == theme.font_header_family
+                    && (t.font_size - theme.font_header_size).abs() < 0.01)
+        );
+        assert!(
+            dl.texts
+                .iter()
+                .any(|t| t.font_family == theme.font_body_family
+                    && (t.font_size - theme.font_body_size).abs() < 0.01)
+        );
+        assert!(dl.texts.iter().any(|t| t.color == theme.danger));
     }
 
     #[test]
@@ -2458,27 +2274,33 @@ mod tests {
     #[test]
     fn demo_tree_includes_rich_text() {
         let theme = Theme::default();
-        let mut tree = demo_tree(&theme);
-        tree.layout(
-            Size {
-                width: 800.0,
-                height: 600.0,
-            },
-            14.0,
-        );
+        let kb = keybindings::KeyBindings::defaults();
+        let live = demo::DemoLiveData {
+            entity_info: None,
+            tick: 0,
+            population: 0,
+        };
+        let screen = Size {
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut tree = WidgetTree::new();
+        demo::build_demo(&mut tree, &theme, &kb, &live, screen);
+        tree.layout(screen, 14.0);
 
         let mut dl = DrawList::new();
         tree.draw(&mut dl);
 
-        // Panels: original panel + ScrollList bg + scrollbar thumb
-        assert!(dl.panels.len() >= 2);
-        // Labels: 3 original + visible scroll items
-        assert!(dl.texts.len() >= 3);
-        assert_eq!(dl.rich_texts.len(), 1);
+        // Demo has rich text blocks (title, population, live data, etc.).
+        assert!(!dl.rich_texts.is_empty());
 
-        // Rich text has 3 spans: "Population: " + "1,034,196" + " souls"
-        let rt = &dl.rich_texts[0];
-        assert_eq!(rt.spans.len(), 3);
+        // Find the "Population:" rich text.
+        let pop_rt = dl
+            .rich_texts
+            .iter()
+            .find(|rt| rt.spans.iter().any(|s| s.text == "Population: "));
+        assert!(pop_rt.is_some(), "should have Population rich text");
+        let rt = pop_rt.unwrap();
         assert_eq!(rt.spans[0].text, "Population: ");
         assert_eq!(rt.spans[0].font_family, FontFamily::Serif);
         assert_eq!(rt.spans[1].text, "1,034,196");
@@ -2680,31 +2502,32 @@ mod tests {
     #[test]
     fn demo_tree_includes_scroll_list() {
         let theme = Theme::default();
-        let mut tree = demo_tree(&theme);
-        tree.layout(
-            Size {
-                width: 800.0,
-                height: 600.0,
-            },
-            14.0,
-        );
+        let kb = keybindings::KeyBindings::defaults();
+        let live = demo::DemoLiveData {
+            entity_info: None,
+            tick: 0,
+            population: 0,
+        };
+        let screen = Size {
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut tree = WidgetTree::new();
+        demo::build_demo(&mut tree, &theme, &kb, &live, screen);
+        tree.layout(screen, 14.0);
 
-        // Should have 3 roots: panel + ScrollList + tooltip button.
-        assert_eq!(tree.roots().len(), 3);
+        // Demo is a single root panel.
+        assert_eq!(tree.roots().len(), 1);
 
         let mut dl = DrawList::new();
         tree.draw(&mut dl);
 
-        // Original panel + ScrollList bg + scrollbar thumb + tooltip button bg = 4 panels.
-        assert_eq!(dl.panels.len(), 4);
+        // Should have scroll items and button texts.
+        assert!(dl.texts.len() > 4, "scroll items + buttons should be drawn");
 
-        // 3 original labels + visible scroll items + tooltip button text.
-        assert!(dl.texts.len() > 4, "scroll items + button should be drawn");
-
-        // Verify scroll items are from the list (skip first 3 labels).
-        let after_labels: Vec<&str> = dl.texts[3..].iter().map(|t| t.text.as_str()).collect();
-        assert!(after_labels.contains(&"Item 1"));
-        assert!(after_labels.contains(&"Hover for tooltip"));
+        // Verify scroll items exist.
+        let all_texts: Vec<&str> = dl.texts.iter().map(|t| t.text.as_str()).collect();
+        assert!(all_texts.contains(&"Item 1"));
     }
 
     #[test]

@@ -317,6 +317,8 @@ struct App {
     // Entity inspector (UI-I01d)
     selected_entity: Option<components::Entity>,
     inspector_close_id: Option<ui::WidgetId>,
+    // Widget showcase (UI-DEMO)
+    show_demo: bool,
 }
 
 impl ApplicationHandler for App {
@@ -406,8 +408,25 @@ impl ApplicationHandler for App {
                                 ui::Action::SpeedSet(speed) => {
                                     self.sim_speed = speed;
                                 }
+                                ui::Action::ToggleDemo => {
+                                    self.show_demo = !self.show_demo;
+                                    if self.show_demo {
+                                        self.animator.start(
+                                            "demo_slide",
+                                            -1.0,
+                                            0.0,
+                                            std::time::Duration::from_millis(
+                                                self.ui_theme.anim_inspector_slide_ms,
+                                            ),
+                                            ui::Easing::EaseOut,
+                                            Instant::now(),
+                                        );
+                                    } else {
+                                        self.animator.remove("demo_slide");
+                                    }
+                                }
                                 ui::Action::CloseTopmost => {
-                                    // Priority: tooltips → inspector → exit.
+                                    // Priority: tooltips → inspector → demo → exit.
                                     if self.ui_state.tooltip_count() > 0 {
                                         self.ui_state.dismiss_all_tooltips(
                                             &mut self.ui_tree,
@@ -415,6 +434,9 @@ impl ApplicationHandler for App {
                                         );
                                     } else if self.selected_entity.is_some() {
                                         self.selected_entity = None;
+                                    } else if self.show_demo {
+                                        self.show_demo = false;
+                                        self.animator.remove("demo_slide");
                                     } else {
                                         event_loop.exit();
                                     }
@@ -886,8 +908,49 @@ impl ApplicationHandler for App {
                                 self.animator.remove("inspector_slide");
                             }
 
+                            // Build widget showcase (UI-DEMO) when active.
+                            let mut demo_root_id = None;
+                            if self.show_demo {
+                                // Pick first alive entity for live data section.
+                                let first_entity =
+                                    self.world.alive.iter().copied().min_by_key(|e| e.0);
+                                let entity_info = first_entity
+                                    .and_then(|e| ui::collect_inspector_info(e, &self.world));
+                                let live = ui::demo::DemoLiveData {
+                                    entity_info: entity_info.as_ref(),
+                                    tick: self.world.tick.0,
+                                    population: self.world.alive.len(),
+                                };
+                                let demo_id = ui::demo::build_demo(
+                                    &mut self.ui_tree,
+                                    &self.ui_theme,
+                                    &self.keybindings,
+                                    &live,
+                                    screen_size,
+                                );
+                                demo_root_id = Some(demo_id);
+                            }
+
                             // Re-layout tree with all widgets included.
                             self.ui_tree.layout(screen_size, m.line_height);
+
+                            // Apply demo slide-in animation (UI-DEMO + UI-W05).
+                            if let Some(demo_id) = demo_root_id {
+                                let slide = self.animator.get("demo_slide", now).unwrap_or(0.0);
+                                if slide < 0.0 {
+                                    // Slide from off-screen left: offset = slide * panel_width.
+                                    let offset = slide * 404.0; // 400 + 4 margin
+                                    self.ui_tree.set_position(
+                                        demo_id,
+                                        ui::Position::Fixed {
+                                            x: 4.0 + offset,
+                                            y: 4.0,
+                                        },
+                                    );
+                                    // Need re-layout after position change.
+                                    self.ui_tree.layout(screen_size, m.line_height);
+                                }
+                            }
 
                             // Apply hover tooltip fade-in (UI-W05).
                             if let Some(tooltip_id) = hover_tooltip_id {
@@ -1131,6 +1194,7 @@ fn main() {
         sim_speed: 1,
         selected_entity: None,
         inspector_close_id: None,
+        show_demo: std::env::args().any(|a| a == "--ui-demo"),
     };
     event_loop.run_app(&mut app).expect("run event loop");
 }

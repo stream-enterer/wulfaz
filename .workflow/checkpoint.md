@@ -4,25 +4,27 @@
 None
 
 ## Completed
-UI-I03 — Keyboard shortcut system — COMPLETE
+UI-DEMO — Widget showcase — COMPLETE
 
-- New file: `src/ui/keybindings.rs` — `KeyCombo`, `ModifierFlags`, `Action` enum, `KeyBindings` map with defaults + reverse lookup for labels
-- Default bindings: Space=PauseSim, Escape=CloseTopmost, 1-5=SpeedSet
-- `KeyBindings::label_for(action)` returns human-readable label (e.g. "Space", "Ctrl+P")
-- `StatusBarInfo` struct replaces positional args for `build_status_bar`
-- Status bar shows: "PAUSED (Space)" in danger red when paused, "Speed: Nx (N)" with gold highlight when speed > 1
-- CloseTopmost priority: tooltips → inspector → exit
-- Pause stops tick accumulator; unpause resets frame time to avoid burst
-- Speed multiplier applied to tick accumulator: `dt * sim_speed`
-- Global keybindings processed before widget focus dispatch in keyboard handler
-- 6 keybindings tests + 2 status bar pause/speed tests
-- All 537 tests pass (214 lib + 312 main + 5 determinism + 6 invariant), zero warnings
+- New file: `src/ui/demo.rs` — `build_demo()` function, `DemoLiveData` struct, 3 tests
+- F11 toggles demo panel, `--ui-demo` CLI flag activates at startup
+- `ToggleDemo` action added to keybindings (F11 default)
+- Demo panel (400px, left side) showcases all 5 UI tiers:
+  - Tier 1: Typography (header/body/data/warning/disabled)
+  - Tier 3: Rich text (mixed fonts/colors), ScrollList (50 items), 3-level tooltip chain
+  - Tier 4: Live entity data (tick, population, first entity stats with severity colors)
+  - Tier 5: Buttons with keybinding labels (Pause/Speed/Close), animated slide-in
+- Slide-in animation on open, Esc closes demo (added to CloseTopmost priority)
+- Old `demo_tree()` in mod.rs removed, 4 tests updated to use new `demo::build_demo()`
+- All 540 tests pass (214 lib + 315 main + 5 determinism + 6 invariant), zero warnings
 
 ## Files Modified
-- src/ui/keybindings.rs (NEW — KeyCombo, ModifierFlags, Action, KeyBindings, key_name, 6 tests)
-- src/ui/mod.rs (module wire-up, StatusBarInfo struct, build_status_bar refactored, 2 new tests, 4 existing tests updated)
-- src/main.rs (keybindings/paused/sim_speed on App, global keybinding dispatch, pause/speed tick logic)
+- src/ui/demo.rs (NEW — build_demo, DemoLiveData, 3 tests)
+- src/ui/mod.rs (module wire-up, removed old demo_tree, 3 tests updated)
+- src/ui/keybindings.rs (ToggleDemo action, F11 default binding)
+- src/ui/input.rs (1 test updated)
+- src/main.rs (show_demo field, ToggleDemo handler, demo building in render, --ui-demo flag)
 
 ## Next Action
-Pick next task from backlog. Remaining:
-- UI-DEMO update (Tier 5 milestone)
+Pick next task from backlog. All UI tasks complete. Remaining:
+- Phase A (SCALE-A09), Phase B, Phase C, Phase D, SIM-*, GROW-*

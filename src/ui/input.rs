@@ -1141,17 +1141,31 @@ mod tests {
     #[test]
     fn demo_tree_has_tooltip_button() {
         let theme = Theme::default();
-        let tree = crate::ui::demo_tree(&theme);
+        let kb = crate::ui::KeyBindings::defaults();
+        let live = crate::ui::demo::DemoLiveData {
+            entity_info: None,
+            tick: 0,
+            population: 0,
+        };
+        let screen = crate::ui::Size {
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut tree = crate::ui::WidgetTree::new();
+        let root = crate::ui::demo::build_demo(&mut tree, &theme, &kb, &live, screen);
 
-        // Third root is the tooltip button.
-        assert_eq!(tree.roots().len(), 3);
+        // Demo has a single root panel.
+        assert_eq!(tree.roots().len(), 1);
+        assert_eq!(tree.roots()[0], root);
 
-        // The tooltip button should have tooltip content set.
-        let btn_id = tree.roots()[2];
-        let node = tree.get(btn_id).unwrap();
+        // At least one widget in the tree should have tooltip content.
+        let has_tooltip = tree
+            .focusable_widgets()
+            .iter()
+            .any(|&id| tree.get(id).map(|n| n.tooltip.is_some()).unwrap_or(false));
         assert!(
-            node.tooltip.is_some(),
-            "demo tooltip button should have tooltip content"
+            has_tooltip,
+            "demo should have at least one widget with tooltip"
         );
     }
 }
