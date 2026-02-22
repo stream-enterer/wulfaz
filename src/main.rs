@@ -574,14 +574,14 @@ impl ApplicationHandler for App {
                             px,
                             py,
                         ) {
-                            // Check if the close button was clicked (UI-I01d).
-                            if pressed
-                                && button == MouseButton::Left
-                                && self.inspector_close_id.is_some()
-                            {
-                                let hit = self.ui_tree.hit_test(px, py);
-                                if hit == self.inspector_close_id {
-                                    self.selected_entity = None;
+                            // Dispatch widget click callbacks (UI-305).
+                            if let Some((_widget_id, action)) = self.ui_state.poll_click() {
+                                #[allow(clippy::single_match)]
+                                match action.as_str() {
+                                    "inspector::close" => {
+                                        self.selected_entity = None;
+                                    }
+                                    _ => {}
                                 }
                             }
                             return;
@@ -993,6 +993,7 @@ impl ApplicationHandler for App {
                                             y: status_bar_h + padding,
                                         },
                                     );
+                                    self.ui_tree.set_on_click(close_id, "inspector::close");
                                     self.inspector_close_id = Some(close_id);
                                 } else {
                                     // Entity died or lost position — auto-close.

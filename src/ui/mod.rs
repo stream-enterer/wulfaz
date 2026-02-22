@@ -199,6 +199,8 @@ pub(crate) struct WidgetNode {
     pub constraints: Option<Constraints>,
     /// Scissor-rect clip region inherited from parent (UI-104).
     pub clip_rect: Option<Rect>,
+    /// Callback key dispatched on click (UI-305). Builder sets this.
+    pub on_click: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +238,7 @@ impl WidgetTree {
             tooltip: None,
             constraints: None,
             clip_rect: None,
+            on_click: None,
         });
         self.roots.push(id);
         id
@@ -258,6 +261,7 @@ impl WidgetTree {
             tooltip: None,
             constraints: None,
             clip_rect: None,
+            on_click: None,
         });
         if let Some(parent_node) = self.arena.get_mut(parent) {
             parent_node.children.push(id);
@@ -363,6 +367,15 @@ impl WidgetTree {
         if let Some(node) = self.arena.get_mut(id) {
             node.constraints = Some(constraints);
             node.dirty = true;
+        }
+    }
+
+    /// Set a click callback key on a widget (UI-305).
+    /// When this widget is clicked, `UiState::poll_click()` returns
+    /// `Some((widget_id, key))`.
+    pub fn set_on_click(&mut self, id: WidgetId, key: impl Into<String>) {
+        if let Some(node) = self.arena.get_mut(id) {
+            node.on_click = Some(key.into());
         }
     }
 

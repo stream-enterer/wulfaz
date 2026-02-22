@@ -98,6 +98,8 @@ pub struct UiState {
     tooltip_last_dismiss: Option<Instant>,
     /// Pending map click event (UI-106). Consumed by `poll_map_click()`.
     map_click: Option<MapClick>,
+    /// Pending widget click event (UI-305). Consumed by `poll_click()`.
+    click_event: Option<(WidgetId, String)>,
 }
 
 impl UiState {
@@ -116,6 +118,7 @@ impl UiState {
             tooltip_pending: None,
             tooltip_last_dismiss: None,
             map_click: None,
+            click_event: None,
         }
     }
 
@@ -132,6 +135,12 @@ impl UiState {
     /// Poll the most recent map click event, consuming it.
     pub fn poll_map_click(&mut self) -> Option<MapClick> {
         self.map_click.take()
+    }
+
+    /// Poll the most recent widget click event (UI-305), consuming it.
+    /// Returns `(widget_id, callback_key)` if a widget with `on_click` was clicked.
+    pub fn poll_click(&mut self) -> Option<(WidgetId, String)> {
+        self.click_event.take()
     }
 
     /// Handle cursor movement. Returns true if the cursor is over a UI widget
@@ -251,9 +260,14 @@ impl UiState {
             } else if let Some(pressed_id) = was_pressed {
                 let release_hit = tree.hit_test(x, y);
                 if release_hit == Some(pressed_id)
-                    && let Some(btn) = was_button
+                    && let Some(_btn) = was_button
                 {
-                    let _ = UiEvent::Click(btn);
+                    // Store click event if widget has a callback key (UI-305).
+                    if let Some(node) = tree.get(pressed_id)
+                        && let Some(key) = &node.on_click
+                    {
+                        self.click_event = Some((pressed_id, key.clone()));
+                    }
                 }
             }
             return true;
@@ -1213,5 +1227,73 @@ mod tests {
 
         // Polling consumes the event.
         assert!(state.poll_map_click().is_none());
+    }
+
+    #[test]
+    fn click_callback_dispatched_on_release() {
+        let tree = &mut WidgetTree::new();
+        let btn = tree.insert_root(Widget::Button {
+            text: "OK".into(),
+            color: [1.0; 4],
+            bg_color: [0.3; 4],
+            border_color: [0.5; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+        });
+        tree.set_sizing(btn, Sizing::Fixed(80.0), Sizing::Fixed(30.0));
+        tree.set_on_click(btn, "test::ok");
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut state = UiState::new();
+
+        // Mouse down on button.
+        let consumed = state.handle_mouse_input(tree, MouseButton::Left, true, 10.0, 10.0);
+        assert!(consumed, "press should be consumed");
+        assert!(state.poll_click().is_none(), "no click event on press");
+
+        // Mouse up on same button.
+        let consumed = state.handle_mouse_input(tree, MouseButton::Left, false, 10.0, 10.0);
+        assert!(consumed, "release should be consumed");
+
+        let click = state.poll_click().expect("should have click event");
+        assert_eq!(click.0, btn);
+        assert_eq!(click.1, "test::ok");
+
+        // Polling consumes the event.
+        assert!(state.poll_click().is_none());
+    }
+
+    #[test]
+    fn no_callback_without_on_click() {
+        let tree = &mut WidgetTree::new();
+        let btn = tree.insert_root(Widget::Button {
+            text: "Plain".into(),
+            color: [1.0; 4],
+            bg_color: [0.3; 4],
+            border_color: [0.5; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+        });
+        tree.set_sizing(btn, Sizing::Fixed(80.0), Sizing::Fixed(30.0));
+        // No set_on_click — should not dispatch.
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut state = UiState::new();
+        state.handle_mouse_input(tree, MouseButton::Left, true, 10.0, 10.0);
+        state.handle_mouse_input(tree, MouseButton::Left, false, 10.0, 10.0);
+
+        assert!(state.poll_click().is_none(), "no on_click = no event");
     }
 }
