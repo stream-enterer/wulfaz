@@ -72,9 +72,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
     // Find attack pairs: aggressive entity attacks another at same position
     let mut attacks: Vec<(Entity, Entity, f32)> = Vec::new(); // (attacker, defender, damage)
 
-    for i in 0..combatants.len() {
-        let (attacker, ax, ay, aggression) = combatants[i];
-
+    for &(attacker, ax, ay, aggression) in &combatants {
         // Gate on intention if present, else legacy fallback
         if let Some(intention) = world.mind.intentions.get(&attacker) {
             if intention.action != ActionId::Attack {
@@ -101,32 +99,40 @@ pub fn run_combat(world: &mut World, tick: Tick) {
             continue;
         }
 
-        // Prefer intention target if set and valid (same tile, alive)
+        // Prefer intention target if set and valid (same tile, alive, combatant)
         let preferred_target = world.mind.intentions.get(&attacker).and_then(|i| i.target);
 
         let mut found_target = false;
         if let Some(target) = preferred_target
-            && let Some(&(defender, dx, dy, _)) =
-                combatants.iter().find(|(e, _, _, _)| *e == target)
-            && defender != attacker
-            && ax == dx
-            && ay == dy
+            && target != attacker
+            && !world.pending_deaths.contains(&target)
+            && world.body.combat_stats.contains_key(&target)
+            && world.body.healths.contains_key(&target)
+            && let Some(tp) = world.body.positions.get(&target)
+            && tp.x == ax
+            && tp.y == ay
         {
-            let damage = compute_fatigue_damage(world, attacker, defender);
-            attacks.push((attacker, defender, damage));
+            let damage = compute_fatigue_damage(world, attacker, target);
+            attacks.push((attacker, target, damage));
             found_target = true;
         }
 
         if !found_target {
-            for (j, &(defender, dx, dy, _)) in combatants.iter().enumerate() {
-                if i == j {
-                    continue;
-                }
-                if ax == dx && ay == dy {
-                    let damage = compute_fatigue_damage(world, attacker, defender);
-                    attacks.push((attacker, defender, damage));
-                    break; // one attack per attacker per tick
-                }
+            // Spatial index lookup: find first valid combatant at same tile
+            let mut candidates: Vec<Entity> = world
+                .entities_at(ax, ay)
+                .iter()
+                .copied()
+                .filter(|&e| e != attacker)
+                .filter(|e| !world.pending_deaths.contains(e))
+                .filter(|e| world.body.combat_stats.contains_key(e))
+                .filter(|e| world.body.healths.contains_key(e))
+                .collect();
+            candidates.sort_unstable_by_key(|e| e.0); // determinism
+
+            if let Some(&defender) = candidates.first() {
+                let damage = compute_fatigue_damage(world, attacker, defender);
+                attacks.push((attacker, defender, damage));
             }
         }
     }
@@ -213,6 +219,7 @@ mod tests {
             },
         );
 
+        world.rebuild_spatial_index();
         run_combat(&mut world, Tick(0));
 
         // Attacker has aggression 1.0 so always attacks. Damage = 15-3 = 12
@@ -265,6 +272,7 @@ mod tests {
             },
         );
 
+        world.rebuild_spatial_index();
         run_combat(&mut world, Tick(0));
 
         assert!(world.pending_deaths.contains(&defender));
@@ -316,6 +324,7 @@ mod tests {
             },
         );
 
+        world.rebuild_spatial_index();
         run_combat(&mut world, Tick(0));
 
         // Health should be clamped to 0.0, not negative

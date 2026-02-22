@@ -211,6 +211,8 @@ fn run_one_tick(world: &mut World) {
     run_fatigue(world, tick);
     run_decisions(world, tick);
     run_wander(world, tick);
+    // Rebuild spatial index after movement so eating/combat see post-move positions.
+    world.rebuild_spatial_index();
     run_eating(world, tick);
     run_combat(world, tick);
     run_death(world, tick);

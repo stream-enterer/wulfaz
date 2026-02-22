@@ -117,19 +117,9 @@ fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
                 return 0.0;
             };
             let count = world
-                .mind
-                .nutritions
-                .iter()
-                .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
-                .filter(|&(&e, _)| {
-                    if let Some(fp) = world.body.positions.get(&e) {
-                        let dx = (fp.x - pos.x).abs();
-                        let dy = (fp.y - pos.y).abs();
-                        dx.max(dy) <= SENSE_RANGE
-                    } else {
-                        false
-                    }
-                })
+                .entities_in_range(pos.x, pos.y, SENSE_RANGE)
+                .filter(|e| !world.pending_deaths.contains(e))
+                .filter(|e| world.mind.nutritions.contains_key(e))
                 .count();
             (count.min(3) as f32) / 3.0
         }
@@ -138,20 +128,10 @@ fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
                 return 0.0;
             };
             let count = world
-                .body
-                .combat_stats
-                .iter()
-                .filter(|&(&e, _)| e != entity)
-                .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
-                .filter(|&(&e, _)| {
-                    if let Some(ep) = world.body.positions.get(&e) {
-                        let dx = (ep.x - pos.x).abs();
-                        let dy = (ep.y - pos.y).abs();
-                        dx.max(dy) <= SENSE_RANGE
-                    } else {
-                        false
-                    }
-                })
+                .entities_in_range(pos.x, pos.y, SENSE_RANGE)
+                .filter(|&e| e != entity)
+                .filter(|e| !world.pending_deaths.contains(e))
+                .filter(|e| world.body.combat_stats.contains_key(e))
                 .count();
             (count.min(3) as f32) / 3.0
         }
@@ -173,11 +153,10 @@ fn read_input(axis: &InputAxis, world: &World, entity: Entity) -> f32 {
 fn select_eat_target(world: &World, entity: Entity) -> Option<Entity> {
     let pos = world.body.positions.get(&entity)?;
     world
-        .mind
-        .nutritions
-        .iter()
-        .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
-        .filter_map(|(&e, n)| {
+        .entities_in_range(pos.x, pos.y, SENSE_RANGE)
+        .filter(|e| !world.pending_deaths.contains(e))
+        .filter_map(|e| {
+            let n = world.mind.nutritions.get(&e)?;
             let fp = world.body.positions.get(&e)?;
             let dist = (fp.x - pos.x).abs().max((fp.y - pos.y).abs());
             Some((e, dist, n.value))
@@ -194,14 +173,13 @@ fn select_eat_target(world: &World, entity: Entity) -> Option<Entity> {
 fn select_attack_target(world: &World, entity: Entity) -> Option<Entity> {
     let pos = world.body.positions.get(&entity)?;
     world
-        .body
-        .combat_stats
-        .iter()
-        .filter(|&(&e, _)| e != entity)
-        .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
-        .filter_map(|(&e, _)| {
-            let ep = world.body.positions.get(&e)?;
+        .entities_in_range(pos.x, pos.y, SENSE_RANGE)
+        .filter(|&e| e != entity)
+        .filter(|e| !world.pending_deaths.contains(e))
+        .filter_map(|e| {
+            let _ = world.body.combat_stats.get(&e)?;
             let health = world.body.healths.get(&e)?;
+            let ep = world.body.positions.get(&e)?;
             let dist = (ep.x - pos.x).abs().max((ep.y - pos.y).abs());
             Some((e, dist, health.current))
         })
@@ -618,6 +596,7 @@ mod tests {
         world.body.positions.insert(f2, Position { x: 10, y: 10 }); // within SENSE_RANGE
         world.mind.nutritions.insert(f2, Nutrition { value: 20.0 });
 
+        world.rebuild_spatial_index();
         let val = read_input(&InputAxis::FoodNearby, &world, e);
         assert!((val - 2.0 / 3.0).abs() < 0.001);
     }
@@ -720,6 +699,7 @@ mod tests {
             state.cooldowns.insert(ActionId::Eat, 5);
         }
 
+        world.rebuild_spatial_index();
         run_decisions(&mut world, Tick(0));
         let intention = world
             .mind
@@ -765,6 +745,7 @@ mod tests {
         }
 
         // Tick 0: decrement cooldown to 0, but Eat is still blocked (cd was 1 at start, decremented to 0)
+        world.rebuild_spatial_index();
         run_decisions(&mut world, Tick(0));
 
         // Tick 1: cooldown is now 0, Eat should be available
@@ -935,6 +916,7 @@ mod tests {
         world.mind.nutritions.insert(f2, Nutrition { value: 10.0 });
 
         // Nearest wins (distance 1 vs 10)
+        world.rebuild_spatial_index();
         let target = select_eat_target(&world, e);
         assert_eq!(target, Some(f2));
     }
@@ -954,6 +936,7 @@ mod tests {
         world.mind.nutritions.insert(f2, Nutrition { value: 30.0 });
 
         // Same distance → highest nutrition wins
+        world.rebuild_spatial_index();
         let target = select_eat_target(&world, e);
         assert_eq!(target, Some(f2));
     }
@@ -1011,6 +994,7 @@ mod tests {
         );
 
         // Nearest wins (distance 1 vs 10)
+        world.rebuild_spatial_index();
         let target = select_attack_target(&world, e);
         assert_eq!(target, Some(t1));
     }
@@ -1066,6 +1050,7 @@ mod tests {
         );
 
         // Same distance → lowest health wins
+        world.rebuild_spatial_index();
         let target = select_attack_target(&world, e);
         assert_eq!(target, Some(t2));
     }

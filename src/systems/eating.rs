@@ -24,47 +24,46 @@ pub fn run_eating(world: &mut World, tick: Tick) {
         .collect();
     hungry.sort_by_key(|(e, _, _, _)| e.0);
 
-    // Collect food items sorted for determinism
-    let mut food_items: Vec<(Entity, f32, i32, i32)> = world
-        .mind
-        .nutritions
-        .iter()
-        .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
-        .filter_map(|(&e, n)| {
-            let pos = world.body.positions.get(&e)?;
-            Some((e, n.value, pos.x, pos.y))
-        })
-        .collect();
-    food_items.sort_by_key(|(e, _, _, _)| e.0);
-
-    // Find food items at same positions
+    // Find food items at same positions using spatial index
     let mut eat_actions: Vec<(Entity, Entity, f32)> = Vec::new(); // (eater, food, nutrition)
     let mut consumed: Vec<Entity> = Vec::new();
 
     for (eater, ex, ey, _) in &hungry {
-        // Prefer intention target if set and valid
+        // Prefer intention target if set and valid (same tile, has nutrition)
         if let Some(target) = world.mind.intentions.get(eater).and_then(|i| i.target)
-            && let Some(&(_, nutrition_value, fx, fy)) =
-                food_items.iter().find(|(e, _, _, _)| *e == target)
             && !consumed.contains(&target)
-            && fx == *ex
-            && fy == *ey
-            && nutrition_value > 0.0
+            && !world.pending_deaths.contains(&target)
+            && let Some(n) = world.mind.nutritions.get(&target)
+            && let Some(fp) = world.body.positions.get(&target)
+            && fp.x == *ex
+            && fp.y == *ey
+            && n.value > 0.0
         {
-            eat_actions.push((*eater, target, nutrition_value));
+            eat_actions.push((*eater, target, n.value));
             consumed.push(target);
             continue;
         }
-        // Fallback: first food at same position
-        for &(food_entity, nutrition_value, fx, fy) in &food_items {
-            if consumed.contains(&food_entity) {
-                continue;
-            }
-            if fx == *ex && fy == *ey && nutrition_value > 0.0 {
-                eat_actions.push((*eater, food_entity, nutrition_value));
-                consumed.push(food_entity);
-                break; // one food per eater per tick
-            }
+        // Fallback: first food at same position via spatial index
+        let mut candidates: Vec<(Entity, f32)> = world
+            .entities_at(*ex, *ey)
+            .iter()
+            .copied()
+            .filter(|e| !consumed.contains(e))
+            .filter(|e| !world.pending_deaths.contains(e))
+            .filter_map(|e| {
+                let n = world.mind.nutritions.get(&e)?;
+                if n.value > 0.0 {
+                    Some((e, n.value))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        candidates.sort_unstable_by_key(|(e, _)| e.0); // determinism
+
+        if let Some(&(food_entity, nutrition_value)) = candidates.first() {
+            eat_actions.push((*eater, food_entity, nutrition_value));
+            consumed.push(food_entity);
         }
     }
 
@@ -111,6 +110,7 @@ mod tests {
             .nutritions
             .insert(food, Nutrition { value: 30.0 });
 
+        world.rebuild_spatial_index();
         run_eating(&mut world, Tick(0));
 
         assert_eq!(world.mind.hungers[&eater].current, 50.0);

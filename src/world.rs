@@ -177,12 +177,24 @@ impl World {
     }
 
     /// Return all entities at a given tile coordinate.
-    #[allow(dead_code)] // Public API for B02 spatial query conversion
     pub fn entities_at(&self, x: i32, y: i32) -> &[Entity] {
         self.spatial_index
             .get(&(x, y))
             .map(SmallVec::as_slice)
             .unwrap_or(&[])
+    }
+
+    /// Return all entities within Chebyshev distance `range` of (cx, cy).
+    /// Uses the spatial index for O(range²) tile lookups instead of full entity scan.
+    pub fn entities_in_range(
+        &self,
+        cx: i32,
+        cy: i32,
+        range: i32,
+    ) -> impl Iterator<Item = Entity> + '_ {
+        (-range..=range).flat_map(move |dy| {
+            (-range..=range).flat_map(move |dx| self.entities_at(cx + dx, cy + dy).iter().copied())
+        })
     }
 
     /// Remove an entity from ALL tables. Called ONLY by run_death.
@@ -503,6 +515,24 @@ mod tests {
         assert_eq!(at_1_1.len(), 1);
         assert!(at_1_1.contains(&alive));
         assert!(!at_1_1.contains(&dead));
+    }
+
+    #[test]
+    fn entities_in_range_finds_nearby() {
+        let mut world = World::new_with_seed(42);
+        let e1 = world.spawn();
+        let e2 = world.spawn();
+        let e3 = world.spawn();
+        world.body.positions.insert(e1, Position { x: 5, y: 5 });
+        world.body.positions.insert(e2, Position { x: 7, y: 5 }); // Chebyshev dist 2
+        world.body.positions.insert(e3, Position { x: 50, y: 50 }); // far away
+
+        world.rebuild_spatial_index();
+
+        let nearby: Vec<Entity> = world.entities_in_range(5, 5, 3).collect();
+        assert!(nearby.contains(&e1));
+        assert!(nearby.contains(&e2));
+        assert!(!nearby.contains(&e3));
     }
 
     #[test]
