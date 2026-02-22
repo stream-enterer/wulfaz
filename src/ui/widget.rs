@@ -89,4 +89,24 @@ pub enum Widget {
         scrollbar_color: [f32; 4], // scrollbar thumb sRGB RGBA
         scrollbar_width: f32,      // scrollbar track width (pixels)
     },
+
+    /// Horizontal or vertical bar showing a 0.0..=1.0 fraction (UI-200).
+    /// Always stretch-width (fills parent). Height from field.
+    ProgressBar {
+        fraction: f32,          // 0.0..=1.0, clamped in draw
+        fg_color: [f32; 4],     // foreground (filled portion) sRGB RGBA
+        bg_color: [f32; 4],     // background (unfilled portion) sRGB RGBA
+        border_color: [f32; 4], // border on background rect sRGB RGBA
+        border_width: f32,      // border width in pixels
+        height: f32,            // bar height in pixels
+    },
+
+    /// Thin line divider between sections (UI-201).
+    /// Horizontal: width = parent, height = thickness.
+    /// Vertical: width = thickness, height = parent.
+    Separator {
+        color: [f32; 4],  // sRGB RGBA
+        thickness: f32,   // pixels
+        horizontal: bool, // true = horizontal divider, false = vertical
+    },
 }

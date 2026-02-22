@@ -992,6 +992,33 @@ impl WidgetTree {
                     height: node.children.len() as f32 * item_height,
                 }
             }
+            Widget::ProgressBar { height, .. } => {
+                // Width = parent-provided (stretch-width), intrinsic width 0.
+                // Height from field.
+                Size {
+                    width: 0.0,
+                    height: *height,
+                }
+            }
+            Widget::Separator {
+                thickness,
+                horizontal,
+                ..
+            } => {
+                // Horizontal: width = parent, height = thickness.
+                // Vertical: width = thickness, height = parent.
+                if *horizontal {
+                    Size {
+                        width: 0.0,
+                        height: *thickness,
+                    }
+                } else {
+                    Size {
+                        width: *thickness,
+                        height: 0.0,
+                    }
+                }
+            }
         }
     }
 
@@ -1110,6 +1137,59 @@ impl WidgetTree {
                     x: node.rect.x,
                     y: node.rect.y,
                     font_size: *font_size,
+                    clip,
+                });
+            }
+            Widget::ProgressBar {
+                fraction,
+                fg_color,
+                bg_color,
+                border_color,
+                border_width,
+                ..
+            } => {
+                let f = fraction.clamp(0.0, 1.0);
+                // Background rect (full width).
+                draw_list.panels.push(PanelCommand {
+                    x: node.rect.x,
+                    y: node.rect.y,
+                    width: node.rect.width,
+                    height: node.rect.height,
+                    bg_color: *bg_color,
+                    border_color: *border_color,
+                    border_width: *border_width,
+                    shadow_width: 0.0,
+                    clip,
+                });
+                // Foreground rect (fraction of width).
+                if f > 0.0 {
+                    let inner_x = node.rect.x + *border_width;
+                    let inner_y = node.rect.y + *border_width;
+                    let inner_w = (node.rect.width - 2.0 * border_width).max(0.0);
+                    let inner_h = (node.rect.height - 2.0 * border_width).max(0.0);
+                    draw_list.panels.push(PanelCommand {
+                        x: inner_x,
+                        y: inner_y,
+                        width: inner_w * f,
+                        height: inner_h,
+                        bg_color: *fg_color,
+                        border_color: [0.0; 4],
+                        border_width: 0.0,
+                        shadow_width: 0.0,
+                        clip,
+                    });
+                }
+            }
+            Widget::Separator { color, .. } => {
+                draw_list.panels.push(PanelCommand {
+                    x: node.rect.x,
+                    y: node.rect.y,
+                    width: node.rect.width,
+                    height: node.rect.height,
+                    bg_color: *color,
+                    border_color: [0.0; 4],
+                    border_width: 0.0,
+                    shadow_width: 0.0,
                     clip,
                 });
             }
@@ -1329,6 +1409,19 @@ impl WidgetTree {
                 bg_color[3] *= opacity;
                 border_color[3] *= opacity;
                 scrollbar_color[3] *= opacity;
+            }
+            Widget::ProgressBar {
+                fg_color,
+                bg_color,
+                border_color,
+                ..
+            } => {
+                fg_color[3] *= opacity;
+                bg_color[3] *= opacity;
+                border_color[3] *= opacity;
+            }
+            Widget::Separator { color, .. } => {
+                color[3] *= opacity;
             }
         }
     }
@@ -4862,6 +4955,249 @@ mod tests {
         assert!(
             child_node.clip_rect.is_some(),
             "Column child should inherit clip_rect"
+        );
+    }
+
+    // --- UI-200: Progress bar tests ---
+
+    #[test]
+    fn progress_bar_half_fraction_emits_half_width_foreground() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 0.0,
+            align: widget::CrossAlign::Stretch,
+        });
+        tree.set_sizing(col, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
+
+        tree.insert(
+            col,
+            Widget::ProgressBar {
+                fraction: 0.5,
+                fg_color: [0.0, 1.0, 0.0, 1.0],
+                bg_color: [0.2, 0.2, 0.2, 1.0],
+                border_color: [1.0, 1.0, 1.0, 1.0],
+                border_width: 1.0,
+                height: 8.0,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // Should have at least 2 panels: background + foreground.
+        assert!(draw_list.panels.len() >= 2);
+
+        // Background panel = full 200px width.
+        let bg = &draw_list.panels[0];
+        assert!((bg.width - 200.0).abs() < 0.1);
+        assert!((bg.height - 8.0).abs() < 0.1);
+
+        // Foreground panel = inner width (200 - 2*border) * 0.5 = 99.
+        let fg = &draw_list.panels[1];
+        let inner_w = 200.0 - 2.0; // 1px border on each side
+        assert!(
+            (fg.width - inner_w * 0.5).abs() < 0.1,
+            "foreground width should be {} but got {}",
+            inner_w * 0.5,
+            fg.width
+        );
+    }
+
+    #[test]
+    fn progress_bar_fraction_clamped() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 0.0,
+            align: widget::CrossAlign::Stretch,
+        });
+        tree.set_sizing(col, Sizing::Fixed(100.0), Sizing::Fixed(100.0));
+
+        let _bar = tree.insert(
+            col,
+            Widget::ProgressBar {
+                fraction: 1.5, // over 1.0
+                fg_color: [0.0, 1.0, 0.0, 1.0],
+                bg_color: [0.2, 0.2, 0.2, 1.0],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                height: 10.0,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // Foreground width should be clamped to full inner width, not 150%.
+        let fg = &draw_list.panels[1];
+        assert!(
+            (fg.width - 100.0).abs() < 0.1,
+            "clamped fraction should produce 100px foreground, got {}",
+            fg.width
+        );
+    }
+
+    #[test]
+    fn progress_bar_zero_fraction_no_foreground() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 0.0,
+            align: widget::CrossAlign::Stretch,
+        });
+        tree.set_sizing(col, Sizing::Fixed(100.0), Sizing::Fixed(100.0));
+
+        let _bar = tree.insert(
+            col,
+            Widget::ProgressBar {
+                fraction: 0.0,
+                fg_color: [0.0, 1.0, 0.0, 1.0],
+                bg_color: [0.2, 0.2, 0.2, 1.0],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                height: 10.0,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // Only 1 panel: the background. No foreground for fraction 0.
+        assert_eq!(
+            draw_list.panels.len(),
+            1,
+            "fraction 0 should emit only background"
+        );
+    }
+
+    #[test]
+    fn progress_bar_intrinsic_height() {
+        let tree = {
+            let mut t = WidgetTree::new();
+            t.insert_root(Widget::ProgressBar {
+                fraction: 0.5,
+                fg_color: [0.0, 1.0, 0.0, 1.0],
+                bg_color: [0.2, 0.2, 0.2, 1.0],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                height: 12.0,
+            });
+            t
+        };
+        let root = tree.roots()[0];
+        let measured = tree.measure_node(root, 14.0);
+        assert!(
+            (measured.width - 0.0).abs() < 0.01,
+            "intrinsic width should be 0 (stretch)"
+        );
+        assert!(
+            (measured.height - 12.0).abs() < 0.01,
+            "intrinsic height should match field"
+        );
+    }
+
+    // --- UI-201: Separator tests ---
+
+    #[test]
+    fn horizontal_separator_stretches_to_column_width() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 0.0,
+            align: widget::CrossAlign::Stretch,
+        });
+        tree.set_sizing(col, Sizing::Fixed(300.0), Sizing::Fixed(100.0));
+
+        let sep = tree.insert(
+            col,
+            Widget::Separator {
+                color: [1.0, 0.8, 0.3, 0.3],
+                thickness: 1.0,
+                horizontal: true,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let sep_node = tree.get(sep).unwrap();
+        assert!(
+            (sep_node.rect.width - 300.0).abs() < 0.1,
+            "horizontal separator width should match column: got {}",
+            sep_node.rect.width
+        );
+        assert!(
+            (sep_node.rect.height - 1.0).abs() < 0.1,
+            "horizontal separator height should be thickness: got {}",
+            sep_node.rect.height
+        );
+    }
+
+    #[test]
+    fn separator_emits_single_panel_no_border() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 0.0,
+            align: widget::CrossAlign::Stretch,
+        });
+        tree.set_sizing(col, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
+
+        tree.insert(
+            col,
+            Widget::Separator {
+                color: [1.0, 0.8, 0.3, 0.3],
+                thickness: 2.0,
+                horizontal: true,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        assert_eq!(
+            draw_list.panels.len(),
+            1,
+            "separator should emit exactly 1 panel"
+        );
+        let panel = &draw_list.panels[0];
+        assert!(
+            (panel.border_width - 0.0).abs() < 0.01,
+            "separator should have no border"
+        );
+        assert!(
+            (panel.shadow_width - 0.0).abs() < 0.01,
+            "separator should have no shadow"
         );
     }
 }

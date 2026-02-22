@@ -99,6 +99,22 @@ pub struct Theme {
     /// Wander target tile highlight color (semi-transparent).
     pub overlay_path: [f32; 4],
 
+    // -- Progress bar defaults (UI-200) --
+    /// Default progress bar height in pixels.
+    pub progress_bar_height: f32,
+    /// Default progress bar border width in pixels.
+    pub progress_bar_border_width: f32,
+    /// Health bar foreground color (green).
+    pub progress_bar_health_fg: [f32; 4],
+    /// Health bar background color (dark).
+    pub progress_bar_health_bg: [f32; 4],
+
+    // -- Separator defaults (UI-201) --
+    /// Default separator color (sRGB RGBA).
+    pub separator_color: [f32; 4],
+    /// Default separator thickness in pixels.
+    pub separator_thickness: f32,
+
     // -- Animation defaults (UI-W05) --
     /// Hover tooltip fade-in duration (milliseconds).
     pub anim_tooltip_fade_ms: u64,
@@ -176,6 +192,16 @@ impl Default for Theme {
             overlay_hover: hex_a(0xF0, 0xE6, 0xD2, 0.15), // light parchment, subtle
             overlay_selection: hex_a(0xC8, 0xA8, 0x50, 0.35), // gold, prominent
             overlay_path: hex_a(0x60, 0xA0, 0x60, 0.25),  // muted green
+
+            // Progress bar defaults (UI-200)
+            progress_bar_height: 8.0,
+            progress_bar_border_width: 1.0,
+            progress_bar_health_fg: hex(0x40, 0xA0, 0x40), // green
+            progress_bar_health_bg: hex_a(0x30, 0x20, 0x10, 0.6), // dark brown
+
+            // Separator defaults (UI-201)
+            separator_color: hex_a(0xC8, 0xA8, 0x50, 0.3), // gold at 30% alpha
+            separator_thickness: 1.0,
 
             // Animation defaults (UI-W05)
             anim_tooltip_fade_ms: 150,
