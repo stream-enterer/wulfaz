@@ -112,6 +112,7 @@ impl EventLog {
     }
 
     /// Whether the log is empty.
+    #[allow(dead_code)] // Standard container method; used in unit tests
     pub fn is_empty(&self) -> bool {
         self.count == 0
     }

@@ -86,10 +86,8 @@ pub struct GisTables {
     /// Maps quartier_id (1-based index) to quartier name string.
     pub quartier_names: Vec<String>,
     /// Street registry, reconstructed from building address data.
-    #[allow(dead_code)]
     pub streets: StreetRegistry,
     /// Active SoDUCo snapshot year for occupant display.
-    #[allow(dead_code)]
     pub active_year: u16,
 }
 

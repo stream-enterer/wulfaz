@@ -33,7 +33,7 @@ pub struct PanelCommand {
 }
 
 /// Intermediate draw command for a text run.
-/// Consumed by `FontRenderer::prepare_text()`.
+/// Consumed by `FontRenderer::prepare_text_with_font()`.
 #[derive(Debug, Clone)]
 pub struct TextCommand {
     pub text: String,
