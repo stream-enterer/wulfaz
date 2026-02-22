@@ -492,7 +492,7 @@ impl UiState {
     }
 
     /// Compute tooltip position with edge-flipping.
-    fn compute_tooltip_position(
+    pub(crate) fn compute_tooltip_position(
         cursor: (f32, f32),
         tooltip_size: Size,
         screen: Size,

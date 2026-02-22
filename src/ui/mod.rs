@@ -1158,6 +1158,225 @@ pub fn build_status_bar(
 }
 
 // ---------------------------------------------------------------------------
+// Hover tooltip (UI-I01b)
+// ---------------------------------------------------------------------------
+
+/// Data for the map hover tooltip (UI-I01b).
+/// Extracted from World in main.rs, consumed by `build_hover_tooltip`.
+pub struct HoverInfo {
+    pub tile_x: i32,
+    pub tile_y: i32,
+    pub terrain: String,
+    pub quartier: Option<String>,
+    pub address: Option<String>,
+    pub building_name: Option<String>,
+    /// (name, activity) pairs for building occupants.
+    pub occupants: Vec<(String, String)>,
+    /// Year suffix like "[1842]" if data is from a fallback year.
+    pub occupant_year_suffix: Option<String>,
+    /// (icon_char, name) pairs for alive entities on this tile.
+    pub entities: Vec<(char, String)>,
+}
+
+/// Maximum number of occupants shown in the hover tooltip.
+const HOVER_MAX_OCCUPANTS: usize = 5;
+
+/// Build a hover tooltip panel for the hovered map tile (UI-I01b).
+///
+/// Created on demand when cursor is over a map tile, destroyed when
+/// cursor leaves (per DD-5). Styled like a W04 tooltip panel.
+/// Replaces the old string-based `render::render_hover_info()`.
+///
+/// Returns the root panel's `WidgetId`.
+pub fn build_hover_tooltip(
+    tree: &mut WidgetTree,
+    theme: &Theme,
+    info: &HoverInfo,
+    cursor: (f32, f32),
+    screen: Size,
+    line_height: f32,
+) -> WidgetId {
+    let panel = tree.insert_root(Widget::Panel {
+        bg_color: theme.tooltip_bg_color,
+        border_color: theme.tooltip_border_color,
+        border_width: theme.tooltip_border_width,
+        shadow_width: theme.tooltip_shadow_width,
+    });
+    tree.set_sizing(panel, Sizing::Fit, Sizing::Fit);
+    tree.set_padding(panel, Edges::all(theme.tooltip_padding));
+
+    let mut y = 0.0_f32;
+    let data_h = theme.font_data_size;
+    let body_h = theme.font_body_size;
+    let gap = theme.label_gap;
+
+    // Line 1: coordinates + terrain type
+    let coord_line = tree.insert(
+        panel,
+        Widget::RichText {
+            spans: vec![
+                TextSpan {
+                    text: format!("({}, {})", info.tile_x, info.tile_y),
+                    color: theme.gold,
+                    font_family: FontFamily::Mono,
+                },
+                TextSpan {
+                    text: format!("  {}", info.terrain),
+                    color: theme.text_light,
+                    font_family: FontFamily::Mono,
+                },
+            ],
+            font_size: theme.font_data_size,
+        },
+    );
+    tree.set_position(coord_line, Position::Fixed { x: 0.0, y });
+    y += data_h + gap;
+
+    // Line 2: quartier name (optional)
+    if let Some(ref quartier) = info.quartier {
+        let q = tree.insert(
+            panel,
+            Widget::Label {
+                text: quartier.clone(),
+                color: theme.disabled,
+                font_size: theme.font_data_size,
+                font_family: theme.font_data_family,
+            },
+        );
+        tree.set_position(q, Position::Fixed { x: 0.0, y });
+        y += data_h + gap;
+    }
+
+    // Line 3: address + building name (optional)
+    if let Some(ref address) = info.address {
+        let mut spans = vec![TextSpan {
+            text: address.clone(),
+            color: theme.text_light,
+            font_family: FontFamily::Serif,
+        }];
+        if let Some(ref name) = info.building_name {
+            spans.push(TextSpan {
+                text: " \u{2014} ".to_string(),
+                color: theme.disabled,
+                font_family: FontFamily::Serif,
+            });
+            spans.push(TextSpan {
+                text: name.clone(),
+                color: theme.gold,
+                font_family: FontFamily::Serif,
+            });
+        }
+        let addr_line = tree.insert(
+            panel,
+            Widget::RichText {
+                spans,
+                font_size: theme.font_body_size,
+            },
+        );
+        tree.set_position(addr_line, Position::Fixed { x: 0.0, y });
+        y += body_h + gap;
+    }
+
+    // Occupants section
+    if !info.occupants.is_empty() {
+        let show_count = info.occupants.len().min(HOVER_MAX_OCCUPANTS);
+        for (name, activity) in &info.occupants[..show_count] {
+            let occ = tree.insert(
+                panel,
+                Widget::RichText {
+                    spans: vec![
+                        TextSpan {
+                            text: name.clone(),
+                            color: theme.text_light,
+                            font_family: FontFamily::Mono,
+                        },
+                        TextSpan {
+                            text: format!(" ({})", activity),
+                            color: theme.disabled,
+                            font_family: FontFamily::Mono,
+                        },
+                    ],
+                    font_size: theme.font_data_size,
+                },
+            );
+            tree.set_position(occ, Position::Fixed { x: 0.0, y });
+            y += data_h + gap;
+        }
+        if info.occupants.len() > HOVER_MAX_OCCUPANTS {
+            let more = tree.insert(
+                panel,
+                Widget::Label {
+                    text: format!("+{} more", info.occupants.len() - HOVER_MAX_OCCUPANTS),
+                    color: theme.disabled,
+                    font_size: theme.font_data_size,
+                    font_family: theme.font_data_family,
+                },
+            );
+            tree.set_position(more, Position::Fixed { x: 0.0, y });
+            y += data_h + gap;
+        }
+        if let Some(ref suffix) = info.occupant_year_suffix {
+            let yr = tree.insert(
+                panel,
+                Widget::Label {
+                    text: suffix.clone(),
+                    color: theme.disabled,
+                    font_size: theme.font_data_size,
+                    font_family: theme.font_data_family,
+                },
+            );
+            tree.set_position(yr, Position::Fixed { x: 0.0, y });
+            // y += data_h + gap; // last line, no trailing gap needed
+        }
+    }
+
+    // Entities section
+    if !info.entities.is_empty() {
+        for (icon, name) in &info.entities {
+            let ent = tree.insert(
+                panel,
+                Widget::RichText {
+                    spans: vec![
+                        TextSpan {
+                            text: format!("{} ", icon),
+                            color: theme.gold,
+                            font_family: FontFamily::Mono,
+                        },
+                        TextSpan {
+                            text: name.clone(),
+                            color: theme.text_light,
+                            font_family: FontFamily::Mono,
+                        },
+                    ],
+                    font_size: theme.font_data_size,
+                },
+            );
+            tree.set_position(ent, Position::Fixed { x: 0.0, y });
+            y += data_h + gap;
+        }
+    }
+
+    // Position: below-right of cursor, edge-flip if clipping screen.
+    let measured = tree.measure_node(panel, line_height);
+    let tooltip_w = measured.width + theme.tooltip_padding * 2.0;
+    let tooltip_h = measured.height + theme.tooltip_padding * 2.0;
+
+    let (tx, ty) = UiState::compute_tooltip_position(
+        cursor,
+        Size {
+            width: tooltip_w,
+            height: tooltip_h,
+        },
+        screen,
+        0,
+        theme,
+    );
+    tree.set_position(panel, Position::Fixed { x: tx, y: ty });
+
+    panel
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1971,5 +2190,203 @@ mod tests {
 
         // No plain text commands (only rich text).
         assert_eq!(dl.texts.len(), 0);
+    }
+
+    // ------------------------------------------------------------------
+    // Hover tooltip tests (UI-I01b)
+    // ------------------------------------------------------------------
+
+    fn screen() -> Size {
+        Size {
+            width: 800.0,
+            height: 600.0,
+        }
+    }
+
+    /// Helper: build a minimal HoverInfo with just terrain.
+    fn hover_terrain_only() -> HoverInfo {
+        HoverInfo {
+            tile_x: 100,
+            tile_y: 200,
+            terrain: "Road".into(),
+            quartier: None,
+            address: None,
+            building_name: None,
+            occupants: Vec::new(),
+            occupant_year_suffix: None,
+            entities: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn hover_tooltip_terrain_only() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let info = hover_terrain_only();
+        let tip = build_hover_tooltip(&mut tree, &theme, &info, (100.0, 100.0), screen(), 14.0);
+
+        // One root: the tooltip panel.
+        assert_eq!(tree.roots().len(), 1);
+        assert_eq!(tree.roots()[0], tip);
+
+        // Panel has one child: the coordinates + terrain RichText.
+        let node = tree.get(tip).expect("tooltip panel");
+        assert_eq!(node.children.len(), 1);
+        if let Widget::Panel { bg_color, .. } = &node.widget {
+            assert_eq!(*bg_color, theme.tooltip_bg_color);
+        } else {
+            panic!("tooltip root should be a Panel");
+        }
+
+        // Child is RichText with coords and terrain.
+        let child = tree.get(node.children[0]).expect("child");
+        if let Widget::RichText { spans, font_size } = &child.widget {
+            assert!((font_size - theme.font_data_size).abs() < 0.01);
+            assert_eq!(spans.len(), 2);
+            assert_eq!(spans[0].text, "(100, 200)");
+            assert_eq!(spans[0].color, theme.gold);
+            assert!(spans[1].text.contains("Road"));
+            assert_eq!(spans[1].color, theme.text_light);
+        } else {
+            panic!("expected RichText");
+        }
+    }
+
+    #[test]
+    fn hover_tooltip_full_building() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let info = HoverInfo {
+            tile_x: 42,
+            tile_y: 99,
+            terrain: "Floor".into(),
+            quartier: Some("Marais".into()),
+            address: Some("42 Rue de Rivoli".into()),
+            building_name: Some("Boulangerie".into()),
+            occupants: vec![
+                ("Jean Dupont".into(), "flour merchant".into()),
+                ("Marie".into(), "baker".into()),
+            ],
+            occupant_year_suffix: None,
+            entities: vec![('g', "Goblin".into())],
+        };
+        let tip = build_hover_tooltip(&mut tree, &theme, &info, (200.0, 200.0), screen(), 14.0);
+
+        let node = tree.get(tip).expect("panel");
+        // Children: coords(1) + quartier(1) + address(1) + 2 occupants(2) + 1 entity(1) = 6
+        assert_eq!(node.children.len(), 6);
+    }
+
+    #[test]
+    fn hover_tooltip_occupant_truncation() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let info = HoverInfo {
+            tile_x: 0,
+            tile_y: 0,
+            terrain: "Floor".into(),
+            quartier: None,
+            address: Some("1 Rue X".into()),
+            building_name: None,
+            occupants: (0..8)
+                .map(|i| (format!("Person {}", i), "trade".into()))
+                .collect(),
+            occupant_year_suffix: Some("[1842]".into()),
+            entities: Vec::new(),
+        };
+        let tip = build_hover_tooltip(&mut tree, &theme, &info, (50.0, 50.0), screen(), 14.0);
+
+        let node = tree.get(tip).expect("panel");
+        // Children: coords(1) + address(1) + 5 occupants(5) + "+3 more"(1) + year(1) = 9
+        assert_eq!(node.children.len(), 9);
+
+        // Verify "+3 more" label exists.
+        let mut dl = DrawList::new();
+        tree.layout(screen(), 14.0);
+        tree.draw(&mut dl);
+        let has_more = dl.texts.iter().any(|t| t.text == "+3 more");
+        assert!(has_more, "should show +3 more for 8 occupants (max 5)");
+    }
+
+    #[test]
+    fn hover_tooltip_entities_shown() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let info = HoverInfo {
+            tile_x: 10,
+            tile_y: 20,
+            terrain: "Road".into(),
+            quartier: None,
+            address: None,
+            building_name: None,
+            occupants: Vec::new(),
+            occupant_year_suffix: None,
+            entities: vec![('g', "Goblin".into()), ('w', "Wolf".into())],
+        };
+        let tip = build_hover_tooltip(&mut tree, &theme, &info, (100.0, 100.0), screen(), 14.0);
+
+        let node = tree.get(tip).expect("panel");
+        // coords(1) + 2 entities(2) = 3
+        assert_eq!(node.children.len(), 3);
+
+        tree.layout(screen(), 14.0);
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        // Entity entries are RichText with icon + name spans.
+        let entity_rts: Vec<_> = dl
+            .rich_texts
+            .iter()
+            .filter(|rt| rt.spans.len() == 2 && rt.spans[0].text.starts_with('g'))
+            .collect();
+        assert_eq!(entity_rts.len(), 1);
+        assert_eq!(entity_rts[0].spans[1].text, "Goblin");
+    }
+
+    #[test]
+    fn hover_tooltip_draw_output() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let info = hover_terrain_only();
+        build_hover_tooltip(&mut tree, &theme, &info, (100.0, 100.0), screen(), 14.0);
+
+        tree.layout(screen(), 14.0);
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        // One panel (tooltip background).
+        assert_eq!(dl.panels.len(), 1);
+        assert_eq!(dl.panels[0].bg_color, theme.tooltip_bg_color);
+        assert_eq!(dl.panels[0].border_color, theme.tooltip_border_color);
+
+        // One rich text (coords + terrain).
+        assert_eq!(dl.rich_texts.len(), 1);
+        assert_eq!(dl.rich_texts[0].spans.len(), 2);
+        assert!(dl.rich_texts[0].spans[0].text.contains("100"));
+    }
+
+    #[test]
+    fn hover_tooltip_positioned_on_screen() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let info = hover_terrain_only();
+        let tip = build_hover_tooltip(&mut tree, &theme, &info, (750.0, 550.0), screen(), 14.0);
+
+        tree.layout(screen(), 14.0);
+        let rect = tree.node_rect(tip).expect("rect");
+
+        // Tooltip should be fully on screen (edge-flipped if necessary).
+        assert!(rect.x >= 0.0, "x={} should be >= 0", rect.x);
+        assert!(rect.y >= 0.0, "y={} should be >= 0", rect.y);
+        assert!(
+            rect.x + rect.width <= 800.0,
+            "right edge {} should be <= 800",
+            rect.x + rect.width
+        );
+        assert!(
+            rect.y + rect.height <= 600.0,
+            "bottom edge {} should be <= 600",
+            rect.y + rect.height
+        );
     }
 }

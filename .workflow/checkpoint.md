@@ -4,27 +4,29 @@
 None
 
 ## Completed
-UI-I01a — Status bar — COMPLETE
+UI-I01b — Hover tooltip — COMPLETE
 
-- `build_status_bar()` in `src/ui/mod.rs`: builds Panel + RichText with tick, population, mode, optional player name
-- 3 theme constants in `theme.rs`: `status_bar_bg`, `status_bar_padding_h`, `status_bar_padding_v`
-- `node_rect()` method on WidgetTree for reading computed layout rect
-- `ui_theme: ui::Theme` stored on App struct for per-frame rebuilds
-- Render loop: rebuilds ui_tree every frame (DD-5), status bar height drives map viewport layout
-- Removed `render_status()` string rendering from main loop (function kept with `#[allow(dead_code)]`)
-- Screen layout: status_bar_h + padding gap + map + hover + events (3 padding gaps, down from 4)
-- 4 new tests: structure, turn-based+player, full-width layout, draw output
-- All 487 tests pass, zero warnings
+- `build_hover_tooltip()` in `src/ui/mod.rs`: builds tooltip-styled Panel with rich text for terrain, quartier, address/building, occupants, entities
+- `HoverInfo` struct in `src/ui/mod.rs`: decoupled data carrier (extracted from World in main.rs, consumed by UI builder)
+- `collect_hover_info()` in `src/main.rs`: extracts structured data from World for the hovered tile
+- Tooltip styled like W04 (tooltip_bg_color, border, shadow, padding from Theme)
+- Positioned near cursor with edge-flipping via `UiState::compute_tooltip_position` (made pub(crate))
+- Occupant display capped at 5 with "+N more" overflow
+- Entity display: icon (gold) + name for alive entities on the tile
+- Hover line removed from screen layout — map viewport gained 1 line of height
+- Tree re-laid out after tooltip insertion (2 layout passes per frame)
+- `render_hover_info` marked `#[allow(dead_code)]` (kept as reference)
+- 6 new tests: terrain-only, full building, occupant truncation, entity display, draw output, screen positioning
+- All 268 tests pass, zero warnings
 
 ## Files Modified
-- src/ui/mod.rs (build_status_bar, node_rect, 4 tests)
-- src/ui/theme.rs (3 status bar constants)
-- src/main.rs (ui_theme on App, status bar rebuild in render loop, layout adjustments)
-- src/render.rs (#[allow(dead_code)] on render_status)
+- src/ui/mod.rs (HoverInfo, build_hover_tooltip, 6 tests)
+- src/ui/input.rs (pub(crate) compute_tooltip_position)
+- src/main.rs (collect_hover_info, tooltip integration, layout adjustments)
+- src/render.rs (#[allow(dead_code)] on render_hover_info)
 
 ## Next Action
 Pick next task from backlog. Unblocked candidates:
-- UI-I01b — Hover tooltip (needs W01+W04+R02, all done)
 - UI-I01c — Event log (needs W01+W03+R02, all done)
 - UI-I01d — Entity inspector (needs W01+W02+W03+R01, all done)
 - UI-I02 — Map overlay (needs P01+P03, both done)

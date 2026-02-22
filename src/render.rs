@@ -11,6 +11,8 @@ use crate::world::World;
 /// Returns `"---"` if coords are out of bounds.
 ///
 /// This function is READ-ONLY and does not modify world state.
+/// Superseded by `ui::build_hover_tooltip` widget (UI-I01b) but kept as reference.
+#[allow(dead_code)]
 pub fn render_hover_info(world: &World, tile_x: i32, tile_y: i32) -> String {
     if tile_x < 0 || tile_y < 0 {
         return "---".to_string();

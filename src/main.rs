@@ -218,6 +218,74 @@ fn run_one_tick(world: &mut World) {
     world.tick = Tick(tick.0 + 1);
 }
 
+/// Extract structured hover data from a map tile (UI-I01b).
+/// Returns None if coords are out of bounds or no terrain.
+fn collect_hover_info(world: &World, tile_x: i32, tile_y: i32) -> Option<ui::HoverInfo> {
+    if tile_x < 0 || tile_y < 0 {
+        return None;
+    }
+    let ux = tile_x as usize;
+    let uy = tile_y as usize;
+    let terrain = world.tiles.get_terrain(ux, uy)?;
+
+    let mut info = ui::HoverInfo {
+        tile_x,
+        tile_y,
+        terrain: format!("{:?}", terrain),
+        quartier: None,
+        address: None,
+        building_name: None,
+        occupants: Vec::new(),
+        occupant_year_suffix: None,
+        entities: Vec::new(),
+    };
+
+    // Quartier
+    if let Some(qid) = world.tiles.get_quartier_id(ux, uy)
+        && qid > 0
+        && let Some(name) = world.gis.quartier_names.get((qid - 1) as usize)
+    {
+        info.quartier = Some(name.clone());
+    }
+
+    // Building
+    if let Some(bid) = world.tiles.get_building_id(ux, uy)
+        && let Some(building) = world.gis.buildings.get(bid)
+    {
+        if let Some(a) = building.addresses.first() {
+            info.address = Some(format!("{} {}", a.house_number, a.street_name));
+        }
+        info.building_name = building.nom_bati.clone();
+
+        if let Some((year, occupants)) = building.occupants_nearest(world.gis.active_year, 20) {
+            info.occupants = occupants
+                .iter()
+                .map(|o| (o.name.clone(), o.activity.clone()))
+                .collect();
+            if year != world.gis.active_year {
+                info.occupant_year_suffix = Some(format!("[{}]", year));
+            }
+        }
+    }
+
+    // Entities on this tile
+    for (&entity, pos) in &world.body.positions {
+        if pos.x == tile_x && pos.y == tile_y && world.alive.contains(&entity) {
+            let name = world
+                .body
+                .names
+                .get(&entity)
+                .map(|n| n.value.clone())
+                .unwrap_or_else(|| format!("E{}", entity.0));
+            let icon = world.body.icons.get(&entity).map(|i| i.ch).unwrap_or('?');
+            info.entities.push((icon, name));
+        }
+    }
+    info.entities.sort_by(|a, b| a.1.cmp(&b.1));
+
+    Some(info)
+}
+
 struct App {
     gpu: Option<GpuState>,
     font: Option<font::FontRenderer>,
@@ -567,15 +635,14 @@ impl ApplicationHandler for App {
                                 .map(|r| r.height)
                                 .unwrap_or(m.line_height);
 
-                            // Screen layout: status bar | gap | map | hover | gap | events | gap
+                            // Screen layout: status bar | gap | map | gap | events | gap
+                            // Hover tooltip is an overlay (positioned at cursor), not a fixed row.
                             let event_lines = 5_usize;
-                            let hover_lines = 1_usize;
                             let event_h = event_lines as f32 * m.line_height;
-                            let hover_h = hover_lines as f32 * m.line_height;
                             let (mcw, mch) = font.map_cell();
                             let map_y = status_bar_h + padding;
                             let map_pixel_h =
-                                screen_h as f32 - status_bar_h - event_h - hover_h - padding * 3.0;
+                                screen_h as f32 - status_bar_h - event_h - padding * 3.0;
                             let map_pixel_w = screen_w as f32 - padding * 2.0;
 
                             let viewport_cols = (map_pixel_w / mcw).floor().max(1.0) as usize;
@@ -601,8 +668,8 @@ impl ApplicationHandler for App {
                             self.camera.x = self.camera.x.clamp(0, max_cam_x);
                             self.camera.y = self.camera.y.clamp(0, max_cam_y);
 
-                            // Compute hovered tile from cursor position
-                            let hover_text = {
+                            // Build hover tooltip if cursor is over a map tile (UI-I01b).
+                            {
                                 let px = self.cursor_pos.x as f32;
                                 let py = self.cursor_pos.y as f32;
                                 let vx = (px - self.map_origin.0) / self.map_cell_w;
@@ -614,11 +681,23 @@ impl ApplicationHandler for App {
                                 {
                                     let tile_x = self.camera.x + vx as i32;
                                     let tile_y = self.camera.y + vy as i32;
-                                    render::render_hover_info(&self.world, tile_x, tile_y)
-                                } else {
-                                    "---".to_string()
+                                    if let Some(info) =
+                                        collect_hover_info(&self.world, tile_x, tile_y)
+                                    {
+                                        ui::build_hover_tooltip(
+                                            &mut self.ui_tree,
+                                            &self.ui_theme,
+                                            &info,
+                                            (px, py),
+                                            screen_size,
+                                            m.line_height,
+                                        );
+                                    }
                                 }
-                            };
+                            }
+
+                            // Re-layout tree with hover tooltip included.
+                            self.ui_tree.layout(screen_size, m.line_height);
 
                             let map_text = render::render_world_to_string(
                                 &self.world,
@@ -671,11 +750,10 @@ impl ApplicationHandler for App {
                                     .collect();
                                 font.prepare_rich_text(&spans, cmd.x, cmd.y, cmd.font_size);
                             }
-                            // Map, hover, and events still use string-based rendering.
+                            // Map and events still use string-based rendering.
+                            // Hover tooltip is now a widget (UI-I01b).
                             let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
                             font.prepare_map(&map_text, padding, map_y, fg4);
-                            let hover_y = map_y + viewport_rows as f32 * mch;
-                            font.prepare_text(&hover_text, padding, hover_y, fg4);
                             let event_y = screen_h as f32 - event_h - padding;
                             font.prepare_text(&events, padding, event_y, fg4);
 
