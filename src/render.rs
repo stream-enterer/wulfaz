@@ -224,6 +224,10 @@ pub fn render_status(world: &World) -> String {
 /// Uses a friendlier format without tick brackets.
 ///
 /// This function is READ-ONLY and does not modify world state.
+///
+/// Superseded by widget-based `ui::build_event_log()` (UI-I01c).
+/// Kept as reference for the event formatting logic.
+#[allow(dead_code)]
 pub fn render_recent_events(world: &World, count: usize) -> String {
     if world.events.is_empty() {
         return String::new();

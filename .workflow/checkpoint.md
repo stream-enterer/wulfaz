@@ -4,29 +4,27 @@
 None
 
 ## Completed
-UI-I01b — Hover tooltip — COMPLETE
+UI-I01c — Event log panel — COMPLETE
 
-- `build_hover_tooltip()` in `src/ui/mod.rs`: builds tooltip-styled Panel with rich text for terrain, quartier, address/building, occupants, entities
-- `HoverInfo` struct in `src/ui/mod.rs`: decoupled data carrier (extracted from World in main.rs, consumed by UI builder)
-- `collect_hover_info()` in `src/main.rs`: extracts structured data from World for the hovered tile
-- Tooltip styled like W04 (tooltip_bg_color, border, shadow, padding from Theme)
-- Positioned near cursor with edge-flipping via `UiState::compute_tooltip_position` (made pub(crate))
-- Occupant display capped at 5 with "+N more" overflow
-- Entity display: icon (gold) + name for alive entities on the tile
-- Hover line removed from screen layout — map viewport gained 1 line of height
-- Tree re-laid out after tooltip insertion (2 layout passes per frame)
-- `render_hover_info` marked `#[allow(dead_code)]` (kept as reference)
-- 6 new tests: terrain-only, full building, occupant truncation, entity display, draw output, screen positioning
-- All 268 tests pass, zero warnings
+- `EventLogEntry` enum in `src/ui/mod.rs`: Spawned/Died/Ate/Attacked variants (decoupled data carrier)
+- `build_event_log()` in `src/ui/mod.rs`: builds ScrollList with RichText children, auto-scrolls to bottom
+- `collect_event_entries()` in `src/ui/mod.rs`: extracts significant events from EventLog + names table
+- Filters to significant events (Spawned/Died/Ate/Attacked), skips Moved/HungerChanged
+- Themed colors: text_light for names, danger for death/damage, gold for food, disabled for verbs
+- Chrome panel at bottom of screen, full width, fixed height (5 visible items × scroll_item_height)
+- Auto-scroll to newest events (computes max offset at build time)
+- Replaces string-based `render_recent_events()` and `font.prepare_text()` calls
+- `render_recent_events` and `font.prepare_text` marked `#[allow(dead_code)]`
+- 8 new tests: empty, spawned, died, ate, attacked, auto-scroll, draw output, sizing
+- All 501 tests pass, zero warnings
 
 ## Files Modified
-- src/ui/mod.rs (HoverInfo, build_hover_tooltip, 6 tests)
-- src/ui/input.rs (pub(crate) compute_tooltip_position)
-- src/main.rs (collect_hover_info, tooltip integration, layout adjustments)
-- src/render.rs (#[allow(dead_code)] on render_hover_info)
+- src/ui/mod.rs (EventLogEntry, build_event_log, collect_event_entries, 8 tests)
+- src/main.rs (event log integration, removed string-based event rendering)
+- src/render.rs (#[allow(dead_code)] on render_recent_events)
+- src/font.rs (#[allow(dead_code)] on prepare_text)
 
 ## Next Action
 Pick next task from backlog. Unblocked candidates:
-- UI-I01c — Event log (needs W01+W03+R02, all done)
 - UI-I01d — Entity inspector (needs W01+W02+W03+R01, all done)
 - UI-I02 — Map overlay (needs P01+P03, both done)

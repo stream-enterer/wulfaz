@@ -131,11 +131,11 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 | 1 — Foundation | COMPLETE | Colored text + panel backgrounds + widget tree |
 | 2 — Styled Panels | COMPLETE | Theme + mouse input |
 | 3 — Full Widget Set | COMPLETE | Rich text + scroll list + tooltips |
-| 4 — Game Integration | 3 (I01c-d + I02) | Real game UI replaces string rendering |
+| 4 — Game Integration | 2 (I01d + I02) | Real game UI replaces string rendering |
 | 5 — Polish | 2 | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-6 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+5 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -218,12 +218,6 @@ Sub-panels ordered simplest to most complex — each proves more of the pipeline
 - `UiState` struct on `App` (not on `World` — UI is not simulation state)
 
 **UI-DEMO after Tier 4:** Retired — the game itself is the demo. The showcase code remains as a developer reference panel (F11), but the live game UI with status bar, inspector, event log, tooltip, and map overlays is the real verification.
-
-- **UI-I01c** — Event log. Needs: UI-W01, UI-W03, UI-R02.
-  - Bottom of screen, scrollable via ScrollList (UI-W03). Live feed from `world.events.recent(n)`.
-  - Chrome panel (permanent, per DD-5). Rebuild every frame.
-  - Tests ScrollList with live data feed — new events push items, virtual scrolling keeps it responsive.
-  - Replaces current `render::render_recent_events()`.
 
 - **UI-I01d** — Entity inspector. Needs: UI-W01, UI-W02, UI-W03, UI-R01.
   - Side panel on entity click: name, occupation, needs bars, inventory list.

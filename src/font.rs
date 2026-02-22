@@ -456,6 +456,8 @@ impl FontRenderer {
 
     /// Append text vertices using cosmic-text shaping (for status/event log).
     /// Uses the default mono font at base size.
+    /// Superseded by widget-based rich text rendering (UI-I01a/c).
+    #[allow(dead_code)]
     pub fn prepare_text(&mut self, text: &str, x: f32, y: f32, color: [f32; 4]) {
         self.prepare_text_shaped(text, x, y, color, "Libertinus Mono", self.font_size_px);
     }

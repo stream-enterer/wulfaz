@@ -635,14 +635,38 @@ impl ApplicationHandler for App {
                                 .map(|r| r.height)
                                 .unwrap_or(m.line_height);
 
-                            // Screen layout: status bar | gap | map | gap | events | gap
+                            // Screen layout: status bar | gap | map | gap | event log | gap
                             // Hover tooltip is an overlay (positioned at cursor), not a fixed row.
-                            let event_lines = 5_usize;
-                            let event_h = event_lines as f32 * m.line_height;
+                            let event_log_visible = 5_usize;
+                            let event_log_h = event_log_visible as f32
+                                * self.ui_theme.scroll_item_height
+                                + self.ui_theme.status_bar_padding_v * 2.0;
+
+                            // Build event log panel (UI-I01c).
+                            let event_entries = ui::collect_event_entries(
+                                &self.world.events,
+                                &self.world.body.names,
+                            );
+                            let event_log_id = ui::build_event_log(
+                                &mut self.ui_tree,
+                                &self.ui_theme,
+                                &event_entries,
+                                screen_w as f32,
+                                event_log_h,
+                            );
+                            let event_log_y = screen_h as f32 - event_log_h - padding;
+                            self.ui_tree.set_position(
+                                event_log_id,
+                                ui::Position::Fixed {
+                                    x: 0.0,
+                                    y: event_log_y,
+                                },
+                            );
+
                             let (mcw, mch) = font.map_cell();
                             let map_y = status_bar_h + padding;
                             let map_pixel_h =
-                                screen_h as f32 - status_bar_h - event_h - padding * 3.0;
+                                screen_h as f32 - status_bar_h - event_log_h - padding * 3.0;
                             let map_pixel_w = screen_w as f32 - padding * 2.0;
 
                             let viewport_cols = (map_pixel_w / mcw).floor().max(1.0) as usize;
@@ -706,7 +730,6 @@ impl ApplicationHandler for App {
                                 viewport_cols,
                                 viewport_rows,
                             );
-                            let events = render::render_recent_events(&self.world, event_lines);
 
                             // Emit draw commands from UI tree.
                             let mut draw_list = ui::DrawList::new();
@@ -750,12 +773,10 @@ impl ApplicationHandler for App {
                                     .collect();
                                 font.prepare_rich_text(&spans, cmd.x, cmd.y, cmd.font_size);
                             }
-                            // Map and events still use string-based rendering.
-                            // Hover tooltip is now a widget (UI-I01b).
+                            // Map still uses string-based rendering.
+                            // Status bar, hover tooltip, and event log are widgets.
                             let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
                             font.prepare_map(&map_text, padding, map_y, fg4);
-                            let event_y = screen_h as f32 - event_h - padding;
-                            font.prepare_text(&events, padding, event_y, fg4);
 
                             let text_vertex_count = font.flush(&gpu.queue, &gpu.device);
                             gpu.render(panel, panel_vertex_count, font, text_vertex_count);
