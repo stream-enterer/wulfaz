@@ -51,6 +51,14 @@ pub struct Theme {
     pub button_pad_h: f32,
     /// Button internal vertical padding in pixels.
     pub button_pad_v: f32,
+
+    // -- ScrollList defaults --
+    /// Scrollbar thumb width in pixels.
+    pub scrollbar_width: f32,
+    /// Scrollbar thumb color (sRGB RGBA).
+    pub scrollbar_color: [f32; 4],
+    /// Default scroll list item height in pixels.
+    pub scroll_item_height: f32,
 }
 
 /// Convert a hex color (#RRGGBB) to sRGB [f32; 4] with alpha 1.0.
@@ -92,6 +100,11 @@ impl Default for Theme {
             label_gap: 4.0,
             button_pad_h: 8.0,
             button_pad_v: 4.0,
+
+            // ScrollList defaults
+            scrollbar_width: 6.0,
+            scrollbar_color: hex_a(0xC8, 0xA8, 0x50, 0.5), // gold at 50% alpha
+            scroll_item_height: 20.0,                      // pixels
         }
     }
 }

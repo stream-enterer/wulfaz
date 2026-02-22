@@ -37,4 +37,17 @@ pub enum Widget {
         spans: Vec<TextSpan>,
         font_size: f32, // pixels — shared across all spans
     },
+
+    /// Scrollable vertical list with virtual scrolling (UI-W03).
+    /// Children are laid out vertically, each at `item_height` pixels tall.
+    /// Only children within the visible viewport are measured/drawn.
+    ScrollList {
+        bg_color: [f32; 4],        // background sRGB RGBA
+        border_color: [f32; 4],    // border sRGB RGBA
+        border_width: f32,         // pixels
+        item_height: f32,          // fixed height per child item (pixels)
+        scroll_offset: f32,        // scroll position (pixels from top, 0 = top)
+        scrollbar_color: [f32; 4], // scrollbar thumb sRGB RGBA
+        scrollbar_width: f32,      // scrollbar track width (pixels)
+    },
 }

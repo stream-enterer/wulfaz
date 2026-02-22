@@ -29,6 +29,18 @@ pub enum UiEvent {
 /// Minimum pixel distance before a press becomes a drag.
 const DRAG_THRESHOLD: f32 = 4.0;
 
+/// Pixels scrolled per mouse wheel line.
+const SCROLL_SPEED: f32 = 40.0;
+
+/// Active scrollbar thumb drag state.
+struct ScrollDrag {
+    widget: WidgetId,
+    start_mouse_y: f32,
+    start_scroll_offset: f32,
+    content_height: f32,
+    viewport_height: f32,
+}
+
 /// Interaction state for the widget system. Lives on App, not World.
 pub struct UiState {
     /// Widget currently under the cursor.
@@ -49,6 +61,8 @@ pub struct UiState {
     dragging: bool,
     /// Last known cursor position (screen coords).
     pub cursor: (f32, f32),
+    /// Active scrollbar drag (if user is dragging a scrollbar thumb).
+    scroll_drag: Option<ScrollDrag>,
 }
 
 impl UiState {
@@ -62,13 +76,30 @@ impl UiState {
             press_origin: None,
             dragging: false,
             cursor: (0.0, 0.0),
+            scroll_drag: None,
         }
     }
 
     /// Handle cursor movement. Returns true if the cursor is over a UI widget
     /// (event consumed — don't pass to game).
-    pub fn handle_cursor_moved(&mut self, tree: &WidgetTree, x: f32, y: f32) -> bool {
+    pub fn handle_cursor_moved(&mut self, tree: &mut WidgetTree, x: f32, y: f32) -> bool {
         self.cursor = (x, y);
+
+        // Active scrollbar drag — update scroll offset from mouse position.
+        if let Some(ref drag) = self.scroll_drag {
+            let delta_y = y - drag.start_mouse_y;
+            let thumb_h = (drag.viewport_height * drag.viewport_height / drag.content_height)
+                .max(WidgetTree::MIN_THUMB_HEIGHT);
+            let available_track = drag.viewport_height - thumb_h;
+            if available_track > 0.0 {
+                let max_scroll = drag.content_height - drag.viewport_height;
+                let new_offset = drag.start_scroll_offset + delta_y * max_scroll / available_track;
+                let widget_id = drag.widget;
+                tree.set_scroll_offset(widget_id, new_offset);
+            }
+            self.hovered = tree.hit_test(x, y);
+            return true;
+        }
 
         // If a widget has capture, route drag events to it.
         if self.captured.is_some() {
@@ -77,7 +108,6 @@ impl UiState {
                 let dy = y - origin.1;
                 if !self.dragging && (dx * dx + dy * dy).sqrt() >= DRAG_THRESHOLD {
                     self.dragging = true;
-                    // DragStart event (widget can react when callbacks are added)
                     let _ = UiEvent::DragStart {
                         x: origin.0,
                         y: origin.1,
@@ -87,8 +117,6 @@ impl UiState {
                     let _ = UiEvent::DragMove { x, y };
                 }
             }
-            // Cursor is captured — update hover to whatever is under cursor
-            // but the capture still holds.
             self.hovered = tree.hit_test(x, y);
             return true;
         }
@@ -101,7 +129,7 @@ impl UiState {
     /// Handle mouse button press/release. Returns true if consumed by UI.
     pub fn handle_mouse_input(
         &mut self,
-        tree: &WidgetTree,
+        tree: &mut WidgetTree,
         button: MouseButton,
         pressed: bool,
         x: f32,
@@ -112,7 +140,6 @@ impl UiState {
         if pressed {
             // Mouse down
             let hit = if let Some(cap) = self.captured {
-                // Captured widget gets the event regardless of position.
                 Some(cap)
             } else {
                 tree.hit_test(x, y)
@@ -124,15 +151,26 @@ impl UiState {
                 self.press_origin = Some((x, y));
                 self.dragging = false;
 
-                // Left click sets focus to the clicked widget (if focusable).
+                // Check if clicking on a ScrollList's scrollbar area.
+                if button == MouseButton::Left
+                    && let Some(scroll_drag) = Self::try_start_scrollbar_drag(tree, widget_id, x, y)
+                {
+                    self.scroll_drag = Some(scroll_drag);
+                    self.captured = Some(widget_id);
+                    return true;
+                }
+
+                // Left click sets focus (Buttons and ScrollLists).
                 if button == MouseButton::Left
                     && let Some(node) = tree.get(widget_id)
-                    && matches!(node.widget, Widget::Button { .. })
+                    && matches!(
+                        node.widget,
+                        Widget::Button { .. } | Widget::ScrollList { .. }
+                    )
                 {
                     self.focused = Some(widget_id);
                 }
 
-                // Start capture (for drag support).
                 self.captured = Some(widget_id);
                 return true;
             }
@@ -147,15 +185,16 @@ impl UiState {
         let was_button = self.pressed_button.take();
         let was_captured = self.captured.take();
         let was_dragging = self.dragging;
+        let was_scrollbar_drag = self.scroll_drag.take().is_some();
         self.press_origin = None;
         self.dragging = false;
 
         if was_captured.is_some() {
-            if was_dragging {
-                // Drag ended.
+            if was_scrollbar_drag {
+                // Scrollbar drag ended — already handled.
+            } else if was_dragging {
                 let _ = UiEvent::DragEnd;
             } else if let Some(pressed_id) = was_pressed {
-                // Not a drag — check if release is on the same widget for a click.
                 let release_hit = tree.hit_test(x, y);
                 if release_hit == Some(pressed_id)
                     && let Some(btn) = was_button
@@ -172,7 +211,7 @@ impl UiState {
     /// Handle keyboard input. Returns true if consumed by a focused widget.
     pub fn handle_key_input(
         &mut self,
-        tree: &WidgetTree,
+        tree: &mut WidgetTree,
         key: winit::keyboard::KeyCode,
         pressed: bool,
     ) -> bool {
@@ -180,8 +219,10 @@ impl UiState {
             return self.focused.is_some();
         }
 
+        use winit::keyboard::KeyCode;
+
         // Tab cycles focus through focusable widgets.
-        if key == winit::keyboard::KeyCode::Tab {
+        if key == KeyCode::Tab {
             let focusable = tree.focusable_widgets();
             if focusable.is_empty() {
                 self.focused = None;
@@ -200,18 +241,116 @@ impl UiState {
             return true;
         }
 
+        // ScrollList keyboard navigation.
+        if let Some(focused_id) = self.focused
+            && let Some(node) = tree.get(focused_id)
+            && let Widget::ScrollList { item_height, .. } = &node.widget
+        {
+            let ih = *item_height;
+            let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
+
+            match key {
+                KeyCode::ArrowUp => {
+                    tree.scroll_by(focused_id, -ih);
+                    return true;
+                }
+                KeyCode::ArrowDown => {
+                    tree.scroll_by(focused_id, ih);
+                    return true;
+                }
+                KeyCode::PageUp => {
+                    tree.scroll_by(focused_id, -viewport_h);
+                    return true;
+                }
+                KeyCode::PageDown => {
+                    tree.scroll_by(focused_id, viewport_h);
+                    return true;
+                }
+                KeyCode::Home => {
+                    tree.set_scroll_offset(focused_id, 0.0);
+                    return true;
+                }
+                KeyCode::End => {
+                    let max = tree.max_scroll(focused_id);
+                    tree.set_scroll_offset(focused_id, max);
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
         // Other keys go to focused widget (if any).
         self.focused.is_some()
     }
 
     /// Handle scroll wheel. Returns true if consumed by a widget under cursor.
-    pub fn handle_scroll(&mut self, tree: &WidgetTree, delta: f32) -> bool {
+    pub fn handle_scroll(&mut self, tree: &mut WidgetTree, delta: f32) -> bool {
         let hit = tree.hit_test(self.cursor.0, self.cursor.1);
-        if hit.is_some() {
+        if let Some(widget_id) = hit {
+            // Walk up to find nearest ScrollList ancestor (or self).
+            if let Some(scroll_id) = Self::find_scroll_list_ancestor(tree, widget_id) {
+                tree.scroll_by(scroll_id, delta * SCROLL_SPEED);
+                return true;
+            }
             let _ = UiEvent::Scroll(delta);
             return true;
         }
         false
+    }
+
+    /// Walk from `start` up the parent chain to find a ScrollList widget.
+    fn find_scroll_list_ancestor(tree: &WidgetTree, start: WidgetId) -> Option<WidgetId> {
+        let mut current = Some(start);
+        while let Some(id) = current {
+            let node = tree.get(id)?;
+            if matches!(node.widget, Widget::ScrollList { .. }) {
+                return Some(id);
+            }
+            current = node.parent;
+        }
+        None
+    }
+
+    /// Check if a mouse press at (x, y) is on a ScrollList's scrollbar area.
+    /// If so, return a ScrollDrag to begin scrollbar dragging.
+    fn try_start_scrollbar_drag(
+        tree: &WidgetTree,
+        widget_id: WidgetId,
+        x: f32,
+        y: f32,
+    ) -> Option<ScrollDrag> {
+        let node = tree.get(widget_id)?;
+        let Widget::ScrollList {
+            item_height,
+            scroll_offset,
+            scrollbar_width,
+            ..
+        } = &node.widget
+        else {
+            return None;
+        };
+
+        let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
+        let total_h = node.children.len() as f32 * item_height;
+
+        // No scrollbar if content fits.
+        if total_h <= viewport_h {
+            return None;
+        }
+
+        // Check if click is in the scrollbar area (rightmost scrollbar_width pixels).
+        let sb_x = node.rect.x + node.rect.width - scrollbar_width - node.padding.right;
+        if x >= sb_x {
+            return Some(ScrollDrag {
+                widget: widget_id,
+                start_mouse_y: y,
+                start_scroll_offset: *scroll_offset,
+                content_height: total_h,
+                viewport_height: viewport_h,
+            });
+        }
+
+        None
     }
 }
 
@@ -317,24 +456,24 @@ mod tests {
 
     #[test]
     fn hover_tracking() {
-        let (tree, _panel, button) = tree_with_button();
+        let (mut tree, _panel, button) = tree_with_button();
         let btn_rect = tree.get(button).unwrap().rect;
         let mut state = UiState::new();
 
         // Move cursor over button.
-        let consumed = state.handle_cursor_moved(&tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        let consumed = state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
         assert!(consumed);
         assert_eq!(state.hovered, Some(button));
 
         // Move cursor outside all widgets.
-        let consumed = state.handle_cursor_moved(&tree, 0.0, 0.0);
+        let consumed = state.handle_cursor_moved(&mut tree, 0.0, 0.0);
         assert!(!consumed);
         assert_eq!(state.hovered, None);
     }
 
     #[test]
     fn click_sets_focus() {
-        let (tree, _, button) = tree_with_button();
+        let (mut tree, _, button) = tree_with_button();
         let btn_rect = tree.get(button).unwrap().rect;
         let mut state = UiState::new();
         let bx = btn_rect.x + 1.0;
@@ -343,32 +482,32 @@ mod tests {
         assert_eq!(state.focused, None);
 
         // Press on button.
-        let consumed = state.handle_mouse_input(&tree, MouseButton::Left, true, bx, by);
+        let consumed = state.handle_mouse_input(&mut tree, MouseButton::Left, true, bx, by);
         assert!(consumed);
         assert_eq!(state.focused, Some(button));
 
         // Release on button.
-        let consumed = state.handle_mouse_input(&tree, MouseButton::Left, false, bx, by);
+        let consumed = state.handle_mouse_input(&mut tree, MouseButton::Left, false, bx, by);
         assert!(consumed);
         assert_eq!(state.focused, Some(button));
     }
 
     #[test]
     fn click_outside_clears_focus() {
-        let (tree, _, button) = tree_with_button();
+        let (mut tree, _, button) = tree_with_button();
         let btn_rect = tree.get(button).unwrap().rect;
         let mut state = UiState::new();
 
         // Focus the button first.
         state.handle_mouse_input(
-            &tree,
+            &mut tree,
             MouseButton::Left,
             true,
             btn_rect.x + 1.0,
             btn_rect.y + 1.0,
         );
         state.handle_mouse_input(
-            &tree,
+            &mut tree,
             MouseButton::Left,
             false,
             btn_rect.x + 1.0,
@@ -377,64 +516,64 @@ mod tests {
         assert_eq!(state.focused, Some(button));
 
         // Click outside all widgets.
-        let consumed = state.handle_mouse_input(&tree, MouseButton::Left, true, 0.0, 0.0);
+        let consumed = state.handle_mouse_input(&mut tree, MouseButton::Left, true, 0.0, 0.0);
         assert!(!consumed);
         assert_eq!(state.focused, None);
     }
 
     #[test]
     fn tab_cycles_focus() {
-        let (tree, _, button) = tree_with_button();
+        let (mut tree, _, button) = tree_with_button();
         let mut state = UiState::new();
 
         // Tab with no focus — focuses first focusable.
-        let consumed = state.handle_key_input(&tree, winit::keyboard::KeyCode::Tab, true);
+        let consumed = state.handle_key_input(&mut tree, winit::keyboard::KeyCode::Tab, true);
         assert!(consumed);
         assert_eq!(state.focused, Some(button));
 
         // Tab again wraps around (only 1 button, so stays on it).
-        let consumed = state.handle_key_input(&tree, winit::keyboard::KeyCode::Tab, true);
+        let consumed = state.handle_key_input(&mut tree, winit::keyboard::KeyCode::Tab, true);
         assert!(consumed);
         assert_eq!(state.focused, Some(button));
     }
 
     #[test]
     fn mouse_capture_holds_during_drag() {
-        let (tree, _, button) = tree_with_button();
+        let (mut tree, _, button) = tree_with_button();
         let btn_rect = tree.get(button).unwrap().rect;
         let mut state = UiState::new();
         let bx = btn_rect.x + 1.0;
         let by = btn_rect.y + 1.0;
 
         // Press on button — starts capture.
-        state.handle_mouse_input(&tree, MouseButton::Left, true, bx, by);
+        state.handle_mouse_input(&mut tree, MouseButton::Left, true, bx, by);
         assert_eq!(state.captured, Some(button));
 
         // Move far away — capture holds.
-        state.handle_cursor_moved(&tree, 500.0, 500.0);
+        state.handle_cursor_moved(&mut tree, 500.0, 500.0);
         assert_eq!(state.captured, Some(button));
         assert!(state.dragging); // crossed threshold
 
         // Release — capture ends.
-        state.handle_mouse_input(&tree, MouseButton::Left, false, 500.0, 500.0);
+        state.handle_mouse_input(&mut tree, MouseButton::Left, false, 500.0, 500.0);
         assert_eq!(state.captured, None);
         assert!(!state.dragging);
     }
 
     #[test]
     fn scroll_consumed_over_widget() {
-        let (tree, panel, _) = tree_with_button();
+        let (mut tree, panel, _) = tree_with_button();
         let panel_rect = tree.get(panel).unwrap().rect;
         let mut state = UiState::new();
 
         // Position cursor over panel.
         state.cursor = (panel_rect.x + 1.0, panel_rect.y + 1.0);
-        let consumed = state.handle_scroll(&tree, 1.0);
+        let consumed = state.handle_scroll(&mut tree, 1.0);
         assert!(consumed);
 
         // Position cursor outside.
         state.cursor = (0.0, 0.0);
-        let consumed = state.handle_scroll(&tree, 1.0);
+        let consumed = state.handle_scroll(&mut tree, 1.0);
         assert!(!consumed);
     }
 }

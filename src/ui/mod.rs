@@ -365,7 +365,10 @@ impl WidgetTree {
 
     fn collect_focusable(&self, id: WidgetId, out: &mut Vec<WidgetId>) {
         if let Some(node) = self.arena.get(id) {
-            if matches!(node.widget, Widget::Button { .. }) {
+            if matches!(
+                node.widget,
+                Widget::Button { .. } | Widget::ScrollList { .. }
+            ) {
                 out.push(id);
             }
             for &child in &node.children {
@@ -436,6 +439,84 @@ impl WidgetTree {
             y: node.rect.y + node.padding.top,
             width: (node.rect.width - node.padding.horizontal()).max(0.0),
             height: (node.rect.height - node.padding.vertical()).max(0.0),
+        };
+
+        // ScrollList positions children in a vertical stack with virtual scrolling.
+        if let Widget::ScrollList {
+            item_height,
+            scroll_offset,
+            scrollbar_width,
+            ..
+        } = &node.widget
+        {
+            let ih = *item_height;
+            let so = *scroll_offset;
+            let sbw = *scrollbar_width;
+            let children: Vec<WidgetId> = node.children.clone();
+            let viewport_h = content.height;
+            let content_w = (content.width - sbw).max(0.0);
+
+            for (i, child_id) in children.iter().enumerate() {
+                let item_y = i as f32 * ih - so;
+
+                // Virtual scrolling: skip items outside viewport.
+                if item_y + ih < 0.0 || item_y >= viewport_h {
+                    if let Some(child_node) = self.arena.get_mut(*child_id) {
+                        child_node.rect = Rect::default();
+                        child_node.dirty = false;
+                    }
+                    continue;
+                }
+
+                // Layout visible item: set rect directly, then recurse for children.
+                self.layout_scroll_item(
+                    *child_id,
+                    content.x,
+                    content.y + item_y,
+                    content_w,
+                    ih,
+                    line_height,
+                );
+            }
+            return;
+        }
+
+        let children: Vec<WidgetId> = node.children.clone();
+        for child in children {
+            self.layout_node(child, content, line_height);
+        }
+    }
+
+    /// Layout a scroll list item: set its rect directly and recurse into its children.
+    fn layout_scroll_item(
+        &mut self,
+        id: WidgetId,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        line_height: f32,
+    ) {
+        let measured = self.measure_node(id, line_height);
+
+        let Some(node) = self.arena.get_mut(id) else {
+            return;
+        };
+        node.measured = measured;
+        node.rect = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
+        node.dirty = false;
+
+        // Content area for children (inside padding).
+        let content = Rect {
+            x: x + node.padding.left,
+            y: y + node.padding.top,
+            width: (width - node.padding.horizontal()).max(0.0),
+            height: (height - node.padding.vertical()).max(0.0),
         };
 
         let children: Vec<WidgetId> = node.children.clone();
@@ -513,6 +594,23 @@ impl WidgetTree {
                 Size {
                     width: max_w,
                     height: max_h,
+                }
+            }
+            Widget::ScrollList {
+                item_height,
+                scrollbar_width,
+                ..
+            } => {
+                // Total content height = items * item_height.
+                // Width = widest child + scrollbar.
+                let mut max_w: f32 = 0.0;
+                for &child_id in &node.children {
+                    let child_measured = self.measure_node(child_id, line_height);
+                    max_w = max_w.max(child_measured.width);
+                }
+                Size {
+                    width: max_w + scrollbar_width,
+                    height: node.children.len() as f32 * item_height,
                 }
             }
         }
@@ -604,12 +702,162 @@ impl WidgetTree {
                     font_size: *font_size,
                 });
             }
+            Widget::ScrollList {
+                bg_color,
+                border_color,
+                border_width,
+                item_height,
+                scroll_offset,
+                scrollbar_color,
+                scrollbar_width,
+            } => {
+                // Background panel.
+                draw_list.panels.push(PanelCommand {
+                    x: node.rect.x,
+                    y: node.rect.y,
+                    width: node.rect.width,
+                    height: node.rect.height,
+                    bg_color: *bg_color,
+                    border_color: *border_color,
+                    border_width: *border_width,
+                    shadow_width: 0.0,
+                });
+
+                let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
+                let total_h = node.children.len() as f32 * item_height;
+                let content_y = node.rect.y + node.padding.top;
+                let sb_w = *scrollbar_width;
+                let sb_color = *scrollbar_color;
+                let so = *scroll_offset;
+                let rect = node.rect;
+                let padding = node.padding;
+                let children: Vec<WidgetId> = node.children.clone();
+
+                // Draw only visible children (those with non-zero rects from layout).
+                for &child in &children {
+                    if let Some(cn) = self.arena.get(child)
+                        && cn.rect.width > 0.0
+                        && cn.rect.height > 0.0
+                    {
+                        self.draw_node(child, draw_list);
+                    }
+                }
+
+                // Scrollbar thumb (auto-hides when content fits).
+                if total_h > viewport_h && viewport_h > 0.0 {
+                    let thumb_ratio = viewport_h / total_h;
+                    let thumb_h = (viewport_h * thumb_ratio).max(20.0); // min 20px
+                    let track_range = viewport_h - thumb_h;
+                    let max_scroll = total_h - viewport_h;
+                    let thumb_y = if max_scroll > 0.0 {
+                        content_y + (so / max_scroll) * track_range
+                    } else {
+                        content_y
+                    };
+                    let sb_x = rect.x + rect.width - sb_w - padding.right;
+
+                    draw_list.panels.push(PanelCommand {
+                        x: sb_x,
+                        y: thumb_y,
+                        width: sb_w,
+                        height: thumb_h,
+                        bg_color: sb_color,
+                        border_color: [0.0; 4],
+                        border_width: 0.0,
+                        shadow_width: 0.0,
+                    });
+                }
+
+                return; // ScrollList handles its own children.
+            }
         }
 
-        // Draw children on top.
+        // Draw children on top (non-ScrollList widgets).
         for &child in &node.children {
             self.draw_node(child, draw_list);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // ScrollList helpers
+    // ------------------------------------------------------------------
+
+    /// Minimum scrollbar thumb height in pixels.
+    const MIN_THUMB_HEIGHT: f32 = 20.0;
+
+    /// Compute maximum scroll offset for a ScrollList.
+    /// Returns 0.0 if content fits in viewport.
+    pub fn max_scroll(&self, id: WidgetId) -> f32 {
+        let Some(node) = self.arena.get(id) else {
+            return 0.0;
+        };
+        let Widget::ScrollList { item_height, .. } = &node.widget else {
+            return 0.0;
+        };
+        let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
+        let total_h = node.children.len() as f32 * item_height;
+        (total_h - viewport_h).max(0.0)
+    }
+
+    /// Set scroll offset for a ScrollList, clamped to valid range.
+    pub fn set_scroll_offset(&mut self, id: WidgetId, offset: f32) {
+        let max = self.max_scroll(id);
+        if let Some(node) = self.arena.get_mut(id)
+            && let Widget::ScrollList { scroll_offset, .. } = &mut node.widget
+        {
+            *scroll_offset = offset.clamp(0.0, max);
+        }
+        self.mark_dirty(id);
+    }
+
+    /// Scroll a ScrollList by a delta (positive = down).
+    pub fn scroll_by(&mut self, id: WidgetId, delta: f32) {
+        let current = self
+            .arena
+            .get(id)
+            .and_then(|n| {
+                if let Widget::ScrollList { scroll_offset, .. } = &n.widget {
+                    Some(*scroll_offset)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0.0);
+        self.set_scroll_offset(id, current + delta);
+    }
+
+    /// Scroll to make a specific child visible by index.
+    pub fn ensure_visible(&mut self, id: WidgetId, child_index: usize) {
+        let Some(node) = self.arena.get(id) else {
+            return;
+        };
+        let Widget::ScrollList {
+            item_height,
+            scroll_offset,
+            ..
+        } = &node.widget
+        else {
+            return;
+        };
+        let ih = *item_height;
+        let so = *scroll_offset;
+        let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
+        if viewport_h <= 0.0 {
+            return;
+        }
+
+        let item_top = child_index as f32 * ih;
+        let item_bottom = item_top + ih;
+
+        let new_offset = if item_top < so {
+            item_top
+        } else if item_bottom > so + viewport_h {
+            item_bottom - viewport_h
+        } else {
+            return; // already visible
+        };
+
+        self.set_scroll_offset(id, new_offset);
     }
 }
 
@@ -716,6 +964,32 @@ pub fn demo_tree(theme: &Theme) -> WidgetTree {
             y: warning_y + theme.font_data_size + theme.label_gap,
         },
     );
+
+    // ScrollList with 100 items (UI-W03 demo).
+    let scroll_list = tree.insert_root(Widget::ScrollList {
+        bg_color: theme.bg_parchment,
+        border_color: theme.panel_border_color,
+        border_width: theme.panel_border_width,
+        item_height: theme.scroll_item_height,
+        scroll_offset: 0.0,
+        scrollbar_color: theme.scrollbar_color,
+        scrollbar_width: theme.scrollbar_width,
+    });
+    tree.set_position(scroll_list, Position::Fixed { x: 360.0, y: 20.0 });
+    tree.set_sizing(scroll_list, Sizing::Fixed(200.0), Sizing::Fixed(160.0));
+    tree.set_padding(scroll_list, Edges::all(4.0));
+
+    for i in 0..100 {
+        tree.insert(
+            scroll_list,
+            Widget::Label {
+                text: format!("Item {}", i + 1),
+                color: theme.text_dark,
+                font_size: theme.font_data_size,
+                font_family: theme.font_data_family,
+            },
+        );
+    }
 
     tree
 }
@@ -954,14 +1228,15 @@ mod tests {
         let mut dl = DrawList::new();
         tree.draw(&mut dl);
 
-        // Panel uses theme parchment bg
-        assert_eq!(dl.panels.len(), 1);
+        // First panel is the themed parchment panel, second is the ScrollList bg.
+        assert!(dl.panels.len() >= 2);
         assert_eq!(dl.panels[0].bg_color, theme.bg_parchment);
         assert_eq!(dl.panels[0].border_color, theme.panel_border_color);
         assert!((dl.panels[0].border_width - theme.panel_border_width).abs() < 0.01);
 
-        // 3 labels: gold header, light body, red warning
-        assert_eq!(dl.texts.len(), 3);
+        // First 3 texts are labels: gold header, light body, red warning.
+        // Remaining texts are visible ScrollList items.
+        assert!(dl.texts.len() >= 3);
         assert_eq!(dl.texts[0].color, theme.gold);
         assert_eq!(dl.texts[0].font_family, theme.font_header_family);
         assert!((dl.texts[0].font_size - theme.font_header_size).abs() < 0.01);
@@ -1174,10 +1449,10 @@ mod tests {
         let mut dl = DrawList::new();
         tree.draw(&mut dl);
 
-        // Panel bg
-        assert_eq!(dl.panels.len(), 1);
-        // 3 labels (header, body, warning) + 1 rich text
-        assert_eq!(dl.texts.len(), 3);
+        // Panels: original panel + ScrollList bg + scrollbar thumb
+        assert!(dl.panels.len() >= 2);
+        // Labels: 3 original + visible scroll items
+        assert!(dl.texts.len() >= 3);
         assert_eq!(dl.rich_texts.len(), 1);
 
         // Rich text has 3 spans: "Population: " + "1,034,196" + " souls"
@@ -1190,5 +1465,230 @@ mod tests {
         assert_eq!(rt.spans[1].color, theme.gold);
         assert_eq!(rt.spans[2].text, " souls");
         assert!((rt.font_size - theme.font_body_size).abs() < 0.01);
+    }
+
+    // ------------------------------------------------------------------
+    // ScrollList tests (UI-W03)
+    // ------------------------------------------------------------------
+
+    /// Helper: build a ScrollList with N items.
+    fn scroll_list_tree(n: usize) -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new();
+        let list = tree.insert_root(Widget::ScrollList {
+            bg_color: [0.5; 4],
+            border_color: [1.0; 4],
+            border_width: 1.0,
+            item_height: 20.0,
+            scroll_offset: 0.0,
+            scrollbar_color: [0.8, 0.6, 0.3, 0.5],
+            scrollbar_width: 6.0,
+        });
+        tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
+        // 100px tall viewport = 5 visible items at 20px each.
+        tree.set_sizing(list, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
+        tree.set_padding(list, Edges::all(0.0));
+
+        for i in 0..n {
+            tree.insert(
+                list,
+                Widget::Label {
+                    text: format!("Item {}", i),
+                    color: [1.0; 4],
+                    font_size: 12.0,
+                    font_family: FontFamily::Mono,
+                },
+            );
+        }
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+        (tree, list)
+    }
+
+    #[test]
+    fn scroll_list_layout_vertical_stack() {
+        let (tree, list) = scroll_list_tree(10);
+        let node = tree.get(list).unwrap();
+        let children = &node.children;
+
+        // First 5 items are visible (viewport 100px / item_height 20px).
+        for i in 0..5 {
+            let child = tree.get(children[i]).unwrap();
+            assert!(child.rect.width > 0.0, "item {} should be visible", i);
+            assert!(
+                (child.rect.y - (i as f32 * 20.0)).abs() < 0.01,
+                "item {} y = {}, expected {}",
+                i,
+                child.rect.y,
+                i as f32 * 20.0
+            );
+        }
+
+        // Items 5-9 are outside viewport — should have zero rects.
+        for i in 5..10 {
+            let child = tree.get(children[i]).unwrap();
+            assert!(
+                child.rect.width == 0.0 && child.rect.height == 0.0,
+                "item {} should be invisible (rect {:?})",
+                i,
+                child.rect
+            );
+        }
+    }
+
+    #[test]
+    fn scroll_list_virtual_scrolling() {
+        let (mut tree, list) = scroll_list_tree(20);
+
+        // Scroll down by 60px (3 items).
+        tree.set_scroll_offset(list, 60.0);
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        // Only visible items (3-7ish) should produce text commands.
+        // Background panel + scrollbar thumb = 2 panel commands.
+        assert!(dl.panels.len() >= 1);
+
+        // Count visible text commands — should be around 5-8 (viewport 100px / 20px items,
+        // plus partially visible items at edges).
+        let visible_texts = dl.texts.len();
+        assert!(
+            visible_texts <= 8,
+            "expected <=8 visible items, got {}",
+            visible_texts
+        );
+        assert!(
+            visible_texts >= 4,
+            "expected >=4 visible items, got {}",
+            visible_texts
+        );
+    }
+
+    #[test]
+    fn scroll_offset_clamping() {
+        let (mut tree, list) = scroll_list_tree(10);
+
+        // Max scroll = total_height - viewport = 10*20 - 100 = 100.
+        assert!((tree.max_scroll(list) - 100.0).abs() < 0.01);
+
+        // Scroll beyond max clamps.
+        tree.set_scroll_offset(list, 999.0);
+        let offset = match &tree.get(list).unwrap().widget {
+            Widget::ScrollList { scroll_offset, .. } => *scroll_offset,
+            _ => panic!(),
+        };
+        assert!((offset - 100.0).abs() < 0.01);
+
+        // Negative scroll clamps to 0.
+        tree.set_scroll_offset(list, -50.0);
+        let offset = match &tree.get(list).unwrap().widget {
+            Widget::ScrollList { scroll_offset, .. } => *scroll_offset,
+            _ => panic!(),
+        };
+        assert!(offset.abs() < 0.01);
+    }
+
+    #[test]
+    fn scroll_list_no_scrollbar_when_content_fits() {
+        // 3 items * 20px = 60px < 100px viewport → no scrollbar.
+        let (tree, _list) = scroll_list_tree(3);
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        // Only 1 panel (background, no scrollbar thumb).
+        assert_eq!(dl.panels.len(), 1);
+    }
+
+    #[test]
+    fn scroll_list_scrollbar_when_content_overflows() {
+        // 10 items * 20px = 200px > 100px viewport → scrollbar visible.
+        let (tree, _list) = scroll_list_tree(10);
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        // 2 panels: background + scrollbar thumb.
+        assert_eq!(dl.panels.len(), 2);
+    }
+
+    #[test]
+    fn ensure_visible_scrolls_to_item() {
+        let (mut tree, list) = scroll_list_tree(20);
+
+        // Item 15 is at y=300, well below viewport (0-100). Ensure visible.
+        tree.ensure_visible(list, 15);
+        let offset = match &tree.get(list).unwrap().widget {
+            Widget::ScrollList { scroll_offset, .. } => *scroll_offset,
+            _ => panic!(),
+        };
+        // Item 15 bottom = 16*20 = 320. Scroll to 320 - 100 = 220.
+        assert!((offset - 220.0).abs() < 0.01);
+
+        // Ensure visible on an already-visible item doesn't change offset.
+        let before = offset;
+        tree.ensure_visible(list, 15); // 15 is at 300, viewport 220..320 → visible.
+        let after = match &tree.get(list).unwrap().widget {
+            Widget::ScrollList { scroll_offset, .. } => *scroll_offset,
+            _ => panic!(),
+        };
+        assert!((after - before).abs() < 0.01);
+
+        // Ensure visible scrolls up when item is above viewport.
+        tree.ensure_visible(list, 0);
+        let offset = match &tree.get(list).unwrap().widget {
+            Widget::ScrollList { scroll_offset, .. } => *scroll_offset,
+            _ => panic!(),
+        };
+        assert!(offset.abs() < 0.01); // scrolled to top
+    }
+
+    #[test]
+    fn demo_tree_includes_scroll_list() {
+        let theme = Theme::default();
+        let mut tree = demo_tree(&theme);
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        // Should have 2 roots: original panel + ScrollList.
+        assert_eq!(tree.roots().len(), 2);
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        // Original panel + ScrollList bg + scrollbar thumb = 3 panels.
+        assert_eq!(dl.panels.len(), 3);
+
+        // 3 original labels + visible scroll items (viewport 152px / 20px ≈ 7-8).
+        assert!(dl.texts.len() > 3, "scroll items should be drawn");
+
+        // Verify scroll items are from the list.
+        let scroll_texts: Vec<&str> = dl.texts[3..].iter().map(|t| t.text.as_str()).collect();
+        assert!(scroll_texts.contains(&"Item 1"));
+    }
+
+    #[test]
+    fn scroll_list_focusable() {
+        let (tree, list) = scroll_list_tree(5);
+        let focusable = tree.focusable_widgets();
+        assert!(focusable.contains(&list));
     }
 }

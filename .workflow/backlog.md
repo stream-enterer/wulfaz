@@ -130,12 +130,12 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 |------|-------|-----------|
 | 1 — Foundation | COMPLETE | Colored text + panel backgrounds + widget tree |
 | 2 — Styled Panels | COMPLETE | Theme + mouse input |
-| 3 — Full Widget Set | 2 | Rich text + scroll list + tooltips |
+| 3 — Full Widget Set | 1 | Rich text + scroll list + tooltips |
 | 4 — Game Integration | 5 (I01a-d + I02) | Real game UI replaces string rendering |
 | 5 — Polish | 2 | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-10 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+9 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -196,7 +196,7 @@ All tasks done: UI-P02 (multi-font atlas), UI-R02 (theme), UI-W02 (input routing
 
 ### Tier 3 — Full Widget Set
 
-All three tasks can be built in parallel once their deps are met. R01 needs P01+P02. W03 and W04 each need W01+W02.
+R01 and W03 complete. One task remaining: W04.
 
 **Available after this tier:**
 - Rich text with mixed styles (bold, italic, color) in one text block via cosmic-text spans
@@ -205,14 +205,6 @@ All three tasks can be built in parallel once their deps are met. R01 needs P01+
 - Every widget type needed for game UI panels
 
 **UI-DEMO after Tier 3:** Previous demo plus: a ScrollList with 100 dummy items (virtual-scrolled), a rich text block mixing serif body with mono inline data and gold highlights, a button that spawns a 3-level nested tooltip chain demonstrating hover delay and recursive dismiss.
-
-- **UI-W03** — ScrollList widget. Needs: UI-W01, UI-W02.
-  - Scrollable content area: `content_height` measured from children, `scroll_offset: f32` tracks position.
-  - Scrollbar: thin vertical bar rendered as a Panel quad. Draggable (uses mouse capture from UI-W02). Auto-hides when content fits.
-  - Keyboard navigation: arrow keys move selection, Page Up/Down jump by visible height, Home/End go to extremes.
-  - Virtual scrolling: only `measure()` + `draw()` children whose Y range intersects the visible viewport. Essential for entity lists (hundreds of items).
-  - Scroll-to-item: `scroll_list.ensure_visible(child_index)` — smooth or instant scroll to bring a specific child into view.
-  - Momentum/overscroll: optional, can defer. Functional without it.
 
 - **UI-W04** — Tooltip system. Needs: UI-W01, UI-W02.
   - `TooltipStack: Vec<TooltipEntry>` in `UiState`. Each entry: content widget tree, anchor position, hover source widget ID.

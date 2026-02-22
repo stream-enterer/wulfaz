@@ -274,7 +274,7 @@ impl ApplicationHandler for App {
                 self.cursor_pos = position;
                 // Route to UI input system.
                 self.ui_state.handle_cursor_moved(
-                    &self.ui_tree,
+                    &mut self.ui_tree,
                     position.x as f32,
                     position.y as f32,
                 );
@@ -287,7 +287,7 @@ impl ApplicationHandler for App {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => y,
                     winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 20.0,
                 };
-                self.ui_state.handle_scroll(&self.ui_tree, dy);
+                self.ui_state.handle_scroll(&mut self.ui_tree, dy);
             }
             WindowEvent::CloseRequested => event_loop.exit(),
             // Everything below requires GPU
@@ -300,7 +300,10 @@ impl ApplicationHandler for App {
                         // Route keyboard to UI first; skip game keys if consumed.
                         if let PhysicalKey::Code(kc) = event.physical_key {
                             let pressed = event.state == ElementState::Pressed;
-                            if self.ui_state.handle_key_input(&self.ui_tree, kc, pressed) {
+                            if self
+                                .ui_state
+                                .handle_key_input(&mut self.ui_tree, kc, pressed)
+                            {
                                 return;
                             }
                         }
@@ -387,10 +390,13 @@ impl ApplicationHandler for App {
                         let pressed = btn_state == ElementState::Pressed;
 
                         // UI consumes click — don't pass to game.
-                        if self
-                            .ui_state
-                            .handle_mouse_input(&self.ui_tree, ui_btn, pressed, px, py)
-                        {
+                        if self.ui_state.handle_mouse_input(
+                            &mut self.ui_tree,
+                            ui_btn,
+                            pressed,
+                            px,
+                            py,
+                        ) {
                             return;
                         }
 
