@@ -275,6 +275,11 @@ impl WidgetTree {
         self.arena.get_mut(id)
     }
 
+    /// Get the computed layout rect for a widget (set by the layout pass).
+    pub fn node_rect(&self, id: WidgetId) -> Option<Rect> {
+        self.arena.get(id).map(|n| n.rect)
+    }
+
     /// Set position mode for a widget.
     pub fn set_position(&mut self, id: WidgetId, pos: Position) {
         if let Some(node) = self.arena.get_mut(id) {
@@ -1063,6 +1068,95 @@ pub fn demo_tree(theme: &Theme) -> WidgetTree {
     tree
 }
 
+/// Build the status bar panel at the top of the screen (UI-I01a).
+///
+/// Chrome panel: permanent, rebuilt every frame with live simulation data.
+/// Replaces the old string-based `render::render_status()`.
+///
+/// Returns the root panel's `WidgetId` so the caller can read its
+/// computed height after layout (via `WidgetTree::node_rect`).
+pub fn build_status_bar(
+    tree: &mut WidgetTree,
+    theme: &Theme,
+    tick: u64,
+    population: usize,
+    is_turn_based: bool,
+    player_name: Option<&str>,
+    screen_width: f32,
+) -> WidgetId {
+    let panel = tree.insert_root(Widget::Panel {
+        bg_color: theme.status_bar_bg,
+        border_color: theme.panel_border_color,
+        border_width: theme.tooltip_border_width, // thin 1px border
+        shadow_width: 0.0,                        // no shadow for a flat bar
+    });
+    tree.set_position(panel, Position::Fixed { x: 0.0, y: 0.0 });
+    tree.set_sizing(panel, Sizing::Fixed(screen_width), Sizing::Fit);
+    tree.set_padding(
+        panel,
+        Edges {
+            top: theme.status_bar_padding_v,
+            right: theme.status_bar_padding_h,
+            bottom: theme.status_bar_padding_v,
+            left: theme.status_bar_padding_h,
+        },
+    );
+
+    let sep = || TextSpan {
+        text: "  |  ".to_string(),
+        color: theme.disabled,
+        font_family: FontFamily::Mono,
+    };
+
+    let mut spans = vec![
+        TextSpan {
+            text: format!("Tick: {tick}"),
+            color: theme.gold,
+            font_family: FontFamily::Mono,
+        },
+        sep(),
+        TextSpan {
+            text: format!("Pop: {population}"),
+            color: theme.text_light,
+            font_family: FontFamily::Mono,
+        },
+        sep(),
+    ];
+
+    if is_turn_based {
+        spans.push(TextSpan {
+            text: "TURN-BASED".to_string(),
+            color: theme.gold,
+            font_family: FontFamily::Mono,
+        });
+    } else {
+        spans.push(TextSpan {
+            text: "REAL-TIME".to_string(),
+            color: theme.text_light,
+            font_family: FontFamily::Mono,
+        });
+    }
+
+    if let Some(name) = player_name {
+        spans.push(sep());
+        spans.push(TextSpan {
+            text: format!("@{name}"),
+            color: theme.gold,
+            font_family: FontFamily::Mono,
+        });
+    }
+
+    tree.insert(
+        panel,
+        Widget::RichText {
+            spans,
+            font_size: theme.font_data_size,
+        },
+    );
+
+    panel
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1760,5 +1854,122 @@ mod tests {
         let (tree, list) = scroll_list_tree(5);
         let focusable = tree.focusable_widgets();
         assert!(focusable.contains(&list));
+    }
+
+    // ------------------------------------------------------------------
+    // Status bar tests (UI-I01a)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn status_bar_structure() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let bar = build_status_bar(&mut tree, &theme, 42, 15, false, None, 800.0);
+
+        // One root: the status bar panel.
+        assert_eq!(tree.roots().len(), 1);
+        assert_eq!(tree.roots()[0], bar);
+
+        // Panel has one child: the RichText.
+        let node = tree.get(bar).expect("bar exists");
+        assert_eq!(node.children.len(), 1);
+        if let Widget::Panel { bg_color, .. } = &node.widget {
+            assert_eq!(*bg_color, theme.status_bar_bg);
+        } else {
+            panic!("status bar root should be a Panel");
+        }
+
+        // Child is RichText with data font size.
+        let child = tree.get(node.children[0]).expect("child exists");
+        if let Widget::RichText { spans, font_size } = &child.widget {
+            assert!((font_size - theme.font_data_size).abs() < 0.01);
+            // Real-time mode, no player: 5 spans (tick, sep, pop, sep, mode).
+            assert_eq!(spans.len(), 5);
+            assert_eq!(spans[0].text, "Tick: 42");
+            assert_eq!(spans[0].color, theme.gold);
+            assert_eq!(spans[2].text, "Pop: 15");
+            assert_eq!(spans[2].color, theme.text_light);
+            assert_eq!(spans[4].text, "REAL-TIME");
+            assert_eq!(spans[4].color, theme.text_light);
+        } else {
+            panic!("status bar child should be RichText");
+        }
+    }
+
+    #[test]
+    fn status_bar_turn_based_with_player() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        build_status_bar(&mut tree, &theme, 100, 3, true, Some("Goblin"), 800.0);
+
+        let bar = tree.roots()[0];
+        let child_id = tree.get(bar).expect("bar").children[0];
+        let child = tree.get(child_id).expect("child");
+        if let Widget::RichText { spans, .. } = &child.widget {
+            // Turn-based + player: 7 spans (tick, sep, pop, sep, mode, sep, @name).
+            assert_eq!(spans.len(), 7);
+            assert_eq!(spans[4].text, "TURN-BASED");
+            assert_eq!(spans[4].color, theme.gold);
+            assert_eq!(spans[6].text, "@Goblin");
+            assert_eq!(spans[6].color, theme.gold);
+        } else {
+            panic!("expected RichText");
+        }
+    }
+
+    #[test]
+    fn status_bar_layout_full_width() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let bar = build_status_bar(&mut tree, &theme, 0, 0, false, None, 1024.0);
+
+        tree.layout(
+            Size {
+                width: 1024.0,
+                height: 768.0,
+            },
+            14.0,
+        );
+
+        let rect = tree.node_rect(bar).expect("rect after layout");
+        assert!((rect.x - 0.0).abs() < 0.01);
+        assert!((rect.y - 0.0).abs() < 0.01);
+        assert!((rect.width - 1024.0).abs() < 0.01);
+        // Height = padding_v*2 + content (Fit sizing).
+        assert!(rect.height > 0.0);
+        assert!(rect.height < 100.0); // sanity: a single-line bar shouldn't be huge
+    }
+
+    #[test]
+    fn status_bar_draw_output() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        build_status_bar(&mut tree, &theme, 7, 200, true, Some("Wolf"), 800.0);
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        // One panel (the status bar background).
+        assert_eq!(dl.panels.len(), 1);
+        assert_eq!(dl.panels[0].bg_color, theme.status_bar_bg);
+        assert!((dl.panels[0].width - 800.0).abs() < 0.01);
+
+        // One rich text command with 7 spans.
+        assert_eq!(dl.rich_texts.len(), 1);
+        assert_eq!(dl.rich_texts[0].spans.len(), 7);
+        assert!(dl.rich_texts[0].spans[0].text.contains("7"));
+        assert!(dl.rich_texts[0].spans[2].text.contains("200"));
+        assert_eq!(dl.rich_texts[0].spans[6].text, "@Wolf");
+
+        // No plain text commands (only rich text).
+        assert_eq!(dl.texts.len(), 0);
     }
 }

@@ -186,6 +186,8 @@ pub fn render_world_to_string(
 /// Format: "Tick: N | Entities: M | Name1:count Name2:count"
 ///
 /// This function is READ-ONLY and does not modify world state.
+/// Superseded by `ui::build_status_bar` widget (UI-I01a) but kept as reference.
+#[allow(dead_code)]
 pub fn render_status(world: &World) -> String {
     let mut status = format!("Tick: {} | Entities: {}", world.tick.0, world.alive.len());
 

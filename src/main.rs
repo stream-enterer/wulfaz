@@ -237,6 +237,7 @@ struct App {
     // UI widget system (UI-W02)
     ui_state: ui::UiState,
     ui_tree: ui::WidgetTree,
+    ui_theme: ui::Theme,
 }
 
 impl ApplicationHandler for App {
@@ -537,22 +538,50 @@ impl ApplicationHandler for App {
                             let screen_h = gpu.config.height;
                             let padding = 4.0_f32;
 
-                            let status_lines = 1_usize;
+                            // Rebuild game UI tree every frame (DD-5: full rebuild).
+                            let player_name = self
+                                .world
+                                .player
+                                .and_then(|p| self.world.body.names.get(&p))
+                                .map(|n| n.value.as_str());
+                            self.ui_tree = ui::WidgetTree::new();
+                            let status_bar_id = ui::build_status_bar(
+                                &mut self.ui_tree,
+                                &self.ui_theme,
+                                self.world.tick.0,
+                                self.world.alive.len(),
+                                self.world.player.is_some(),
+                                player_name,
+                                screen_w as f32,
+                            );
+
+                            // Layout UI tree to compute status bar height.
+                            let screen_size = ui::Size {
+                                width: screen_w as f32,
+                                height: screen_h as f32,
+                            };
+                            self.ui_tree.layout(screen_size, m.line_height);
+                            let status_bar_h = self
+                                .ui_tree
+                                .node_rect(status_bar_id)
+                                .map(|r| r.height)
+                                .unwrap_or(m.line_height);
+
+                            // Screen layout: status bar | gap | map | hover | gap | events | gap
                             let event_lines = 5_usize;
                             let hover_lines = 1_usize;
-                            let status_h = status_lines as f32 * m.line_height;
                             let event_h = event_lines as f32 * m.line_height;
                             let hover_h = hover_lines as f32 * m.line_height;
                             let (mcw, mch) = font.map_cell();
+                            let map_y = status_bar_h + padding;
                             let map_pixel_h =
-                                screen_h as f32 - status_h - event_h - hover_h - padding * 4.0;
+                                screen_h as f32 - status_bar_h - event_h - hover_h - padding * 3.0;
                             let map_pixel_w = screen_w as f32 - padding * 2.0;
 
                             let viewport_cols = (map_pixel_w / mcw).floor().max(1.0) as usize;
                             let viewport_rows = (map_pixel_h / mch).floor().max(1.0) as usize;
 
                             // Store layout for click hit-testing
-                            let map_y = padding * 2.0 + status_h;
                             self.map_origin = (padding, map_y);
                             self.map_cell_w = mcw;
                             self.map_cell_h = mch;
@@ -591,7 +620,6 @@ impl ApplicationHandler for App {
                                 }
                             };
 
-                            let status = render::render_status(&self.world);
                             let map_text = render::render_world_to_string(
                                 &self.world,
                                 self.camera.x,
@@ -601,14 +629,7 @@ impl ApplicationHandler for App {
                             );
                             let events = render::render_recent_events(&self.world, event_lines);
 
-                            // Layout persistent UI tree and emit draw commands.
-                            self.ui_tree.layout(
-                                ui::Size {
-                                    width: screen_w as f32,
-                                    height: screen_h as f32,
-                                },
-                                m.line_height,
-                            );
+                            // Emit draw commands from UI tree.
                             let mut draw_list = ui::DrawList::new();
                             self.ui_tree.draw(&mut draw_list);
 
@@ -650,8 +671,8 @@ impl ApplicationHandler for App {
                                     .collect();
                                 font.prepare_rich_text(&spans, cmd.x, cmd.y, cmd.font_size);
                             }
+                            // Map, hover, and events still use string-based rendering.
                             let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
-                            font.prepare_text(&status, padding, padding, fg4);
                             font.prepare_map(&map_text, padding, map_y, fg4);
                             let hover_y = map_y + viewport_rows as f32 * mch;
                             font.prepare_text(&hover_text, padding, hover_y, fg4);
@@ -716,7 +737,8 @@ fn main() {
         map_cell_w: 0.0,
         map_cell_h: 0.0,
         ui_state: ui::UiState::new(),
-        ui_tree: ui::demo_tree(&ui_theme),
+        ui_tree: ui::WidgetTree::new(),
+        ui_theme,
     };
     event_loop.run_app(&mut app).expect("run event loop");
 }

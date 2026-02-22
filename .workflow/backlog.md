@@ -131,11 +131,11 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 | 1 — Foundation | COMPLETE | Colored text + panel backgrounds + widget tree |
 | 2 — Styled Panels | COMPLETE | Theme + mouse input |
 | 3 — Full Widget Set | COMPLETE | Rich text + scroll list + tooltips |
-| 4 — Game Integration | 5 (I01a-d + I02) | Real game UI replaces string rendering |
+| 4 — Game Integration | 4 (I01b-d + I02) | Real game UI replaces string rendering |
 | 5 — Polish | 2 | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-8 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+7 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -218,12 +218,6 @@ Sub-panels ordered simplest to most complex — each proves more of the pipeline
 - `UiState` struct on `App` (not on `World` — UI is not simulation state)
 
 **UI-DEMO after Tier 4:** Retired — the game itself is the demo. The showcase code remains as a developer reference panel (F11), but the live game UI with status bar, inspector, event log, tooltip, and map overlays is the real verification.
-
-- **UI-I01a** — Status bar. Needs: UI-W01, UI-R02. Decisions resolved by DD-5.
-  - Top of screen: tick count, population, paused state. Simplest panel — proves the full widget-to-screen pipeline works end-to-end.
-  - Chrome panel (permanent, per DD-5). Rebuild every frame (per DD-5).
-  - `UiState` struct on `App` (not on `World`). Holds widget tree root, tooltip stack, focused widget, panel visibility flags.
-  - Replaces current `render::render_status()` string-based rendering.
 
 - **UI-I01b** — Hover tooltip. Needs: UI-W01, UI-W04, UI-R02.
   - Appears on map tile hover: terrain type, entities present, building info.

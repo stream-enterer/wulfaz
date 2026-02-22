@@ -4,34 +4,27 @@
 None
 
 ## Completed
-UI-W04 — Tooltip system — COMPLETE
+UI-I01a — Status bar — COMPLETE
 
-- `TooltipContent` enum in `widget.rs`: Text (simple label) and Custom (widget list with nested tooltips)
-- Theme tooltip constants: delay 300ms, fast window 500ms, offset 8px, nesting offset 4px, padding 8px, darker parchment bg, gold border 1px, shadow 4px
-- `tooltip: Option<TooltipContent>` field on WidgetNode, `set_tooltip()` on WidgetTree
-- `measure_node()` made public for tooltip size estimation
-- `TooltipEntry`/`TooltipPending` types in `input.rs`
-- `tooltip_stack`, `tooltip_pending`, `tooltip_last_dismiss` fields on UiState
-- `update_tooltips()`: hover delay, fast-show window, show/dismiss lifecycle
-- `show_tooltip()`: builds Panel root from TooltipContent, vertical stacking, edge-flip positioning
-- `dismiss_all_tooltips()`, `tooltip_count()` public API
-- `find_tooltip_ancestor()`: walks parent chain to find widget with tooltip content
-- `compute_tooltip_position()`: below-right of cursor, flips if clipping screen, nesting offset
-- Nested tooltips: Custom content children can have their own tooltips → stacking
-- Recursive dismissal: top of stack popped when cursor leaves both tooltip rect and source rect
-- Demo tree: button at (580,20) with 3-level nested tooltip chain (level 1 → level 2 → level 3)
-- 11 new tests: delay, show after delay, dismiss on leave, stays on source, stays inside tooltip, fast show window, edge flip (right/bottom), nested chain, dismiss all, demo tree tooltip
-- All 483 tests pass, zero warnings
+- `build_status_bar()` in `src/ui/mod.rs`: builds Panel + RichText with tick, population, mode, optional player name
+- 3 theme constants in `theme.rs`: `status_bar_bg`, `status_bar_padding_h`, `status_bar_padding_v`
+- `node_rect()` method on WidgetTree for reading computed layout rect
+- `ui_theme: ui::Theme` stored on App struct for per-frame rebuilds
+- Render loop: rebuilds ui_tree every frame (DD-5), status bar height drives map viewport layout
+- Removed `render_status()` string rendering from main loop (function kept with `#[allow(dead_code)]`)
+- Screen layout: status_bar_h + padding gap + map + hover + events (3 padding gaps, down from 4)
+- 4 new tests: structure, turn-based+player, full-width layout, draw output
+- All 487 tests pass, zero warnings
 
 ## Files Modified
-- src/ui/widget.rs (TooltipContent enum)
-- src/ui/theme.rs (10 tooltip constants)
-- src/ui/mod.rs (WidgetNode tooltip field, set_tooltip, pub measure_node, demo tooltip button, updated demo tests)
-- src/ui/input.rs (TooltipEntry, TooltipPending, UiState tooltip fields, update/show/dismiss/position methods, 11 tests)
+- src/ui/mod.rs (build_status_bar, node_rect, 4 tests)
+- src/ui/theme.rs (3 status bar constants)
+- src/main.rs (ui_theme on App, status bar rebuild in render loop, layout adjustments)
+- src/render.rs (#[allow(dead_code)] on render_status)
 
 ## Next Action
 Pick next task from backlog. Unblocked candidates:
-- UI-I01a — Status bar (needs W01+R02, both done)
-- UI-I01b — Hover tooltip (needs W01+W04+R02, all done now)
+- UI-I01b — Hover tooltip (needs W01+W04+R02, all done)
 - UI-I01c — Event log (needs W01+W03+R02, all done)
+- UI-I01d — Entity inspector (needs W01+W02+W03+R01, all done)
 - UI-I02 — Map overlay (needs P01+P03, both done)

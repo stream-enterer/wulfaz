@@ -60,6 +60,14 @@ pub struct Theme {
     /// Default scroll list item height in pixels.
     pub scroll_item_height: f32,
 
+    // -- Status bar defaults (UI-I01a) --
+    /// Status bar background color (sRGB RGBA).
+    pub status_bar_bg: [f32; 4],
+    /// Status bar horizontal padding (pixels).
+    pub status_bar_padding_h: f32,
+    /// Status bar vertical padding (pixels).
+    pub status_bar_padding_v: f32,
+
     // -- Tooltip defaults (UI-W04) --
     /// Hover delay before showing tooltip (milliseconds).
     pub tooltip_delay_ms: u64,
@@ -128,6 +136,11 @@ impl Default for Theme {
             scrollbar_width: 6.0,
             scrollbar_color: hex_a(0xC8, 0xA8, 0x50, 0.5), // gold at 50% alpha
             scroll_item_height: 20.0,                      // pixels
+
+            // Status bar defaults (UI-I01a)
+            status_bar_bg: hex_a(0xC0, 0xA8, 0x80, 0.98), // darker parchment (same as tooltip)
+            status_bar_padding_h: 8.0,
+            status_bar_padding_v: 4.0,
 
             // Tooltip defaults (UI-W04)
             tooltip_delay_ms: 300,
