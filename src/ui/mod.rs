@@ -204,13 +204,34 @@ pub(crate) struct WidgetNode {
 }
 
 // ---------------------------------------------------------------------------
+// Z-order tiers (UI-307)
+// ---------------------------------------------------------------------------
+
+/// Z-order tier for root widgets (UI-307).
+/// Roots are drawn in tier order: Panel first (bottom), Tooltip last (top).
+/// Within a tier, roots draw in insertion order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+#[repr(u8)]
+pub enum ZTier {
+    /// Regular panels (character sheets, outliner, status bar).
+    #[default]
+    Panel = 0,
+    /// Dropdowns, context menus — above panels.
+    Overlay = 1,
+    /// Modal dialogs — above overlays.
+    Modal = 2,
+    /// Tooltips — always on top.
+    Tooltip = 3,
+}
+
+// ---------------------------------------------------------------------------
 // WidgetTree
 // ---------------------------------------------------------------------------
 
 /// Arena-backed retained widget tree.
 pub struct WidgetTree {
     arena: SlotMap<WidgetId, WidgetNode>,
-    roots: Vec<WidgetId>,
+    roots: Vec<(WidgetId, ZTier)>,
 }
 
 impl WidgetTree {
@@ -221,8 +242,13 @@ impl WidgetTree {
         }
     }
 
-    /// Insert a widget as a root (no parent).
+    /// Insert a widget as a root (no parent) at the default Panel tier.
     pub fn insert_root(&mut self, widget: Widget) -> WidgetId {
+        self.insert_root_with_tier(widget, ZTier::Panel)
+    }
+
+    /// Insert a widget as a root at the specified Z-tier (UI-307).
+    pub fn insert_root_with_tier(&mut self, widget: Widget, z_tier: ZTier) -> WidgetId {
         let id = self.arena.insert(WidgetNode {
             widget,
             parent: None,
@@ -240,7 +266,7 @@ impl WidgetTree {
             clip_rect: None,
             on_click: None,
         });
-        self.roots.push(id);
+        self.roots.push((id, z_tier));
         id
     }
 
@@ -286,7 +312,7 @@ impl WidgetTree {
         }
 
         // Remove from roots if present.
-        self.roots.retain(|r| *r != id);
+        self.roots.retain(|(r, _)| *r != id);
 
         // Remove all nodes.
         for rid in to_remove {
@@ -403,9 +429,29 @@ impl WidgetTree {
         }
     }
 
-    /// Root widget ids.
-    pub fn roots(&self) -> &[WidgetId] {
-        &self.roots
+    /// Root widget ids in draw order (sorted by Z-tier, stable within tier).
+    pub fn roots(&self) -> Vec<WidgetId> {
+        self.roots_draw_order()
+    }
+
+    /// Root ids in draw order: Panel → Overlay → Modal → Tooltip.
+    /// Within each tier, insertion order is preserved (stable sort).
+    fn roots_draw_order(&self) -> Vec<WidgetId> {
+        let mut sorted = self.roots.clone();
+        sorted.sort_by_key(|(_, tier)| *tier);
+        sorted.iter().map(|(id, _)| *id).collect()
+    }
+
+    /// Get the Z-tier of a root widget. Returns None if not a root.
+    pub fn z_tier(&self, id: WidgetId) -> Option<ZTier> {
+        self.roots.iter().find(|(r, _)| *r == id).map(|(_, t)| *t)
+    }
+
+    /// Change the Z-tier of an existing root widget (UI-307).
+    pub fn set_z_tier(&mut self, id: WidgetId, tier: ZTier) {
+        if let Some(entry) = self.roots.iter_mut().find(|(r, _)| *r == id) {
+            entry.1 = tier;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -413,9 +459,11 @@ impl WidgetTree {
     // ------------------------------------------------------------------
 
     /// Find the topmost widget whose rect contains the point (x, y).
-    /// Walks back-to-front: last child / last root is topmost.
+    /// Walks back-to-front through draw order: highest Z-tier first,
+    /// last inserted within tier first.
     pub fn hit_test(&self, x: f32, y: f32) -> Option<WidgetId> {
-        for &root in self.roots.iter().rev() {
+        let draw_order = self.roots_draw_order();
+        for &root in draw_order.iter().rev() {
             if let Some(hit) = self.hit_test_node(root, x, y) {
                 return Some(hit);
             }
@@ -441,7 +489,7 @@ impl WidgetTree {
     /// Currently only Buttons are focusable.
     pub fn focusable_widgets(&self) -> Vec<WidgetId> {
         let mut result = Vec::new();
-        for &root in &self.roots {
+        for root in self.roots_draw_order() {
             self.collect_focusable(root, &mut result);
         }
         result
@@ -467,7 +515,7 @@ impl WidgetTree {
 
     /// Run the full layout pass over the tree. `screen` is the available area.
     pub fn layout(&mut self, screen: Size, line_height: f32) {
-        let root_ids: Vec<WidgetId> = self.roots.clone();
+        let root_ids = self.roots_draw_order();
         for root in root_ids {
             self.layout_node(
                 root,
@@ -1210,7 +1258,7 @@ impl WidgetTree {
 
     /// Walk the tree and emit draw commands, using `line_height` for wrap metrics.
     pub fn draw_with_line_height(&self, draw_list: &mut DrawList, line_height: f32) {
-        for &root in &self.roots {
+        for root in self.roots_draw_order() {
             self.draw_node(root, draw_list, line_height);
         }
     }
@@ -6311,5 +6359,145 @@ mod tests {
         assert_eq!(draw_list.texts[1].text, "Items");
         assert_eq!(draw_list.texts[2].text, "Child A");
         assert_eq!(draw_list.texts[3].text, "Child B");
+    }
+
+    // ------------------------------------------------------------------
+    // Z-order tier tests (UI-307)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn z_tier_draw_order_panels_before_modals() {
+        let mut tree = WidgetTree::new();
+        // Insert a panel (default tier).
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: [0.2, 0.2, 0.2, 1.0],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+        tree.set_position(panel, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(panel, Sizing::Fixed(100.0), Sizing::Fixed(50.0));
+
+        // Insert a modal (higher tier).
+        let modal = tree.insert_root_with_tier(
+            Widget::Panel {
+                bg_color: [1.0, 0.0, 0.0, 1.0],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+            ZTier::Modal,
+        );
+        tree.set_position(modal, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(modal, Sizing::Fixed(80.0), Sizing::Fixed(40.0));
+
+        let draw_order = tree.roots();
+        assert_eq!(draw_order.len(), 2);
+        assert_eq!(draw_order[0], panel, "panel drawn first (behind)");
+        assert_eq!(draw_order[1], modal, "modal drawn last (on top)");
+    }
+
+    #[test]
+    fn z_tier_modal_stays_above_raised_panel() {
+        let mut tree = WidgetTree::new();
+        // Panel A.
+        let panel_a = tree.insert_root(Widget::Panel {
+            bg_color: [0.1; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+        // Modal.
+        let modal = tree.insert_root_with_tier(
+            Widget::Panel {
+                bg_color: [1.0, 0.0, 0.0, 1.0],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+            ZTier::Modal,
+        );
+        // Panel B (inserted after modal — simulates "raising" by removing + re-inserting).
+        let panel_b = tree.insert_root(Widget::Panel {
+            bg_color: [0.3; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+
+        let draw_order = tree.roots();
+        assert_eq!(draw_order.len(), 3);
+        // Both panels come before the modal regardless of insertion order.
+        assert_eq!(draw_order[0], panel_a);
+        assert_eq!(draw_order[1], panel_b);
+        assert_eq!(draw_order[2], modal, "modal always draws last");
+    }
+
+    #[test]
+    fn z_tier_hit_test_highest_tier_wins() {
+        let mut tree = WidgetTree::new();
+        // Panel covering the full area.
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: [0.2; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+        tree.set_position(panel, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(panel, Sizing::Fixed(200.0), Sizing::Fixed(200.0));
+
+        // Overlay covering part of the same area.
+        let overlay = tree.insert_root_with_tier(
+            Widget::Panel {
+                bg_color: [0.5; 4],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+            ZTier::Overlay,
+        );
+        tree.set_position(overlay, Position::Fixed { x: 10.0, y: 10.0 });
+        tree.set_sizing(overlay, Sizing::Fixed(50.0), Sizing::Fixed(50.0));
+
+        tree.layout(
+            Size {
+                width: 400.0,
+                height: 400.0,
+            },
+            14.0,
+        );
+
+        // Hit at overlay position → overlay wins (higher tier).
+        assert_eq!(tree.hit_test(20.0, 20.0), Some(overlay));
+        // Hit outside overlay but inside panel → panel wins.
+        assert_eq!(tree.hit_test(100.0, 100.0), Some(panel));
+    }
+
+    #[test]
+    fn z_tier_set_z_tier_changes_draw_order() {
+        let mut tree = WidgetTree::new();
+        let a = tree.insert_root(Widget::Panel {
+            bg_color: [0.1; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+        let b = tree.insert_root(Widget::Panel {
+            bg_color: [0.2; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+
+        // Both at Panel tier — insertion order.
+        let order = tree.roots();
+        assert_eq!(order[0], a);
+        assert_eq!(order[1], b);
+
+        // Promote a to Overlay.
+        tree.set_z_tier(a, ZTier::Overlay);
+        let order = tree.roots();
+        assert_eq!(order[0], b, "b stays at Panel tier");
+        assert_eq!(order[1], a, "a promoted to Overlay tier");
     }
 }

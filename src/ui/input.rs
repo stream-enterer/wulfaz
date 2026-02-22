@@ -1,6 +1,6 @@
 use super::theme::Theme;
 use super::widget::{TooltipContent, Widget};
-use super::{Edges, Position, Size, Sizing, WidgetId, WidgetTree};
+use super::{Edges, Position, Size, Sizing, WidgetId, WidgetTree, ZTier};
 
 use std::time::{Duration, Instant};
 
@@ -465,13 +465,16 @@ impl UiState {
         let line_height = theme.font_body_size;
         let nesting = self.tooltip_stack.len();
 
-        // Build tooltip panel.
-        let panel = tree.insert_root(Widget::Panel {
-            bg_color: theme.tooltip_bg_color,
-            border_color: theme.tooltip_border_color,
-            border_width: theme.tooltip_border_width,
-            shadow_width: theme.tooltip_shadow_width,
-        });
+        // Build tooltip panel at Tooltip Z-tier (UI-307) — always on top.
+        let panel = tree.insert_root_with_tier(
+            Widget::Panel {
+                bg_color: theme.tooltip_bg_color,
+                border_color: theme.tooltip_border_color,
+                border_width: theme.tooltip_border_width,
+                shadow_width: theme.tooltip_shadow_width,
+            },
+            ZTier::Tooltip,
+        );
         tree.set_sizing(panel, Sizing::Fit, Sizing::Fit);
         tree.set_padding(panel, Edges::all(theme.tooltip_padding));
 

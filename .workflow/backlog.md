@@ -148,24 +148,6 @@ Manager structs (ModalStack, NotificationManager, PanelManager, ContextMenu) eac
   - Supports nested submenus: hovering an item with children spawns a child menu to the right. Max nesting depth: 2.
   - Test: spawn context menu at (100, 100), click item 1, assert menu is removed and action string matches.
 
-- **UI-304** — Collapsible section widget. Needs: UI-101 (Column). Blocks: UI-400, UI-405, UI-406.
-  - Add `Widget::Collapsible { header: String, expanded: bool, color: [f32;4], font_size: f32 }`.
-  - Header row: clickable label with a triangle indicator (right-pointing when collapsed, down-pointing when expanded). Uses Unicode triangles (already in the glyph atlas: U+25B6, U+25BC).
-  - When collapsed: children are not laid out or drawn. `measure_node()` returns header height only.
-  - When expanded: children are laid out in a Column below the header. `measure_node()` returns header + children height.
-  - Click on header toggles `expanded`. Animate expand/collapse with existing `Animator` (slide content height from 0 to measured).
-  - Test: build collapsible with 3 children, toggle collapsed, assert measured height decreases to header-only.
-
-- **UI-305** — Event/callback dispatch system. Needs: none (refactoring of existing code). Blocks: UI-300, UI-301, UI-303, UI-400.
-  - Currently click handling in `src/main.rs` (line ~528) polls `UiState` and checks widget IDs manually: `if clicked_id == some_button_id { ... }`. This does not scale to many interactive widgets.
-  - Add `pub on_click: Option<String>` field to `WidgetNode`. Builder sets a callback key (e.g. `"close_inspector"`, `"tab_switch:2"`, `"context:declare_war"`).
-  - Add `UiState::poll_click() -> Option<(WidgetId, String)>` that returns the most recent click's widget and callback key. Cleared each frame.
-  - Main loop checks `poll_click()` once and dispatches by string prefix. No function pointers, no closures, no trait objects — just string keys matched in a `match` block.
-  - String keys use hierarchical namespace: `panel_name::action::param`. Consider migrating to enum-based callback IDs if match block exceeds 50 arms.
-  - Extend to `on_toggle`, `on_text_changed`, `on_select` for Checkbox, TextInput, Dropdown.
-  - Migrate existing button-click checks in main.rs to use callback keys.
-  - Test: set on_click = "test_action" on a button, simulate click, assert poll_click returns "test_action".
-
 - **UI-306** — Panel stack / window management. Needs: UI-305 (callback dispatch for close buttons), UI-307 (z-order tiers). Blocks: UI-400, UI-402, UI-405, UI-412, UI-413, UI-415.
   - Multiple panels open simultaneously (character panel, outliner, event log — all visible in CK3).
   - Add `PanelManager` struct to `src/ui/panel_manager.rs`: tracks open panels by name (`HashMap<String, WidgetId>`), draw order (`Vec<String>`), and closeable flag.
@@ -175,11 +157,6 @@ Manager structs (ModalStack, NotificationManager, PanelManager, ContextMenu) eac
   - Z-order: panels draw in `draw_order` sequence. Modals (UI-300) always draw above all panels.
   - Escape closes the topmost non-modal panel (extend `Action::CloseTopmost` logic).
   - Test: open 3 panels, raise panel 1, assert it is last in draw order. Close panel 2, assert its subtree is removed.
-
-- **UI-307** — Z-order tier system for root widgets. Blocks: UI-300, UI-306.
-  - Split `WidgetTree::roots` into tiered draw order: `panel_roots`, `overlay_roots` (dropdowns, context menus), `modal_roots`, `tooltip_roots`. Draw in that order. Alternatively, add `z_tier: u8` to root entries and sort.
-  - This prevents `PanelManager::raise()` from accidentally placing a panel above a modal.
-  - Test: raise a panel while a modal is open, assert the modal still draws last.
 
 ## Phase UI-4 — Game Screens
 
