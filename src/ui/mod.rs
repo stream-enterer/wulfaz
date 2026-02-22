@@ -1031,6 +1031,21 @@ impl WidgetTree {
                     height: *size,
                 }
             }
+            Widget::Dropdown {
+                options, font_size, ..
+            } => {
+                // Width = widest option text + arrow "▼" + padding.
+                let scale = font_size / line_height;
+                let char_w = line_height * 0.6 * scale;
+                let h = line_height * scale;
+                let widest = options.iter().map(|o| o.len()).max().unwrap_or(0);
+                // Arrow "▼" counts as ~2 chars, plus 16px internal padding.
+                let arrow_w = char_w * 2.0;
+                Size {
+                    width: widest as f32 * char_w + arrow_w + 16.0,
+                    height: h + 8.0,
+                }
+            }
         }
     }
 
@@ -1215,6 +1230,78 @@ impl WidgetTree {
                     tint: tint.unwrap_or([1.0, 1.0, 1.0, 1.0]),
                     clip,
                 });
+            }
+            Widget::Dropdown {
+                selected,
+                options,
+                open,
+                color,
+                bg_color,
+                font_size,
+            } => {
+                let scale = font_size / line_height;
+                let row_h = line_height * scale + 8.0;
+                // Trigger button background.
+                draw_list.panels.push(PanelCommand {
+                    x: node.rect.x,
+                    y: node.rect.y,
+                    width: node.rect.width,
+                    height: row_h,
+                    bg_color: *bg_color,
+                    border_color: *color,
+                    border_width: 1.0,
+                    shadow_width: 0.0,
+                    clip,
+                });
+                // Selected option text.
+                let label = options.get(*selected).map(|s| s.as_str()).unwrap_or("");
+                draw_list.texts.push(TextCommand {
+                    text: label.to_string(),
+                    x: node.rect.x + 8.0,
+                    y: node.rect.y + 4.0,
+                    color: *color,
+                    font_size: *font_size,
+                    font_family: FontFamily::default(),
+                    clip,
+                });
+                // Down-arrow indicator.
+                draw_list.texts.push(TextCommand {
+                    text: "\u{25BC}".to_string(),
+                    x: node.rect.x + node.rect.width - 8.0 - line_height * 0.6 * scale,
+                    y: node.rect.y + 4.0,
+                    color: *color,
+                    font_size: *font_size,
+                    font_family: FontFamily::default(),
+                    clip,
+                });
+                // Open state: option list overlay below trigger.
+                if *open {
+                    let list_y = node.rect.y + row_h;
+                    // Options background.
+                    draw_list.panels.push(PanelCommand {
+                        x: node.rect.x,
+                        y: list_y,
+                        width: node.rect.width,
+                        height: row_h * options.len() as f32,
+                        bg_color: *bg_color,
+                        border_color: *color,
+                        border_width: 1.0,
+                        shadow_width: 0.0,
+                        clip: None, // overlay not clipped by parent
+                    });
+                    // Option labels.
+                    for (i, opt) in options.iter().enumerate() {
+                        draw_list.texts.push(TextCommand {
+                            text: opt.clone(),
+                            x: node.rect.x + 8.0,
+                            y: list_y + i as f32 * row_h + 4.0,
+                            color: *color,
+                            font_size: *font_size,
+                            font_family: FontFamily::default(),
+                            clip: None,
+                        });
+                    }
+                }
             }
             Widget::ScrollList {
                 bg_color,
@@ -1450,6 +1537,12 @@ impl WidgetTree {
                 if let Some(t) = tint {
                     t[3] *= opacity;
                 }
+            }
+            Widget::Dropdown {
+                color, bg_color, ..
+            } => {
+                color[3] *= opacity;
+                bg_color[3] *= opacity;
             }
         }
     }
@@ -5307,5 +5400,127 @@ mod tests {
             (panel.shadow_width - 0.0).abs() < 0.01,
             "separator should have no shadow"
         );
+    }
+
+    #[test]
+    fn dropdown_measure_uses_widest_option() {
+        let mut tree = WidgetTree::new();
+        let dd = tree.insert_root(Widget::Dropdown {
+            selected: 0,
+            options: vec!["A".into(), "Long Option".into(), "B".into()],
+            open: false,
+            color: [1.0; 4],
+            bg_color: [0.2; 4],
+            font_size: 14.0,
+        });
+        let size = tree.measure_node(dd, 14.0);
+        // Width should be based on "Long Option" (11 chars), not "A" (1 char).
+        let char_w = 14.0 * 0.6; // scale = 1.0
+        let expected_min = 11.0 * char_w; // widest option text
+        assert!(
+            size.width > expected_min,
+            "dropdown width {:.1} should exceed widest option text width {:.1}",
+            size.width,
+            expected_min
+        );
+    }
+
+    #[test]
+    fn dropdown_closed_emits_panel_and_two_texts() {
+        let mut tree = WidgetTree::new();
+        let dd = tree.insert_root(Widget::Dropdown {
+            selected: 1,
+            options: vec!["Alpha".into(), "Beta".into(), "Gamma".into()],
+            open: false,
+            color: [1.0; 4],
+            bg_color: [0.2, 0.2, 0.2, 1.0],
+            font_size: 14.0,
+        });
+        tree.set_sizing(dd, Sizing::Fixed(200.0), Sizing::Fixed(30.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // 1 panel (trigger bg) + 2 texts (selected label + arrow).
+        assert_eq!(draw_list.panels.len(), 1, "closed dropdown: 1 panel");
+        assert_eq!(draw_list.texts.len(), 2, "closed dropdown: 2 texts");
+        assert_eq!(draw_list.texts[0].text, "Beta");
+    }
+
+    #[test]
+    fn dropdown_open_emits_overlay_panels_and_option_texts() {
+        let mut tree = WidgetTree::new();
+        let dd = tree.insert_root(Widget::Dropdown {
+            selected: 0,
+            options: vec!["One".into(), "Two".into(), "Three".into()],
+            open: true,
+            color: [1.0; 4],
+            bg_color: [0.2; 4],
+            font_size: 14.0,
+        });
+        tree.set_sizing(dd, Sizing::Fixed(200.0), Sizing::Fixed(30.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // 2 panels: trigger bg + options overlay bg.
+        assert_eq!(draw_list.panels.len(), 2, "open dropdown: 2 panels");
+        // 5 texts: selected label + arrow + 3 option labels.
+        assert_eq!(
+            draw_list.texts.len(),
+            5,
+            "open dropdown: 2 + 3 option texts"
+        );
+        // Options overlay panel should be below trigger.
+        assert!(
+            draw_list.panels[1].y > draw_list.panels[0].y,
+            "overlay should be below trigger"
+        );
+    }
+
+    #[test]
+    fn dropdown_apply_opacity() {
+        let mut tree = WidgetTree::new();
+        let root = tree.insert_root(Widget::Column {
+            gap: 0.0,
+            align: widget::CrossAlign::Start,
+        });
+        tree.set_sizing(root, Sizing::Fixed(200.0), Sizing::Fixed(200.0));
+        let dd = tree.insert(
+            root,
+            Widget::Dropdown {
+                selected: 0,
+                options: vec!["X".into()],
+                open: false,
+                color: [1.0, 1.0, 1.0, 1.0],
+                bg_color: [0.5, 0.5, 0.5, 1.0],
+                font_size: 14.0,
+            },
+        );
+        tree.set_subtree_opacity(root, 0.5);
+        let node = tree.get(dd).unwrap();
+        match &node.widget {
+            Widget::Dropdown {
+                color, bg_color, ..
+            } => {
+                assert!((color[3] - 0.5).abs() < 0.01, "text alpha should be 0.5");
+                assert!((bg_color[3] - 0.5).abs() < 0.01, "bg alpha should be 0.5");
+            }
+            _ => panic!("expected Dropdown"),
+        }
     }
 }

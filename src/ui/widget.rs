@@ -117,4 +117,17 @@ pub enum Widget {
         size: f32,              // display size in pixels (square)
         tint: Option<[f32; 4]>, // optional tint multiply (sRGB RGBA)
     },
+
+    /// Drop-down select widget (UI-204).
+    /// Closed: button showing `options[selected]` with down-arrow.
+    /// Open: emits option labels below the trigger rect.
+    /// Builder manages open/close state and rebuilds each frame.
+    Dropdown {
+        selected: usize,
+        options: Vec<String>,
+        open: bool,
+        color: [f32; 4],    // text color sRGB RGBA
+        bg_color: [f32; 4], // background sRGB RGBA
+        font_size: f32,     // pixels
+    },
 }
