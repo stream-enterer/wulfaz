@@ -172,6 +172,8 @@ pub(crate) struct WidgetNode {
     pub measured: Size,
     /// Optional tooltip content shown on hover (UI-W04).
     pub tooltip: Option<widget::TooltipContent>,
+    /// Optional min/max size constraints applied after Sizing resolution (UI-103).
+    pub constraints: Option<Constraints>,
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +209,7 @@ impl WidgetTree {
             rect: Rect::default(),
             measured: Size::default(),
             tooltip: None,
+            constraints: None,
         });
         self.roots.push(id);
         id
@@ -227,6 +230,7 @@ impl WidgetTree {
             rect: Rect::default(),
             measured: Size::default(),
             tooltip: None,
+            constraints: None,
         });
         if let Some(parent_node) = self.arena.get_mut(parent) {
             parent_node.children.push(id);
@@ -324,6 +328,14 @@ impl WidgetTree {
     pub fn set_tooltip(&mut self, id: WidgetId, content: Option<widget::TooltipContent>) {
         if let Some(node) = self.arena.get_mut(id) {
             node.tooltip = content;
+        }
+    }
+
+    /// Set min/max size constraints on a widget (UI-103).
+    pub fn set_constraints(&mut self, id: WidgetId, constraints: Constraints) {
+        if let Some(node) = self.arena.get_mut(id) {
+            node.constraints = Some(constraints);
+            node.dirty = true;
         }
     }
 
@@ -469,6 +481,17 @@ impl WidgetTree {
             }
         } else {
             resolved_h
+        };
+
+        // Apply min/max constraints if set (UI-103).
+        let (resolved_w, resolved_h) = if let Some(c) = &node.constraints {
+            let clamped = c.clamp(Size {
+                width: resolved_w,
+                height: resolved_h,
+            });
+            (clamped.width, clamped.height)
+        } else {
+            (resolved_w, resolved_h)
         };
 
         node.rect = Rect {
@@ -4240,5 +4263,81 @@ mod tests {
         tree.draw(&mut draw_list);
 
         assert_eq!(draw_list.texts.len(), 1);
+    }
+
+    // ------------------------------------------------------------------
+    // Min/Max constraints (UI-103)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn constraints_min_width_enforced() {
+        let mut tree = WidgetTree::new();
+        let label = tree.insert_root(Widget::Label {
+            text: "Hi".into(), // ~2 chars ≈ 16.8px wide
+            color: [1.0; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+            wrap: false,
+        });
+        tree.set_constraints(
+            label,
+            Constraints {
+                min_width: 200.0,
+                min_height: 0.0,
+                max_width: f32::MAX,
+                max_height: f32::MAX,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let rect = tree.node_rect(label).unwrap();
+        assert!(
+            rect.width >= 200.0,
+            "min_width constraint should enforce width >= 200, got {}",
+            rect.width
+        );
+    }
+
+    #[test]
+    fn constraints_max_width_enforced() {
+        let mut tree = WidgetTree::new();
+        let label = tree.insert_root(Widget::Label {
+            text: "A very long label that should be wider than 50 pixels normally".into(),
+            color: [1.0; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+            wrap: false,
+        });
+        tree.set_constraints(
+            label,
+            Constraints {
+                min_width: 0.0,
+                min_height: 0.0,
+                max_width: 50.0,
+                max_height: f32::MAX,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let rect = tree.node_rect(label).unwrap();
+        assert!(
+            rect.width <= 50.0,
+            "max_width constraint should enforce width <= 50, got {}",
+            rect.width
+        );
     }
 }
