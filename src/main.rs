@@ -635,6 +635,15 @@ impl ApplicationHandler for App {
                                     cmd.font_size,
                                 );
                             }
+                            // Rich text commands (per-span color + font via cosmic-text)
+                            for cmd in &draw_list.rich_texts {
+                                let spans: Vec<(String, [f32; 4], &str)> = cmd
+                                    .spans
+                                    .iter()
+                                    .map(|s| (s.text.clone(), s.color, s.font_family.family_name()))
+                                    .collect();
+                                font.prepare_rich_text(&spans, cmd.x, cmd.y, cmd.font_size);
+                            }
                             let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
                             font.prepare_text(&status, padding, padding, fg4);
                             font.prepare_map(&map_text, padding, map_y, fg4);

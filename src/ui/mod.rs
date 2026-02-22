@@ -4,7 +4,7 @@ mod theme;
 mod widget;
 
 #[allow(unused_imports)] // Public API: used by game panels constructing widgets.
-pub use draw::{DrawList, FontFamily, PanelCommand, TextCommand};
+pub use draw::{DrawList, FontFamily, PanelCommand, RichTextCommand, TextCommand, TextSpan};
 #[allow(unused_imports)] // Public API: used by main.rs for input routing (UI-W02).
 pub use input::{MouseButton, UiEvent, UiState};
 pub use theme::Theme;
@@ -476,6 +476,17 @@ impl WidgetTree {
                     height: h + 8.0,
                 }
             }
+            Widget::RichText { spans, font_size } => {
+                // Approximate: sum of all span char counts * estimated glyph width.
+                let scale = font_size / line_height;
+                let char_w = line_height * 0.6 * scale;
+                let h = line_height * scale;
+                let total_chars: usize = spans.iter().map(|s| s.text.len()).sum();
+                Size {
+                    width: total_chars as f32 * char_w,
+                    height: h,
+                }
+            }
             Widget::Panel { .. } => {
                 // Panel measures from children bounding box.
                 let mut max_w: f32 = 0.0;
@@ -585,6 +596,14 @@ impl WidgetTree {
                     font_family: *font_family,
                 });
             }
+            Widget::RichText { spans, font_size } => {
+                draw_list.rich_texts.push(RichTextCommand {
+                    spans: spans.clone(),
+                    x: node.rect.x,
+                    y: node.rect.y,
+                    font_size: *font_size,
+                });
+            }
         }
 
         // Draw children on top.
@@ -595,12 +614,13 @@ impl WidgetTree {
 }
 
 // ---------------------------------------------------------------------------
-// Tier 2 UI-DEMO: themed panel with multi-font labels
+// Tier 3 UI-DEMO: themed panel with multi-font labels + rich text
 // ---------------------------------------------------------------------------
 
 /// Build the demo widget tree using Theme constants.
-/// Tier 2: parchment panel with themed colors, Serif header (16pt),
-/// Serif body (12pt), Mono warning (9pt).
+/// Tier 3: parchment panel with themed colors, Serif header (16pt),
+/// Serif body (12pt), Mono warning (9pt), and a rich text block
+/// mixing serif body with mono inline data and gold highlights.
 pub fn demo_tree(theme: &Theme) -> WidgetTree {
     let mut tree = WidgetTree::new();
 
@@ -612,7 +632,7 @@ pub fn demo_tree(theme: &Theme) -> WidgetTree {
         shadow_width: theme.panel_shadow_width,
     });
     tree.set_position(panel, Position::Fixed { x: 20.0, y: 20.0 });
-    tree.set_sizing(panel, Sizing::Fixed(260.0), Sizing::Fixed(120.0));
+    tree.set_sizing(panel, Sizing::Fixed(320.0), Sizing::Fixed(160.0));
     tree.set_padding(panel, Edges::all(theme.panel_padding));
 
     // Gold header — Serif, header size
@@ -655,11 +675,45 @@ pub fn demo_tree(theme: &Theme) -> WidgetTree {
             font_family: theme.font_data_family,
         },
     );
+    let warning_y =
+        theme.font_header_size + theme.label_gap + theme.font_body_size + theme.label_gap;
     tree.set_position(
         warning,
         Position::Fixed {
             x: 0.0,
-            y: theme.font_header_size + theme.label_gap + theme.font_body_size + theme.label_gap,
+            y: warning_y,
+        },
+    );
+
+    // Rich text — mixed serif body + mono data + gold highlight (UI-R01)
+    let rich = tree.insert(
+        panel,
+        Widget::RichText {
+            spans: vec![
+                TextSpan {
+                    text: "Population: ".into(),
+                    color: theme.text_light,
+                    font_family: FontFamily::Serif,
+                },
+                TextSpan {
+                    text: "1,034,196".into(),
+                    color: theme.gold,
+                    font_family: FontFamily::Mono,
+                },
+                TextSpan {
+                    text: " souls".into(),
+                    color: theme.text_light,
+                    font_family: FontFamily::Serif,
+                },
+            ],
+            font_size: theme.font_body_size,
+        },
+    );
+    tree.set_position(
+        rich,
+        Position::Fixed {
+            x: 0.0,
+            y: warning_y + theme.font_data_size + theme.label_gap,
         },
     );
 
@@ -980,5 +1034,161 @@ mod tests {
         assert_eq!(dl.texts[1].font_family, FontFamily::Mono);
         assert_eq!(dl.texts[1].text, "Mono Data");
         assert!((dl.texts[1].font_size - 9.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn rich_text_draw_command() {
+        let mut tree = WidgetTree::new();
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: [0.5; 4],
+            border_color: [1.0; 4],
+            border_width: 2.0,
+            shadow_width: 0.0,
+        });
+        tree.set_position(panel, Position::Fixed { x: 10.0, y: 10.0 });
+        tree.set_sizing(panel, Sizing::Fixed(400.0), Sizing::Fixed(100.0));
+        tree.set_padding(panel, Edges::all(8.0));
+
+        let gold = [0.78, 0.66, 0.31, 1.0];
+        let white = [1.0, 1.0, 1.0, 1.0];
+
+        let rich = tree.insert(
+            panel,
+            Widget::RichText {
+                spans: vec![
+                    TextSpan {
+                        text: "Name: ".into(),
+                        color: white,
+                        font_family: FontFamily::Serif,
+                    },
+                    TextSpan {
+                        text: "Jean Valjean".into(),
+                        color: gold,
+                        font_family: FontFamily::Serif,
+                    },
+                ],
+                font_size: 12.0,
+            },
+        );
+        tree.set_position(rich, Position::Fixed { x: 0.0, y: 0.0 });
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        assert_eq!(dl.panels.len(), 1);
+        assert_eq!(dl.texts.len(), 0);
+        assert_eq!(dl.rich_texts.len(), 1);
+
+        let cmd = &dl.rich_texts[0];
+        assert_eq!(cmd.spans.len(), 2);
+        assert_eq!(cmd.spans[0].text, "Name: ");
+        assert_eq!(cmd.spans[0].color, white);
+        assert_eq!(cmd.spans[0].font_family, FontFamily::Serif);
+        assert_eq!(cmd.spans[1].text, "Jean Valjean");
+        assert_eq!(cmd.spans[1].color, gold);
+        assert!((cmd.font_size - 12.0).abs() < 0.01);
+        // Position = panel (10,10) + padding (8,8)
+        assert!((cmd.x - 18.0).abs() < 0.01);
+        assert!((cmd.y - 18.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn rich_text_measure() {
+        let mut tree = WidgetTree::new();
+        let rich = tree.insert_root(Widget::RichText {
+            spans: vec![
+                TextSpan {
+                    text: "Hello ".into(),
+                    color: [1.0; 4],
+                    font_family: FontFamily::Serif,
+                },
+                TextSpan {
+                    text: "World".into(),
+                    color: [0.8; 4],
+                    font_family: FontFamily::Mono,
+                },
+            ],
+            font_size: 14.0,
+        });
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let node = tree.get(rich).expect("rich text exists");
+        // 11 total chars ("Hello " + "World"), intrinsic width > 0
+        assert!(node.measured.width > 0.0);
+        assert!(node.measured.height > 0.0);
+    }
+
+    #[test]
+    fn rich_text_empty_spans() {
+        let mut tree = WidgetTree::new();
+        let rich = tree.insert_root(Widget::RichText {
+            spans: vec![],
+            font_size: 12.0,
+        });
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        assert_eq!(dl.rich_texts.len(), 1);
+        assert!(dl.rich_texts[0].spans.is_empty());
+
+        let node = tree.get(rich).expect("exists");
+        assert!((node.measured.width - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn demo_tree_includes_rich_text() {
+        let theme = Theme::default();
+        let mut tree = demo_tree(&theme);
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl);
+
+        // Panel bg
+        assert_eq!(dl.panels.len(), 1);
+        // 3 labels (header, body, warning) + 1 rich text
+        assert_eq!(dl.texts.len(), 3);
+        assert_eq!(dl.rich_texts.len(), 1);
+
+        // Rich text has 3 spans: "Population: " + "1,034,196" + " souls"
+        let rt = &dl.rich_texts[0];
+        assert_eq!(rt.spans.len(), 3);
+        assert_eq!(rt.spans[0].text, "Population: ");
+        assert_eq!(rt.spans[0].font_family, FontFamily::Serif);
+        assert_eq!(rt.spans[1].text, "1,034,196");
+        assert_eq!(rt.spans[1].font_family, FontFamily::Mono);
+        assert_eq!(rt.spans[1].color, theme.gold);
+        assert_eq!(rt.spans[2].text, " souls");
+        assert!((rt.font_size - theme.font_body_size).abs() < 0.01);
     }
 }

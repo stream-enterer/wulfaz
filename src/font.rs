@@ -3,7 +3,9 @@ use std::ffi::CString;
 use std::os::raw::c_int;
 use std::rc::Rc;
 
-use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics as CosmicMetrics, Shaping};
+use cosmic_text::{
+    Attrs, Buffer, Color as CosmicColor, Family, FontSystem, Metrics as CosmicMetrics, Shaping,
+};
 use freetype::Library;
 use freetype::face::LoadFlag;
 
@@ -470,6 +472,152 @@ impl FontRenderer {
         font_size_px: f32,
     ) {
         self.prepare_text_shaped(text, x, y, color, family_name, font_size_px);
+    }
+
+    /// Append text vertices for a rich text block with per-span styles (UI-R01).
+    /// Uses cosmic-text `set_rich_text()` for mixed families/colors in one buffer.
+    /// Per-glyph color is read from `glyph.color_opt` in the layout output.
+    pub fn prepare_rich_text(
+        &mut self,
+        spans: &[(String, [f32; 4], &str)], // (text, color_srgb, family_name)
+        x: f32,
+        y: f32,
+        font_size_px: f32,
+    ) {
+        if spans.is_empty() {
+            return;
+        }
+
+        let line_height = (font_size_px * self.metrics.line_height / self.font_size_px).ceil();
+        let cosmic_metrics = CosmicMetrics::new(font_size_px, line_height);
+        let mut buffer = Buffer::new(&mut self.font_system, cosmic_metrics);
+        buffer.set_size(&mut self.font_system, None, None);
+
+        // Build per-span attrs with color + family
+        let rich_spans: Vec<(&str, Attrs)> = spans
+            .iter()
+            .map(|(text, color, family)| {
+                let cosmic_color = CosmicColor::rgba(
+                    (color[0] * 255.0).round() as u8,
+                    (color[1] * 255.0).round() as u8,
+                    (color[2] * 255.0).round() as u8,
+                    (color[3] * 255.0).round() as u8,
+                );
+                let attrs = Attrs::new()
+                    .family(Family::Name(family))
+                    .color(cosmic_color);
+                (text.as_str(), attrs)
+            })
+            .collect();
+
+        let default_attrs = Attrs::new();
+        buffer.set_rich_text(
+            &mut self.font_system,
+            rich_spans,
+            &default_attrs,
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(&mut self.font_system, false);
+
+        // Collect glyph positions with font_id and per-glyph color
+        let mut glyph_positions: Vec<(cosmic_text::fontdb::ID, u16, f32, i32, i32, [f32; 4])> =
+            Vec::new();
+        let fallback_color = [1.0_f32, 1.0, 1.0, 1.0]; // white fallback
+        for run in buffer.layout_runs() {
+            for glyph in run.glyphs.iter() {
+                let physical = glyph.physical((x, y + run.line_y), 1.0);
+                // Read per-glyph color from cosmic-text's layout output
+                let color = match glyph.color_opt {
+                    Some(c) => [
+                        c.r() as f32 / 255.0,
+                        c.g() as f32 / 255.0,
+                        c.b() as f32 / 255.0,
+                        c.a() as f32 / 255.0,
+                    ],
+                    None => fallback_color,
+                };
+                glyph_positions.push((
+                    physical.cache_key.font_id,
+                    physical.cache_key.glyph_id,
+                    f32::from_bits(physical.cache_key.font_size_bits),
+                    physical.x,
+                    physical.y,
+                    color,
+                ));
+            }
+        }
+        drop(buffer);
+
+        let question = self.glyphs.get(&(b'?' as u32)).copied();
+
+        for &(font_id, glyph_id, glyph_font_size, px, py, color) in &glyph_positions {
+            let cache_key = GlyphCacheKey {
+                font_id,
+                font_size_bits: glyph_font_size.to_bits(),
+                glyph_id,
+            };
+
+            if !self.shaped_glyphs.contains_key(&cache_key) && glyph_id != 0 {
+                self.rasterize_glyph_on_demand(font_id, glyph_font_size, glyph_id);
+            }
+
+            let info = if glyph_id == 0 {
+                match question {
+                    Some(g) => g,
+                    None => continue,
+                }
+            } else {
+                match self.shaped_glyphs.get(&cache_key) {
+                    Some(g) => *g,
+                    None => match question {
+                        Some(g) => g,
+                        None => continue,
+                    },
+                }
+            };
+
+            if info.width == 0 || info.height == 0 {
+                continue;
+            }
+
+            let x0 = (px as f32 + info.bearing_x as f32).floor();
+            let y0 = (py as f32 - info.bearing_y as f32).floor();
+            let x1 = x0 + info.width as f32;
+            let y1 = y0 + info.height as f32;
+
+            self.frame_vertices.push(TextVertex {
+                position: [x0, y0],
+                uv: [info.u0, info.v0],
+                color,
+            });
+            self.frame_vertices.push(TextVertex {
+                position: [x1, y0],
+                uv: [info.u1, info.v0],
+                color,
+            });
+            self.frame_vertices.push(TextVertex {
+                position: [x0, y1],
+                uv: [info.u0, info.v1],
+                color,
+            });
+
+            self.frame_vertices.push(TextVertex {
+                position: [x1, y0],
+                uv: [info.u1, info.v0],
+                color,
+            });
+            self.frame_vertices.push(TextVertex {
+                position: [x1, y1],
+                uv: [info.u1, info.v1],
+                color,
+            });
+            self.frame_vertices.push(TextVertex {
+                position: [x0, y1],
+                uv: [info.u0, info.v1],
+                color,
+            });
+        }
     }
 
     /// Map cell dimensions (width, height). Square cells for uniform grid.

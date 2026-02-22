@@ -1,4 +1,4 @@
-use super::draw::FontFamily;
+use super::draw::{FontFamily, TextSpan};
 
 /// Flat enum widget identity (DD-1).
 /// Closed set — we know all widget types. No trait objects.
@@ -28,5 +28,13 @@ pub enum Widget {
         border_color: [f32; 4], // border sRGB RGBA
         font_size: f32,         // pixels
         font_family: FontFamily,
+    },
+
+    /// Mixed-style text block (DD-4, UI-R01).
+    /// Each span carries its own color and font family.
+    /// Font size is shared across all spans.
+    RichText {
+        spans: Vec<TextSpan>,
+        font_size: f32, // pixels — shared across all spans
     },
 }

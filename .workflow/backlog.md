@@ -130,12 +130,12 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 |------|-------|-----------|
 | 1 — Foundation | COMPLETE | Colored text + panel backgrounds + widget tree |
 | 2 — Styled Panels | COMPLETE | Theme + mouse input |
-| 3 — Full Widget Set | 3 | Rich text + scroll list + tooltips |
+| 3 — Full Widget Set | 2 | Rich text + scroll list + tooltips |
 | 4 — Game Integration | 5 (I01a-d + I02) | Real game UI replaces string rendering |
 | 5 — Polish | 2 | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-11 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+10 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -205,12 +205,6 @@ All three tasks can be built in parallel once their deps are met. R01 needs P01+
 - Every widget type needed for game UI panels
 
 **UI-DEMO after Tier 3:** Previous demo plus: a ScrollList with 100 dummy items (virtual-scrolled), a rich text block mixing serif body with mono inline data and gold highlights, a button that spawns a 3-level nested tooltip chain demonstrating hover delay and recursive dismiss.
-
-- **UI-R01** — Rich text rendering. Needs: UI-P01, UI-P02. Decisions resolved by DD-4.
-  - Leverage cosmic-text `set_rich_text()` for mixed-style text: `&[(&str, Attrs)]` spans with different families, weights, colors per span.
-  - Styling by widget type initially (per DD-4): Labels = white, Headers = gold, Warnings = red. No inline markup parser.
-  - Inline icons deferred (per DD-4).
-  - Per-vertex color from UI-P01 carries the color for each glyph. `prepare_text_shaped()` reads `glyph.color_opt` from cosmic-text's layout output and writes it into the vertex color attribute.
 
 - **UI-W03** — ScrollList widget. Needs: UI-W01, UI-W02.
   - Scrollable content area: `content_height` measured from children, `scroll_offset: f32` tracks position.

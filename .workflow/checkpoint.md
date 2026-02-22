@@ -4,28 +4,28 @@
 None
 
 ## Completed
-UI-W02 — Input routing + hit testing — COMPLETE
+UI-R01 — Rich text rendering — COMPLETE
 
-- `Rect::contains(px, py)` for point-in-rect tests
-- `WidgetTree::hit_test(x, y)` — back-to-front traversal returns topmost widget
-- `WidgetTree::focusable_widgets()` — depth-first collection of Buttons for Tab cycling
-- `UiState` struct: hovered, focused, pressed, captured, drag tracking
-- `handle_cursor_moved` / `handle_mouse_input` / `handle_key_input` / `handle_scroll`
-- Mouse capture holds during drag (threshold 4px), released on mouse-up
-- Tab cycles focus through focusable widgets (Buttons)
-- Click on Button sets focus; click outside clears focus
-- UI events consumed before game input (keyboard, mouse, scroll)
-- Persistent `ui_tree` + `ui_state` on App (not rebuilt each frame)
-- 11 new tests, all 246 tests pass, zero warnings
+- `TextSpan` struct in `draw.rs`: text + color + font_family per span
+- `RichTextCommand` in `draw.rs`: spans + position + shared font_size
+- `Widget::RichText` variant: holds `Vec<TextSpan>` + font_size
+- `DrawList.rich_texts` field for rich text draw commands
+- `FontRenderer::prepare_rich_text()`: uses cosmic-text `set_rich_text()` with per-span `Attrs` (color + family), reads `glyph.color_opt` for per-vertex color
+- Wired through `measure_node`, `draw_node`, and main.rs render loop
+- Demo tree updated: "Population: 1,034,196 souls" mixing Serif body + Mono gold data
+- 4 new tests: rich_text_draw_command, rich_text_measure, rich_text_empty_spans, demo_tree_includes_rich_text
+- All 250 tests pass, zero warnings
 
 ## Files Modified
-- src/ui/input.rs (new — UiEvent, MouseButton, UiState, 11 tests)
-- src/ui/mod.rs (Rect::contains, hit_test, focusable_widgets, mod input)
-- src/main.rs (UiState + ui_tree on App, event routing)
+- src/ui/draw.rs (TextSpan, RichTextCommand, DrawList.rich_texts)
+- src/ui/widget.rs (Widget::RichText variant)
+- src/ui/mod.rs (measure/draw/re-exports, demo_tree, 4 tests)
+- src/font.rs (prepare_rich_text with cosmic-text set_rich_text + color_opt)
+- src/main.rs (render loop for rich_texts)
 
 ## Next Action
 Pick next task from backlog. Unblocked candidates:
-- UI-R01 — Rich text rendering (needs P01+P02, both done)
+- UI-W03 — ScrollList widget (needs W01+W02, both done)
+- UI-W04 — Tooltip system (needs W01+W02, both done)
 - UI-I01a — Status bar (needs W01+R02, both done)
 - UI-I02 — Map overlay (needs P01+P03, both done)
-Tier 3 tasks W03/W04 now unblocked (need W01+W02, both done).

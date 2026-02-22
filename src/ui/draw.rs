@@ -44,11 +44,32 @@ pub struct TextCommand {
     pub font_family: FontFamily,
 }
 
+/// A styled text span within a RichText widget (DD-4).
+/// Each span carries its own color and font family.
+/// Font size is shared across all spans (set on the widget/command).
+#[derive(Debug, Clone)]
+pub struct TextSpan {
+    pub text: String,
+    pub color: [f32; 4], // sRGB RGBA
+    pub font_family: FontFamily,
+}
+
+/// Intermediate draw command for rich text with mixed styles.
+/// Consumed by `FontRenderer::prepare_rich_text()`.
+#[derive(Debug, Clone)]
+pub struct RichTextCommand {
+    pub spans: Vec<TextSpan>,
+    pub x: f32,
+    pub y: f32,
+    pub font_size: f32, // shared across all spans
+}
+
 /// Collects draw commands from the widget tree.
 /// Decouples widget logic from GPU renderers.
 pub struct DrawList {
     pub panels: Vec<PanelCommand>,
     pub texts: Vec<TextCommand>,
+    pub rich_texts: Vec<RichTextCommand>,
 }
 
 impl DrawList {
@@ -56,11 +77,13 @@ impl DrawList {
         Self {
             panels: Vec::new(),
             texts: Vec::new(),
+            rich_texts: Vec::new(),
         }
     }
 
     pub fn clear(&mut self) {
         self.panels.clear();
         self.texts.clear();
+        self.rich_texts.clear();
     }
 }
