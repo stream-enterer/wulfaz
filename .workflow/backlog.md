@@ -122,14 +122,6 @@ Manager structs (ModalStack, NotificationManager, PanelManager, ContextMenu) eac
   - Max visible: 5 notifications. Excess queued until space opens.
   - Test: push 3 notifications, advance time past duration of first, assert first is dismissed and remaining 2 shift up.
 
-- **UI-303** — Context menu (right-click). Needs: UI-101 (Column for menu items), UI-104 (clipping for screen-edge adjustment), UI-305. Blocks: UI-400, UI-406.
-  - Add `ContextMenu` struct in `src/ui/context_menu.rs`: spawns a Column of clickable labels at cursor position on right-click.
-  - Menu is a root widget (like dropdown overlay) inserted via `insert_root()`. Positioned at click coords, clamped to screen bounds.
-  - Each menu item: `{ label: String, action: String, enabled: bool }`. Disabled items shown in `theme.disabled` color, not clickable.
-  - Clicking an item fires a callback (store action string, builder checks it next frame), then removes the menu.
-  - Clicking outside or pressing Escape dismisses the menu.
-  - Supports nested submenus: hovering an item with children spawns a child menu to the right. Max nesting depth: 2.
-  - Test: spawn context menu at (100, 100), click item 1, assert menu is removed and action string matches.
 
 - **UI-306** — Panel stack / window management. Needs: UI-305 (callback dispatch for close buttons), UI-307 (z-order tiers). Blocks: UI-400, UI-402, UI-405, UI-412, UI-413, UI-415.
   - Multiple panels open simultaneously (character panel, outliner, event log — all visible in CK3).

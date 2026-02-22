@@ -1,4 +1,5 @@
 mod animation;
+mod context_menu;
 pub(crate) mod demo;
 mod draw;
 mod input;
@@ -10,6 +11,8 @@ mod widget;
 
 #[allow(unused_imports)] // Public API: used by main.rs for animation (UI-W05).
 pub use animation::{Animator, Easing};
+#[allow(unused_imports)] // Public API: used by main.rs for context menus (UI-303).
+pub use context_menu::{ContextMenu, MenuItem};
 #[allow(unused_imports)] // Public API: used by game panels constructing widgets.
 pub use draw::{
     DrawList, FontFamily, PanelCommand, RichTextCommand, SpriteCommand, TextCommand, TextSpan,
