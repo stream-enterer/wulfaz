@@ -118,6 +118,16 @@ pub enum Widget {
         tint: Option<[f32; 4]>, // optional tint multiply (sRGB RGBA)
     },
 
+    /// Checkbox/toggle with label (UI-203).
+    /// Draws a small bordered box (16x16 default) with a checkmark icon when checked,
+    /// and a text label to the right.
+    Checkbox {
+        checked: bool,
+        label: String,
+        color: [f32; 4], // text + border color sRGB RGBA
+        font_size: f32,  // pixels
+    },
+
     /// Drop-down select widget (UI-204).
     /// Closed: button showing `options[selected]` with down-arrow.
     /// Open: emits option labels below the trigger rect.

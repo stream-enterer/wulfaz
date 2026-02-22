@@ -1031,6 +1031,19 @@ impl WidgetTree {
                     height: *size,
                 }
             }
+            Widget::Checkbox {
+                label, font_size, ..
+            } => {
+                let scale = font_size / line_height;
+                let char_w = line_height * 0.6 * scale;
+                let text_h = line_height * scale;
+                let box_size = 16.0;
+                let gap = 6.0;
+                Size {
+                    width: box_size + gap + label.len() as f32 * char_w,
+                    height: box_size.max(text_h),
+                }
+            }
             Widget::Dropdown {
                 options, font_size, ..
             } => {
@@ -1228,6 +1241,53 @@ impl WidgetTree {
                     width: node.rect.width,
                     height: node.rect.height,
                     tint: tint.unwrap_or([1.0, 1.0, 1.0, 1.0]),
+                    clip,
+                });
+            }
+            Widget::Checkbox {
+                checked,
+                label,
+                color,
+                font_size,
+            } => {
+                let box_size = 16.0;
+                let gap = 6.0;
+                let box_y = node.rect.y + (node.rect.height - box_size).max(0.0) / 2.0;
+                // Box border.
+                draw_list.panels.push(PanelCommand {
+                    x: node.rect.x,
+                    y: box_y,
+                    width: box_size,
+                    height: box_size,
+                    bg_color: [0.0, 0.0, 0.0, 0.0],
+                    border_color: *color,
+                    border_width: 1.0,
+                    shadow_width: 0.0,
+                    clip,
+                });
+                // Checkmark when checked.
+                if *checked {
+                    draw_list.texts.push(TextCommand {
+                        text: "\u{2713}".to_string(),
+                        x: node.rect.x + 2.0,
+                        y: box_y + 1.0,
+                        color: *color,
+                        font_size: box_size - 4.0,
+                        font_family: FontFamily::default(),
+                        clip,
+                    });
+                }
+                // Label text.
+                let scale = font_size / line_height;
+                let text_h = line_height * scale;
+                let label_y = node.rect.y + (node.rect.height - text_h).max(0.0) / 2.0;
+                draw_list.texts.push(TextCommand {
+                    text: label.clone(),
+                    x: node.rect.x + box_size + gap,
+                    y: label_y,
+                    color: *color,
+                    font_size: *font_size,
+                    font_family: FontFamily::default(),
                     clip,
                 });
             }
@@ -1537,6 +1597,9 @@ impl WidgetTree {
                 if let Some(t) = tint {
                     t[3] *= opacity;
                 }
+            }
+            Widget::Checkbox { color, .. } => {
+                color[3] *= opacity;
             }
             Widget::Dropdown {
                 color, bg_color, ..
@@ -5522,5 +5585,87 @@ mod tests {
             }
             _ => panic!("expected Dropdown"),
         }
+    }
+
+    #[test]
+    fn checkbox_measure_includes_box_and_label() {
+        let mut tree = WidgetTree::new();
+        let cb = tree.insert_root(Widget::Checkbox {
+            checked: false,
+            label: "Enable".into(),
+            color: [1.0; 4],
+            font_size: 14.0,
+        });
+        let size = tree.measure_node(cb, 14.0);
+        // box_size=16 + gap=6 + label "Enable" (6 chars) * char_w(8.4) ≈ 72.4
+        assert!(
+            size.width > 60.0,
+            "width {:.1} should include box + gap + label",
+            size.width
+        );
+        assert!(
+            size.height >= 16.0,
+            "height {:.1} should be at least box_size",
+            size.height
+        );
+    }
+
+    #[test]
+    fn checkbox_unchecked_emits_box_and_label_only() {
+        let mut tree = WidgetTree::new();
+        let cb = tree.insert_root(Widget::Checkbox {
+            checked: false,
+            label: "Option".into(),
+            color: [1.0; 4],
+            font_size: 14.0,
+        });
+        tree.set_sizing(cb, Sizing::Fixed(200.0), Sizing::Fixed(20.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // 1 panel (box border), 1 text (label). No checkmark text.
+        assert_eq!(draw_list.panels.len(), 1, "unchecked: 1 panel for box");
+        assert_eq!(draw_list.texts.len(), 1, "unchecked: 1 text for label");
+        assert_eq!(draw_list.texts[0].text, "Option");
+    }
+
+    #[test]
+    fn checkbox_checked_emits_checkmark() {
+        let mut tree = WidgetTree::new();
+        let cb = tree.insert_root(Widget::Checkbox {
+            checked: true,
+            label: "Toggle".into(),
+            color: [1.0; 4],
+            font_size: 14.0,
+        });
+        tree.set_sizing(cb, Sizing::Fixed(200.0), Sizing::Fixed(20.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // 1 panel (box border), 2 texts (checkmark + label).
+        assert_eq!(draw_list.panels.len(), 1, "checked: 1 panel for box");
+        assert_eq!(
+            draw_list.texts.len(),
+            2,
+            "checked: 2 texts (checkmark + label)"
+        );
+        assert_eq!(draw_list.texts[0].text, "\u{2713}");
+        assert_eq!(draw_list.texts[1].text, "Toggle");
     }
 }
