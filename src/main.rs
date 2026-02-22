@@ -16,6 +16,8 @@ mod panel;
 mod registry;
 mod render;
 mod rng;
+#[allow(dead_code)] // Used by sprite render pass (UI-202c wires this up)
+mod sprite_renderer;
 mod systems;
 mod tile_map;
 #[allow(dead_code)] // Public API for Tier 2+ UI tasks

@@ -3,17 +3,22 @@ pub(crate) mod demo;
 mod draw;
 mod input;
 mod keybindings;
+pub(crate) mod sprite;
 mod theme;
 mod widget;
 
 #[allow(unused_imports)] // Public API: used by main.rs for animation (UI-W05).
 pub use animation::{Animator, Easing};
 #[allow(unused_imports)] // Public API: used by game panels constructing widgets.
-pub use draw::{DrawList, FontFamily, PanelCommand, RichTextCommand, TextCommand, TextSpan};
+pub use draw::{
+    DrawList, FontFamily, PanelCommand, RichTextCommand, SpriteCommand, TextCommand, TextSpan,
+};
 #[allow(unused_imports)] // Public API: used by main.rs for input routing (UI-W02).
 pub use input::{MapClick, MouseButton, UiEvent, UiState};
 #[allow(unused_imports)] // Public API: used by main.rs for keyboard shortcuts (UI-I03).
 pub use keybindings::{Action, KeyBindings, KeyCombo, ModifierFlags};
+#[allow(unused_imports)] // Public API: used by sprite renderer (UI-202b).
+pub use sprite::{SpriteAtlas, SpriteRect};
 pub use theme::Theme;
 #[allow(unused_imports)] // Public API: used by game panels setting tooltip content.
 pub use widget::{CrossAlign, TooltipContent, Widget};
@@ -1019,6 +1024,13 @@ impl WidgetTree {
                     }
                 }
             }
+            Widget::Icon { size, .. } => {
+                // Square icon.
+                Size {
+                    width: *size,
+                    height: *size,
+                }
+            }
         }
     }
 
@@ -1190,6 +1202,17 @@ impl WidgetTree {
                     border_color: [0.0; 4],
                     border_width: 0.0,
                     shadow_width: 0.0,
+                    clip,
+                });
+            }
+            Widget::Icon { sprite, tint, .. } => {
+                draw_list.sprites.push(SpriteCommand {
+                    sprite: sprite.clone(),
+                    x: node.rect.x,
+                    y: node.rect.y,
+                    width: node.rect.width,
+                    height: node.rect.height,
+                    tint: tint.unwrap_or([1.0, 1.0, 1.0, 1.0]),
                     clip,
                 });
             }
@@ -1422,6 +1445,11 @@ impl WidgetTree {
             }
             Widget::Separator { color, .. } => {
                 color[3] *= opacity;
+            }
+            Widget::Icon { tint, .. } => {
+                if let Some(t) = tint {
+                    t[3] *= opacity;
+                }
             }
         }
     }
@@ -5155,6 +5183,86 @@ mod tests {
             "horizontal separator height should be thickness: got {}",
             sep_node.rect.height
         );
+    }
+
+    // --- UI-202c: Icon widget tests ---
+
+    #[test]
+    fn icon_measures_square() {
+        let mut tree = WidgetTree::new();
+        let icon = tree.insert_root(Widget::Icon {
+            sprite: "heart".into(),
+            size: 16.0,
+            tint: None,
+        });
+        let measured = tree.measure_node(icon, 14.0);
+        assert!((measured.width - 16.0).abs() < 0.01);
+        assert!((measured.height - 16.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn icon_emits_sprite_command() {
+        let mut tree = WidgetTree::new();
+        let icon = tree.insert_root(Widget::Icon {
+            sprite: "sword".into(),
+            size: 24.0,
+            tint: Some([1.0, 0.0, 0.0, 1.0]),
+        });
+        tree.set_sizing(icon, Sizing::Fixed(24.0), Sizing::Fixed(24.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        assert_eq!(
+            draw_list.sprites.len(),
+            1,
+            "Icon should emit exactly 1 SpriteCommand"
+        );
+        assert_eq!(draw_list.sprites[0].sprite, "sword");
+        assert!((draw_list.sprites[0].width - 24.0).abs() < 0.1);
+        assert!(
+            (draw_list.sprites[0].tint[0] - 1.0).abs() < 0.01,
+            "red tint"
+        );
+        assert!(
+            (draw_list.sprites[0].tint[1] - 0.0).abs() < 0.01,
+            "no green"
+        );
+    }
+
+    #[test]
+    fn icon_default_tint_is_white() {
+        let mut tree = WidgetTree::new();
+        let icon = tree.insert_root(Widget::Icon {
+            sprite: "shield".into(),
+            size: 16.0,
+            tint: None,
+        });
+        tree.set_sizing(icon, Sizing::Fixed(16.0), Sizing::Fixed(16.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        assert_eq!(draw_list.sprites.len(), 1);
+        let tint = draw_list.sprites[0].tint;
+        assert!((tint[0] - 1.0).abs() < 0.01);
+        assert!((tint[1] - 1.0).abs() < 0.01);
+        assert!((tint[2] - 1.0).abs() < 0.01);
+        assert!((tint[3] - 1.0).abs() < 0.01);
     }
 
     #[test]

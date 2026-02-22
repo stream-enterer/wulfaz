@@ -109,4 +109,12 @@ pub enum Widget {
         thickness: f32,   // pixels
         horizontal: bool, // true = horizontal divider, false = vertical
     },
+
+    /// Sprite icon from the atlas (UI-202c).
+    /// `sprite` is the atlas region name. Renders as a square quad.
+    Icon {
+        sprite: String,         // atlas region name
+        size: f32,              // display size in pixels (square)
+        tint: Option<[f32; 4]>, // optional tint multiply (sRGB RGBA)
+    },
 }

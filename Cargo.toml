@@ -24,6 +24,7 @@ shapefile = { version = "0.7", features = ["yore"] }
 rusqlite = { version = "0.33", features = ["bundled"] }
 slotmap = "1"
 smallvec = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [lints.clippy]
 unwrap_used = "deny"

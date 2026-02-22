@@ -72,12 +72,27 @@ pub struct RichTextCommand {
     pub clip: Option<Rect>,
 }
 
+/// Intermediate draw command for a sprite quad (UI-202c).
+/// Consumed by `SpriteRenderer::add_sprite()`.
+#[derive(Debug, Clone)]
+pub struct SpriteCommand {
+    pub sprite: String, // atlas region name
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub tint: [f32; 4], // sRGB RGBA tint
+    /// Scissor-rect clip region (UI-104). None = no clipping.
+    pub clip: Option<Rect>,
+}
+
 /// Collects draw commands from the widget tree.
 /// Decouples widget logic from GPU renderers.
 pub struct DrawList {
     pub panels: Vec<PanelCommand>,
     pub texts: Vec<TextCommand>,
     pub rich_texts: Vec<RichTextCommand>,
+    pub sprites: Vec<SpriteCommand>,
 }
 
 impl DrawList {
@@ -86,6 +101,7 @@ impl DrawList {
             panels: Vec::new(),
             texts: Vec::new(),
             rich_texts: Vec::new(),
+            sprites: Vec::new(),
         }
     }
 
@@ -93,5 +109,6 @@ impl DrawList {
         self.panels.clear();
         self.texts.clear();
         self.rich_texts.clear();
+        self.sprites.clear();
     }
 }
