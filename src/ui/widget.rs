@@ -174,4 +174,15 @@ pub enum Widget {
         color: [f32; 4], // text + indicator color sRGB RGBA
         font_size: f32,  // pixels
     },
+
+    /// Tab container with a tab bar and content area (UI-301).
+    /// Tab bar is drawn by the widget. Children are the active tab's content,
+    /// laid out Column-style below the tab bar.
+    TabContainer {
+        tabs: Vec<String>,
+        active: usize,
+        tab_color: [f32; 4],    // inactive tab background sRGB RGBA
+        active_color: [f32; 4], // active tab background sRGB RGBA
+        font_size: f32,         // pixels
+    },
 }

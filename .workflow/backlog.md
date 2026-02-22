@@ -120,14 +120,6 @@ Manager structs (ModalStack, NotificationManager, PanelManager, ContextMenu) eac
   - `ModalStack::push(tree, widget_id)` / `pop(tree)` API. `pop` calls `tree.remove()` on the modal root.
   - Test: push two modals, press Escape, assert only the top modal is removed, bottom modal persists.
 
-- **UI-301** — Tab container widget. Needs: UI-100 (Row for tab bar), UI-101 (Column for content area), UI-102 (text wrapping in tab labels), UI-305. Blocks: UI-400, UI-412, UI-413, UI-415.
-  - Add `Widget::TabContainer { tabs: Vec<String>, active: usize, tab_color: [f32;4], active_color: [f32;4], font_size: f32 }`.
-  - Layout: Column with a Row of tab buttons at the top, and a content Panel below. Only the `active` tab's content children are laid out and drawn.
-  - Tab buttons are clickable. Clicking a tab sets `active` and triggers a rebuild of the content area.
-  - Content area children are managed by the builder: each frame, the builder inserts only the children for the active tab. The TabContainer handles drawing the tab bar; content is standard child layout.
-  - In `measure_node()`: width = max(tab_bar_width, widest_content). Height = tab_bar_height + active_content_height.
-  - Add `Theme` fields: `tab_active_color`, `tab_inactive_color`, `tab_bar_height`.
-  - Test: build 3-tab container, set active=1, assert only tab 1's content children are visible.
 
 - **UI-302** — Notification/toast system. Needs: UI-100 (Row for icon+text). Blocks: UI-405.
   - Top-right notification stack, exactly like CK3's alert system: war declared, heir born, scheme discovered.

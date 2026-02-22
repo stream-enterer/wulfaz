@@ -926,6 +926,64 @@ impl WidgetTree {
             return;
         }
 
+        // TabContainer: tab bar + Column-style content children (UI-301).
+        if let Widget::TabContainer { font_size, .. } = &node.widget {
+            let scale = font_size / line_height;
+            let tab_bar_h = line_height * scale + 6.0;
+            let children: Vec<WidgetId> = node.children.clone();
+            let parent_clip = node.clip_rect;
+
+            // Lay out children Column-style below the tab bar.
+            let mut cursor_y = content.y + tab_bar_h;
+            for &child_id in &children {
+                let child_measured = self.measure_node(child_id, line_height);
+                let Some(child) = self.arena.get(child_id) else {
+                    continue;
+                };
+                let cp = child.padding;
+                let cm = child.margin;
+                let child_h = match child.height {
+                    Sizing::Fixed(px) => px,
+                    Sizing::Percent(frac) => content.height * frac,
+                    Sizing::Fit => child_measured.height + cp.vertical(),
+                };
+                let child_w = match child.width {
+                    Sizing::Fixed(px) => px,
+                    Sizing::Percent(frac) => content.width * frac,
+                    Sizing::Fit => child_measured.width + cp.horizontal(),
+                };
+
+                if let Some(child_node) = self.arena.get_mut(child_id) {
+                    child_node.measured = child_measured;
+                    child_node.rect = Rect {
+                        x: content.x + cm.left,
+                        y: cursor_y + cm.top,
+                        width: child_w,
+                        height: child_h,
+                    };
+                    child_node.clip_rect = Self::merge_clips(parent_clip, child_node.clip_rect);
+                }
+
+                let child_content = Rect {
+                    x: content.x + cm.left + cp.left,
+                    y: cursor_y + cm.top + cp.top,
+                    width: (child_w - cp.horizontal()).max(0.0),
+                    height: (child_h - cp.vertical()).max(0.0),
+                };
+                let grandchildren: Vec<WidgetId> = self
+                    .arena
+                    .get(child_id)
+                    .map(|n| n.children.clone())
+                    .unwrap_or_default();
+                for gc in grandchildren {
+                    self.layout_node(gc, child_content, line_height);
+                }
+
+                cursor_y += child_h + cm.vertical();
+            }
+            return;
+        }
+
         // Propagate clip_rect from parent to children (UI-104).
         let parent_clip = node.clip_rect;
         let children: Vec<WidgetId> = node.children.clone();
@@ -1242,6 +1300,38 @@ impl WidgetTree {
                         width: header_w,
                         height: header_h,
                     }
+                }
+            }
+            Widget::TabContainer {
+                tabs, font_size, ..
+            } => {
+                let scale = font_size / line_height;
+                let char_w = line_height * 0.6 * scale;
+                let tab_pad = 8.0; // horizontal padding per tab
+                let tab_bar_h = line_height * scale + 6.0;
+                let tab_bar_w: f32 = tabs
+                    .iter()
+                    .map(|t| t.len() as f32 * char_w + tab_pad * 2.0)
+                    .sum();
+                // Content children measured Column-style.
+                let mut content_w = 0.0_f32;
+                let mut content_h = 0.0_f32;
+                for &child_id in &node.children {
+                    let child_measured = self.measure_node(child_id, line_height);
+                    if let Some(child) = self.arena.get(child_id) {
+                        content_w = content_w.max(
+                            child_measured.width
+                                + child.padding.horizontal()
+                                + child.margin.horizontal(),
+                        );
+                        content_h += child_measured.height
+                            + child.padding.vertical()
+                            + child.margin.vertical();
+                    }
+                }
+                Size {
+                    width: tab_bar_w.max(content_w),
+                    height: tab_bar_h + content_h,
                 }
             }
         }
@@ -1683,6 +1773,58 @@ impl WidgetTree {
                 }
                 // When expanded, fall through to the default child draw loop.
             }
+            Widget::TabContainer {
+                tabs,
+                active,
+                tab_color,
+                active_color,
+                font_size,
+            } => {
+                let scale = font_size / line_height;
+                let char_w = line_height * 0.6 * scale;
+                let tab_pad = 8.0;
+                let tab_bar_h = line_height * scale + 6.0;
+
+                // Draw tab buttons.
+                let mut tab_x = node.rect.x;
+                for (i, label) in tabs.iter().enumerate() {
+                    let tab_w = label.len() as f32 * char_w + tab_pad * 2.0;
+                    let is_active = i == *active;
+                    let bg = if is_active { *active_color } else { *tab_color };
+
+                    // Tab background.
+                    draw_list.panels.push(PanelCommand {
+                        x: tab_x,
+                        y: node.rect.y,
+                        width: tab_w,
+                        height: tab_bar_h,
+                        bg_color: bg,
+                        border_color: [0.0; 4],
+                        border_width: 0.0,
+                        shadow_width: 0.0,
+                        clip,
+                    });
+
+                    // Tab label — dimmed for inactive tabs.
+                    let text_color = if is_active {
+                        [1.0, 1.0, 1.0, 1.0]
+                    } else {
+                        [1.0, 1.0, 1.0, 0.6]
+                    };
+                    draw_list.texts.push(TextCommand {
+                        text: label.clone(),
+                        x: tab_x + tab_pad,
+                        y: node.rect.y + 3.0,
+                        color: text_color,
+                        font_size: *font_size,
+                        font_family: FontFamily::default(),
+                        clip,
+                    });
+
+                    tab_x += tab_w;
+                }
+                // Fall through to draw content children.
+            }
             Widget::ScrollList {
                 bg_color,
                 border_color,
@@ -1943,6 +2085,14 @@ impl WidgetTree {
             }
             Widget::Collapsible { color, .. } => {
                 color[3] *= opacity;
+            }
+            Widget::TabContainer {
+                tab_color,
+                active_color,
+                ..
+            } => {
+                tab_color[3] *= opacity;
+                active_color[3] *= opacity;
             }
         }
     }
@@ -6499,5 +6649,158 @@ mod tests {
         let order = tree.roots();
         assert_eq!(order[0], b, "b stays at Panel tier");
         assert_eq!(order[1], a, "a promoted to Overlay tier");
+    }
+
+    // ------------------------------------------------------------------
+    // TabContainer tests (UI-301)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn tab_container_measure_includes_tab_bar_and_content() {
+        let mut tree = WidgetTree::new();
+        let tc = tree.insert_root(Widget::TabContainer {
+            tabs: vec!["Alpha".into(), "Beta".into(), "Gamma".into()],
+            active: 0,
+            tab_color: [0.5; 4],
+            active_color: [0.8; 4],
+            font_size: 14.0,
+        });
+        // Add a content child (active tab's content).
+        let label = tree.insert(
+            tc,
+            Widget::Label {
+                text: "Tab content".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        tree.set_sizing(label, Sizing::Fixed(120.0), Sizing::Fixed(30.0));
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let node = tree.get(tc).unwrap();
+        // Tab bar height = line_height * scale + 6 = 14 + 6 = 20.
+        // Label intrinsic height = font_size = 14. Plus child padding (none) = 14.
+        // Fixed sizing on child is used by layout_node, not measure_node.
+        // Total measured height = 20 + 14 = 34. Layout may differ from Fit.
+        let tab_bar_h = 14.0 + 6.0;
+        assert!(
+            node.rect.height >= tab_bar_h + 14.0,
+            "height {} should be >= tab_bar(20) + label(14)",
+            node.rect.height
+        );
+    }
+
+    #[test]
+    fn tab_container_draws_tab_buttons_and_content() {
+        let mut tree = WidgetTree::new();
+        let tc = tree.insert_root(Widget::TabContainer {
+            tabs: vec!["Tab A".into(), "Tab B".into()],
+            active: 1,
+            tab_color: [0.4; 4],
+            active_color: [0.9, 0.9, 0.9, 1.0],
+            font_size: 14.0,
+        });
+        tree.set_position(tc, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(tc, Sizing::Fixed(300.0), Sizing::Fixed(200.0));
+
+        tree.insert(
+            tc,
+            Widget::Label {
+                text: "Content B".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // 2 tab button panels.
+        assert_eq!(draw_list.panels.len(), 2, "2 tab bg panels");
+        // 3 texts: "Tab A" + "Tab B" + "Content B".
+        assert_eq!(draw_list.texts.len(), 3, "2 tab labels + 1 content label");
+        assert_eq!(draw_list.texts[0].text, "Tab A");
+        assert_eq!(draw_list.texts[1].text, "Tab B");
+        assert_eq!(draw_list.texts[2].text, "Content B");
+    }
+
+    #[test]
+    fn tab_container_active_tab_gets_active_color() {
+        let mut tree = WidgetTree::new();
+        let tc = tree.insert_root(Widget::TabContainer {
+            tabs: vec!["One".into(), "Two".into()],
+            active: 0,
+            tab_color: [0.3, 0.3, 0.3, 1.0],
+            active_color: [0.9, 0.9, 0.9, 1.0],
+            font_size: 14.0,
+        });
+        tree.set_position(tc, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(tc, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // First tab (active=0) gets active_color.
+        assert!(
+            (draw_list.panels[0].bg_color[0] - 0.9).abs() < 0.01,
+            "active tab has active_color"
+        );
+        // Second tab gets inactive tab_color.
+        assert!(
+            (draw_list.panels[1].bg_color[0] - 0.3).abs() < 0.01,
+            "inactive tab has tab_color"
+        );
+    }
+
+    #[test]
+    fn tab_container_apply_opacity() {
+        let mut tree = WidgetTree::new();
+        let tc = tree.insert_root(Widget::TabContainer {
+            tabs: vec!["X".into()],
+            active: 0,
+            tab_color: [0.5, 0.5, 0.5, 1.0],
+            active_color: [0.8, 0.8, 0.8, 1.0],
+            font_size: 14.0,
+        });
+        tree.set_subtree_opacity(tc, 0.5);
+        let node = tree.get(tc).unwrap();
+        if let Widget::TabContainer {
+            tab_color,
+            active_color,
+            ..
+        } = &node.widget
+        {
+            assert!((tab_color[3] - 0.5).abs() < 0.01);
+            assert!((active_color[3] - 0.5).abs() < 0.01);
+        } else {
+            panic!("expected TabContainer");
+        }
     }
 }

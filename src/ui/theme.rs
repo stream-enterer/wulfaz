@@ -115,6 +115,14 @@ pub struct Theme {
     /// Default separator thickness in pixels.
     pub separator_thickness: f32,
 
+    // -- Tab container defaults (UI-301) --
+    /// Active tab background color (sRGB RGBA).
+    pub tab_active_color: [f32; 4],
+    /// Inactive tab background color (sRGB RGBA).
+    pub tab_inactive_color: [f32; 4],
+    /// Tab bar row height in pixels.
+    pub tab_bar_height: f32,
+
     // -- Animation defaults (UI-W05) --
     /// Hover tooltip fade-in duration (milliseconds).
     pub anim_tooltip_fade_ms: u64,
@@ -202,6 +210,11 @@ impl Default for Theme {
             // Separator defaults (UI-201)
             separator_color: hex_a(0xC8, 0xA8, 0x50, 0.3), // gold at 30% alpha
             separator_thickness: 1.0,
+
+            // Tab container defaults (UI-301)
+            tab_active_color: hex_a(0xD4, 0xB8, 0x96, 0.95), // parchment (same as bg)
+            tab_inactive_color: hex_a(0xA0, 0x88, 0x68, 0.7), // darker parchment, lower alpha
+            tab_bar_height: 24.0,
 
             // Animation defaults (UI-W05)
             anim_tooltip_fade_ms: 150,

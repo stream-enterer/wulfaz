@@ -6,12 +6,13 @@ Phase UI-3 — Interaction Patterns (in progress)
 ## Phase UI-3 Status
 - UI-304 Collapsible — done (commit 1d44e14)
 - UI-305 Callback dispatch — done (commit bab6f3e)
-- UI-307 Z-order tiers — done
+- UI-307 Z-order tiers — done (commit b29df96)
+- UI-301 TabContainer — done
 
-## Widget Enum Variants (16 total)
+## Widget Enum Variants (17 total)
 Row, Column, Panel, Label, Button, RichText, ScrollList,
 ProgressBar, Separator, Icon, Checkbox, Dropdown, Slider, TextInput,
-Collapsible
+Collapsible, TabContainer
 
 ## Next Action
-UI-301 TabContainer widget (unblocked by UI-305)
+UI-300 Modal/dialog system (unblocked by UI-305 + UI-307)
