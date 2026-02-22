@@ -80,6 +80,7 @@ pub fn build_demo(
             color: theme.gold,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
+            wrap: false,
         },
     );
     tree.set_position(sec_label, Position::Fixed { x: 0.0, y });
@@ -106,6 +107,7 @@ pub fn build_demo(
             color: theme.text_light,
             font_size: theme.font_header_size,
             font_family: theme.font_header_family,
+            wrap: false,
         },
     );
     tree.set_position(header_sample, Position::Fixed { x: 0.0, y });
@@ -118,6 +120,7 @@ pub fn build_demo(
             color: theme.text_light,
             font_size: theme.font_body_size,
             font_family: theme.font_body_family,
+            wrap: false,
         },
     );
     tree.set_position(body_sample, Position::Fixed { x: 0.0, y });
@@ -130,6 +133,7 @@ pub fn build_demo(
             color: theme.text_light,
             font_size: theme.font_data_size,
             font_family: theme.font_data_family,
+            wrap: false,
         },
     );
     tree.set_position(data_sample, Position::Fixed { x: 0.0, y });
@@ -142,6 +146,7 @@ pub fn build_demo(
             color: theme.danger,
             font_size: theme.font_data_size,
             font_family: theme.font_data_family,
+            wrap: false,
         },
     );
     tree.set_position(warning_sample, Position::Fixed { x: 0.0, y });
@@ -154,6 +159,7 @@ pub fn build_demo(
             color: theme.disabled,
             font_size: theme.font_data_size,
             font_family: theme.font_data_family,
+            wrap: false,
         },
     );
     tree.set_position(disabled_sample, Position::Fixed { x: 0.0, y });
@@ -169,6 +175,7 @@ pub fn build_demo(
             color: theme.gold,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
+            wrap: false,
         },
     );
     tree.set_position(rich_label, Position::Fixed { x: 0.0, y });
@@ -223,6 +230,7 @@ pub fn build_demo(
             color: theme.gold,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
+            wrap: false,
         },
     );
     tree.set_position(btn_label, Position::Fixed { x: 0.0, y });
@@ -317,6 +325,7 @@ pub fn build_demo(
             color: theme.gold,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
+            wrap: false,
         },
     );
     tree.set_position(scroll_label, Position::Fixed { x: 0.0, y });
@@ -369,6 +378,7 @@ pub fn build_demo(
                 color: theme.text_dark,
                 font_size: theme.font_data_size,
                 font_family: theme.font_data_family,
+                wrap: false,
             },
         );
     }
@@ -384,6 +394,7 @@ pub fn build_demo(
             color: theme.gold,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
+            wrap: false,
         },
     );
     tree.set_position(live_label, Position::Fixed { x: 0.0, y });
@@ -555,6 +566,7 @@ pub fn build_demo(
                 color: theme.disabled,
                 font_size: theme.font_data_size,
                 font_family: theme.font_data_family,
+                wrap: false,
             },
         );
         tree.set_position(no_entity, Position::Fixed { x: 0.0, y });
@@ -572,6 +584,7 @@ pub fn build_demo(
             color: theme.gold,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
+            wrap: false,
         },
     );
     tree.set_position(tooltip_label, Position::Fixed { x: 0.0, y });
@@ -613,6 +626,7 @@ pub fn build_demo(
                 color: theme.text_light,
                 font_size: theme.font_body_size,
                 font_family: FontFamily::Serif,
+                wrap: false,
             },
             None,
         ),
@@ -622,6 +636,7 @@ pub fn build_demo(
                 color: theme.gold,
                 font_size: theme.font_data_size,
                 font_family: FontFamily::Mono,
+                wrap: false,
             },
             Some(level3),
         ),
@@ -634,6 +649,7 @@ pub fn build_demo(
                 color: theme.text_light,
                 font_size: theme.font_body_size,
                 font_family: FontFamily::Serif,
+                wrap: false,
             },
             None,
         ),
@@ -643,6 +659,7 @@ pub fn build_demo(
                 color: theme.gold,
                 font_size: theme.font_data_size,
                 font_family: FontFamily::Mono,
+                wrap: false,
             },
             Some(level2),
         ),

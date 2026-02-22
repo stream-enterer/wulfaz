@@ -1,21 +1,17 @@
 # Checkpoint
 
 ## Active Task
-UI-100 + UI-101 — Row and Column auto-layout containers — COMPLETE
+UI-102 — Text wrapping for Labels — COMPLETE
 
-## Completed
-- Added `CrossAlign` enum (Start, Center, End, Stretch) to `widget.rs`
-- Added `Widget::Row { gap, align }` and `Widget::Column { gap, align }` variants
-- Implemented `measure_node()` for both: Row sums widths + gaps, Column sums heights + gaps
-- Implemented `layout_node()` for both: two-pass layout (measure then position)
-  - Flex behavior: Percent-sized children split remaining space after fixed/fit children
-  - CrossAlign positioning: Start/Center/End/Stretch for cross-axis
-- Updated `draw_node()` and `apply_opacity()` with no-op arms (transparent containers)
-- 7 new tests: gap spacing, cross-align center, percent splitting, no draw commands
+## Completed This Session
+- UI-100 + UI-101 — Row/Column auto-layout (committed)
+- UI-102 — Text wrapping: `wrap: bool` on Label, word-boundary breaking, multi-line TextCommands
 
 ## Files Modified
-- src/ui/widget.rs (CrossAlign enum, Row/Column variants)
-- src/ui/mod.rs (measure_node, layout_node, draw_node, apply_opacity, tests)
+- src/ui/widget.rs (wrap field on Label)
+- src/ui/mod.rs (wrap_text helper, layout_node height adjust, draw_node multi-line, 6 new tests)
+- src/ui/demo.rs (wrap: false on all existing Label constructors)
+- src/ui/input.rs (wrap: false on all existing Label constructors)
 
 ## Next Action
-UI-102 through UI-108 remaining in Phase UI-1 backlog
+UI-103 — Min/Max size constraints

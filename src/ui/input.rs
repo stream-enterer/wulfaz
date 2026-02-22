@@ -445,6 +445,7 @@ impl UiState {
                         color: theme.text_light,
                         font_size: theme.font_body_size,
                         font_family: theme.font_body_family,
+                        wrap: false,
                     },
                 );
             }
@@ -1059,6 +1060,7 @@ mod tests {
                     color: [1.0; 4],
                     font_size: 12.0,
                     font_family: FontFamily::default(),
+                    wrap: false,
                 },
                 None,
             ),
@@ -1068,6 +1070,7 @@ mod tests {
                     color: [0.8, 0.6, 0.3, 1.0],
                     font_size: 9.0,
                     font_family: FontFamily::default(),
+                    wrap: false,
                 },
                 Some(level2),
             ),

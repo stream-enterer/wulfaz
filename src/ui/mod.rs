@@ -449,6 +449,28 @@ impl WidgetTree {
             Position::Percent { x, y } => (parent_content.width * x, parent_content.height * y),
         };
 
+        // For wrapped labels with Fit height, recompute height based on resolved width (UI-102).
+        let resolved_h = if let Widget::Label {
+            text,
+            font_size,
+            wrap: true,
+            ..
+        } = &node.widget
+        {
+            if matches!(node.height, Sizing::Fit) && resolved_w > 0.0 {
+                let scale = font_size / line_height;
+                let char_w = line_height * 0.6 * scale;
+                let line_h = line_height * scale;
+                let content_w = (resolved_w - node.padding.horizontal()).max(0.0);
+                let n_lines = wrapped_line_count(text, content_w, char_w);
+                n_lines as f32 * line_h + node.padding.vertical()
+            } else {
+                resolved_h
+            }
+        } else {
+            resolved_h
+        };
+
         node.rect = Rect {
             x: parent_content.x + node.margin.left + ox,
             y: parent_content.y + node.margin.top + oy,
@@ -935,15 +957,35 @@ impl WidgetTree {
                 color,
                 font_size,
                 font_family,
+                wrap,
             } => {
-                draw_list.texts.push(TextCommand {
-                    text: text.clone(),
-                    x: node.rect.x,
-                    y: node.rect.y,
-                    color: *color,
-                    font_size: *font_size,
-                    font_family: *font_family,
-                });
+                if *wrap && node.rect.width > 0.0 {
+                    // Word-wrap: break text into lines that fit within rect width.
+                    let scale = font_size / 14.0; // approximate; consistent with measure_node
+                    let char_w = 14.0 * 0.6 * scale;
+                    let line_h = 14.0 * scale;
+                    let max_chars = (node.rect.width / char_w).max(1.0) as usize;
+                    let lines = wrap_text(text, max_chars);
+                    for (i, line) in lines.iter().enumerate() {
+                        draw_list.texts.push(TextCommand {
+                            text: line.clone(),
+                            x: node.rect.x,
+                            y: node.rect.y + i as f32 * line_h,
+                            color: *color,
+                            font_size: *font_size,
+                            font_family: *font_family,
+                        });
+                    }
+                } else {
+                    draw_list.texts.push(TextCommand {
+                        text: text.clone(),
+                        x: node.rect.x,
+                        y: node.rect.y,
+                        color: *color,
+                        font_size: *font_size,
+                        font_family: *font_family,
+                    });
+                }
             }
             Widget::Button {
                 text,
@@ -1217,6 +1259,45 @@ impl WidgetTree {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Text wrapping helper (UI-102)
+// ---------------------------------------------------------------------------
+
+/// Break `text` into lines of at most `max_chars` characters, splitting at word boundaries.
+/// If a single word exceeds `max_chars`, it is placed on its own line (no mid-word break).
+fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
+    if max_chars == 0 {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+
+    for word in text.split_whitespace() {
+        if current_line.is_empty() {
+            current_line.push_str(word);
+        } else if current_line.len() + 1 + word.len() <= max_chars {
+            current_line.push(' ');
+            current_line.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut current_line));
+            current_line.push_str(word);
+        }
+    }
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+/// Compute the number of wrapped lines for a label, given resolved width and font metrics.
+fn wrapped_line_count(text: &str, width: f32, char_w: f32) -> usize {
+    let max_chars = (width / char_w).max(1.0) as usize;
+    wrap_text(text, max_chars).len()
+}
+
 /// Build the status bar panel at the top of the screen (UI-I01a).
 ///
 /// Chrome panel: permanent, rebuilt every frame with live simulation data.
@@ -1417,6 +1498,7 @@ pub fn build_hover_tooltip(
                 color: theme.disabled,
                 font_size: theme.font_data_size,
                 font_family: theme.font_data_family,
+                wrap: false,
             },
         );
         tree.set_position(q, Position::Fixed { x: 0.0, y });
@@ -1486,6 +1568,7 @@ pub fn build_hover_tooltip(
                     color: theme.disabled,
                     font_size: theme.font_data_size,
                     font_family: theme.font_data_family,
+                    wrap: false,
                 },
             );
             tree.set_position(more, Position::Fixed { x: 0.0, y });
@@ -1499,6 +1582,7 @@ pub fn build_hover_tooltip(
                     color: theme.disabled,
                     font_size: theme.font_data_size,
                     font_family: theme.font_data_family,
+                    wrap: false,
                 },
             );
             tree.set_position(yr, Position::Fixed { x: 0.0, y });
@@ -1904,6 +1988,7 @@ pub fn build_entity_inspector(
             color: theme.disabled,
             font_size: theme.font_data_size,
             font_family: FontFamily::Mono,
+            wrap: false,
         },
     );
     tree.set_position(pos_label, Position::Fixed { x: 0.0, y });
@@ -2074,6 +2159,7 @@ pub fn build_entity_inspector(
                 color: theme.disabled,
                 font_size: theme.font_data_size,
                 font_family: FontFamily::Mono,
+                wrap: false,
             },
         );
         tree.set_position(gait_label, Position::Fixed { x: 0.0, y });
@@ -2109,6 +2195,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
         let root_node = tree.get(root).expect("root exists");
@@ -2135,6 +2222,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
         let grandchild = tree.insert(
@@ -2144,6 +2232,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
 
@@ -2173,6 +2262,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
 
@@ -2213,6 +2303,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
         tree.set_position(label, Position::Fixed { x: 0.0, y: 0.0 });
@@ -2281,6 +2372,7 @@ mod tests {
                 color: [0.78, 0.66, 0.31, 1.0],
                 font_size: 16.0,
                 font_family: FontFamily::Serif,
+                wrap: false,
             },
         );
 
@@ -2365,6 +2457,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 16.0,
                 font_family: FontFamily::Serif,
+                wrap: false,
             },
         );
 
@@ -2376,6 +2469,7 @@ mod tests {
                 color: [0.8, 0.8, 0.8, 1.0],
                 font_size: 9.0,
                 font_family: FontFamily::Mono,
+                wrap: false,
             },
         );
         tree.set_position(mono, Position::Fixed { x: 0.0, y: 20.0 });
@@ -2596,6 +2690,7 @@ mod tests {
                     color: [1.0; 4],
                     font_size: 12.0,
                     font_family: FontFamily::Mono,
+                    wrap: false,
                 },
             );
         }
@@ -3697,6 +3792,7 @@ mod tests {
                 color: [1.0, 1.0, 1.0, 1.0],
                 font_size: 12.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
 
@@ -3763,6 +3859,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
         let label_b = tree.insert(
@@ -3772,6 +3869,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
         let label_c = tree.insert(
@@ -3781,6 +3879,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
 
@@ -3827,6 +3926,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
 
@@ -3865,6 +3965,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
         let pct_a = tree.insert(
@@ -3937,6 +4038,7 @@ mod tests {
                     color: [1.0; 4],
                     font_size: 14.0,
                     font_family: FontFamily::default(),
+                    wrap: false,
                 },
             );
             labels.push(l);
@@ -3979,6 +4081,7 @@ mod tests {
                 color: [1.0; 4],
                 font_size: 14.0,
                 font_family: FontFamily::default(),
+                wrap: false,
             },
         );
 
@@ -4025,5 +4128,117 @@ mod tests {
         // Row with no children should produce no draw commands.
         assert!(draw_list.panels.is_empty());
         assert!(draw_list.texts.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // Text wrapping (UI-102)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn wrap_text_basic() {
+        let lines = wrap_text("hello world foo bar", 11);
+        assert_eq!(lines, vec!["hello world", "foo bar"]);
+    }
+
+    #[test]
+    fn wrap_text_long_word() {
+        let lines = wrap_text("supercalifragilistic", 10);
+        // Single word exceeds max_chars — placed on its own line.
+        assert_eq!(lines, vec!["supercalifragilistic"]);
+    }
+
+    #[test]
+    fn wrap_text_empty() {
+        let lines = wrap_text("", 10);
+        assert_eq!(lines, vec![""]);
+    }
+
+    #[test]
+    fn wrapped_label_height_exceeds_single_line() {
+        let mut tree = WidgetTree::new();
+        // A long text that should wrap within 100px.
+        let long_text = "The quick brown fox jumps over the lazy dog and then some more words";
+        let label = tree.insert_root(Widget::Label {
+            text: long_text.into(),
+            color: [1.0; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+            wrap: true,
+        });
+        tree.set_sizing(label, Sizing::Fixed(100.0), Sizing::Fit);
+
+        let lh = 14.0;
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            lh,
+        );
+
+        let rect = tree.node_rect(label).unwrap();
+        // Single line height would be 14.0. Wrapped should be taller.
+        assert!(
+            rect.height > 14.0,
+            "wrapped label height should exceed single line: {}",
+            rect.height
+        );
+    }
+
+    #[test]
+    fn wrapped_label_emits_multiple_text_commands() {
+        let mut tree = WidgetTree::new();
+        let long_text = "aaa bbb ccc ddd eee fff ggg hhh iii jjj";
+        let label = tree.insert_root(Widget::Label {
+            text: long_text.into(),
+            color: [1.0; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+            wrap: true,
+        });
+        tree.set_sizing(label, Sizing::Fixed(80.0), Sizing::Fit);
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // Should produce multiple text commands (one per wrapped line).
+        assert!(
+            draw_list.texts.len() > 1,
+            "wrapped label should emit multiple TextCommands, got {}",
+            draw_list.texts.len()
+        );
+    }
+
+    #[test]
+    fn unwrapped_label_single_line() {
+        let mut tree = WidgetTree::new();
+        let _label = tree.insert_root(Widget::Label {
+            text: "short text".into(),
+            color: [1.0; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+            wrap: false,
+        });
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        assert_eq!(draw_list.texts.len(), 1);
     }
 }

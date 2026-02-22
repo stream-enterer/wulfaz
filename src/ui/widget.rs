@@ -49,11 +49,14 @@ pub enum Widget {
     },
 
     /// Single-line or multi-line text.
+    /// When `wrap` is true and parent provides a width constraint,
+    /// text breaks at word boundaries (UI-102).
     Label {
         text: String,
         color: [f32; 4], // sRGB RGBA
         font_size: f32,  // pixels
         font_family: FontFamily,
+        wrap: bool, // false = single-line (default), true = word-wrap
     },
 
     /// Clickable element with text and background.
