@@ -3,6 +3,7 @@ pub(crate) mod demo;
 mod draw;
 mod input;
 mod keybindings;
+mod modal;
 pub(crate) mod sprite;
 mod theme;
 mod widget;
@@ -17,6 +18,8 @@ pub use draw::{
 pub use input::{MapClick, MouseButton, UiEvent, UiState};
 #[allow(unused_imports)] // Public API: used by main.rs for keyboard shortcuts (UI-I03).
 pub use keybindings::{Action, KeyBindings, KeyCombo, ModifierFlags};
+#[allow(unused_imports)] // Public API: used by main.rs for modal management (UI-300).
+pub use modal::ModalStack;
 #[allow(unused_imports)] // Public API: used by sprite renderer (UI-202b).
 pub use sprite::{SpriteAtlas, SpriteRect};
 pub use theme::Theme;

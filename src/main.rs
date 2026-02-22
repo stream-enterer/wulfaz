@@ -329,6 +329,8 @@ struct App {
     // Entity inspector (UI-I01d)
     selected_entity: Option<components::Entity>,
     inspector_close_id: Option<ui::WidgetId>,
+    // Modal stack (UI-300)
+    modal_stack: ui::ModalStack,
     // Widget showcase (UI-DEMO)
     show_demo: bool,
 }
@@ -466,12 +468,14 @@ impl ApplicationHandler for App {
                                     }
                                 }
                                 ui::Action::CloseTopmost => {
-                                    // Priority: tooltips → inspector → demo → exit.
+                                    // Priority: tooltips → modals → inspector → demo → exit.
                                     if self.ui_state.tooltip_count() > 0 {
                                         self.ui_state.dismiss_all_tooltips(
                                             &mut self.ui_tree,
                                             Instant::now(),
                                         );
+                                    } else if !self.modal_stack.is_empty() {
+                                        self.modal_stack.pop(&mut self.ui_tree);
                                     } else if self.selected_entity.is_some() {
                                         self.selected_entity = None;
                                     } else if self.show_demo {
@@ -1308,6 +1312,7 @@ fn main() {
         sim_speed: 1,
         selected_entity: None,
         inspector_close_id: None,
+        modal_stack: ui::ModalStack::new(),
         show_demo: std::env::args().any(|a| a == "--ui-demo"),
     };
     event_loop.run_app(&mut app).expect("run event loop");

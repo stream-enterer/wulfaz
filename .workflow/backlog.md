@@ -110,15 +110,6 @@ Goal: CK3's core UX patterns — modals, tabs, notifications, context menus, and
 
 Manager structs (ModalStack, NotificationManager, PanelManager, ContextMenu) each get their own file under `src/ui/`, re-exported from `mod.rs`.
 
-- **UI-300** — Modal/dialog system. Needs: UI-100, UI-101 (Row/Column layout), UI-104 (clipping), UI-305, UI-307. Blocks: UI-401.
-  - **The defining CK3 interaction.** Event popups, confirmation dialogs, character interaction prompts.
-  - Add a `ModalStack` struct to `src/ui/modal.rs`: `Vec<WidgetId>` of modal root panels. Each modal is a root widget that dims everything behind it.
-  - Modal roots are inserted via `WidgetTree::insert_root()` and always drawn last (highest Z). Current system has no Z-ordering beyond implicit draw order — modal roots are appended after all other roots.
-  - Dim layer: a fullscreen `PanelCommand` with `[0.0, 0.0, 0.0, 0.4]` background emitted before each modal's subtree.
-  - Input blocking: `UiState::hit_test()` already walks roots back-to-front. When a modal is active, hit testing the dim panel returns the modal root, blocking clicks to widgets behind it.
-  - Escape dismisses the topmost modal (integrate with existing `Action::CloseTopmost` in `src/ui/keybindings.rs`).
-  - `ModalStack::push(tree, widget_id)` / `pop(tree)` API. `pop` calls `tree.remove()` on the modal root.
-  - Test: push two modals, press Escape, assert only the top modal is removed, bottom modal persists.
 
 
 - **UI-302** — Notification/toast system. Needs: UI-100 (Row for icon+text). Blocks: UI-405.
