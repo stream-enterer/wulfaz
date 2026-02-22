@@ -128,14 +128,14 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 
 | Tier | Tasks | Milestone |
 |------|-------|-----------|
-| 1 — Foundation | 1 remaining (W01) | Colored text + panel backgrounds + widget tree |
+| 1 — Foundation | COMPLETE | Colored text + panel backgrounds + widget tree |
 | 2 — Styled Panels | 3 | Multi-font + theme + mouse input |
 | 3 — Full Widget Set | 3 | Rich text + scroll list + tooltips |
 | 4 — Game Integration | 5 (I01a-d + I02) | Real game UI replaces string rendering |
 | 5 — Polish | 2 | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-17 tasks total. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+14 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -168,30 +168,15 @@ Resolve before the tier that needs them. Recommended defaults marked with >>.
 
 ---
 
-### Tier 1 — Foundation ||
+### Tier 1 — Foundation — COMPLETE
 
-UI-P01 (per-vertex color) and UI-P03 (panel renderer) are complete. One task remaining.
+All three tasks done: UI-P01 (per-vertex color), UI-P03 (panel renderer), UI-W01 (widget tree).
 
-**Available after this tier:**
-- Per-glyph color in the text pipeline (gold, white, red, grey in one draw call) — DONE (UI-P01)
-- Panel quad renderer (rectangles with shader-generated borders) — DONE (UI-P03)
-- Widget tree describing UI as data, emitting `DrawList` commands
-- Unit tests proving layout math works (no GPU needed for widget tree tests)
-
-**UI-DEMO after Tier 1:** Fixed-position test panel containing 3 colored labels: gold "Header", white "Body text", red "Warning". Panel background from P03, text colors from P01, layout from W01. Toggled with F11 or `--ui-demo` flag.
-
-- **UI-W01 ||** — Widget tree core + layout model. Needs: nothing. Decisions resolved by DD-1.
-  - Retained-mode widget hierarchy. Base types: `Panel`, `Label`, `Button`.
-  - Simple box model layout (per DD-1): fixed position, percentage sizing, padding/margin.
-  - Flat enum widget identity (per DD-1): `Widget::Panel { .. } | Widget::Label { .. } | Widget::Button { .. }`.
-  - Arena storage (per DD-1): slotmap-based, WidgetId = slotmap key.
-  - Core interface:
-    - `measure(constraints) -> Size` — compute intrinsic size given min/max constraints
-    - `layout(allocated_rect)` — assign final position to self and children
-    - `draw(draw_list: &mut DrawList)` — emit panel quads and text runs into a draw list
-  - `DrawList`: intermediate representation. Contains `Vec<PanelCommand>` (rect + colors + border) and `Vec<TextCommand>` (string + position + color + font attrs). Consumed by `PanelRenderer` and `FontRenderer` during the render pass. Decouples widget logic from GPU.
-  - Dirty-flagging: each widget has a `dirty: bool`. `layout()` only recurses into dirty subtrees. Text content changes and window resize set dirty on affected widgets.
-  - Note: visually complete panels require UI-P03 (backgrounds) and UI-P01 (colored text), but the widget tree itself is renderer-agnostic and can be developed and tested with text-only output first.
+**Available:**
+- Per-glyph color in the text pipeline (gold, white, red, grey in one draw call)
+- Panel quad renderer (rectangles with shader-generated borders)
+- Widget tree (slotmap arena, flat enum, box model layout, DrawList output)
+- Tier 1 demo: parchment panel + 3 colored labels rendered via widget tree
 
 ---
 

@@ -18,6 +18,8 @@ mod render;
 mod rng;
 mod systems;
 mod tile_map;
+#[allow(dead_code)] // Public API for Tier 2+ UI tasks
+mod ui;
 mod world;
 
 use components::Tick;
@@ -549,23 +551,40 @@ impl ApplicationHandler for App {
                             );
                             let events = render::render_recent_events(&self.world, event_lines);
 
+                            // Build UI widget tree (demo: Tier 1 showcase)
+                            let mut ui_tree = ui::demo_tree(m.line_height);
+                            ui_tree.layout(
+                                ui::Size {
+                                    width: screen_w as f32,
+                                    height: screen_h as f32,
+                                },
+                                m.line_height,
+                            );
+                            let mut draw_list = ui::DrawList::new();
+                            ui_tree.draw(&mut draw_list);
+
                             // Panels (backgrounds first)
                             panel.begin_frame(&gpu.queue, screen_w, screen_h);
-                            // Test panel: parchment bg, gold border, inner shadow
-                            panel.add_panel(
-                                20.0,
-                                20.0,
-                                260.0,
-                                120.0,
-                                [0.87, 0.81, 0.70, 0.95], // parchment bg
-                                [0.83, 0.68, 0.21, 1.0],  // CK3 gold border
-                                2.0,                      // border width (px)
-                                6.0,                      // inner shadow (px)
-                            );
+                            for cmd in &draw_list.panels {
+                                panel.add_panel(
+                                    cmd.x,
+                                    cmd.y,
+                                    cmd.width,
+                                    cmd.height,
+                                    cmd.bg_color,
+                                    cmd.border_color,
+                                    cmd.border_width,
+                                    cmd.shadow_width,
+                                );
+                            }
                             let panel_vertex_count = panel.flush(&gpu.queue, &gpu.device);
 
                             // Text (on top)
                             font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
+                            // UI widget text commands
+                            for cmd in &draw_list.texts {
+                                font.prepare_text(&cmd.text, cmd.x, cmd.y, cmd.color);
+                            }
                             let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
                             font.prepare_text(&status, padding, padding, fg4);
                             font.prepare_map(&map_text, padding, map_y, fg4);
