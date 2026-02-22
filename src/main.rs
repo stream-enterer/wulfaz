@@ -932,6 +932,15 @@ impl ApplicationHandler for App {
                                 demo_root_id = Some(demo_id);
                             }
 
+                            // Pause overlay (UI-105): dim layer when paused.
+                            if self.paused {
+                                ui::build_pause_overlay(
+                                    &mut self.ui_tree,
+                                    screen_w as f32,
+                                    screen_h as f32,
+                                );
+                            }
+
                             // Re-layout tree with all widgets included.
                             self.ui_tree.layout(screen_size, m.line_height);
 
