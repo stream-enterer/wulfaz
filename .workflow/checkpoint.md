@@ -1,26 +1,23 @@
 # Checkpoint
 
 ## Active Task
-None — UI-202a/b/c complete
-
-## Completed This Session
-- UI-200: ProgressBar widget
-- UI-201: Separator widget
-- UI-202a: SpriteAtlas data structure (shelf-packing, PNG loading, UV rects)
-- UI-202b: SpriteRenderer (WGSL shader, RGBA atlas texture, vertex pipeline)
-- UI-202c: Icon widget + SpriteCommand in DrawList
+Phase UI-2 — COMPLETE
 
 ## Phase UI-2 Status
-- UI-200 ProgressBar — done
-- UI-201 Separator — done
-- UI-202a SpriteAtlas — done
-- UI-202b Sprite renderer — done
-- UI-202c Icon widget — done
-- UI-202d Placeholder sprites — not started
-- UI-203 Checkbox — unblocked (needs UI-202c done)
-- UI-204 Dropdown — not started
-- UI-205 Slider — unblocked (needs UI-202c done)
-- UI-206 TextInput — not started
+- UI-200 ProgressBar — done (commit 96efe42)
+- UI-201 Separator — done (commit 96efe42)
+- UI-202a SpriteAtlas — done (commit 7ca2fb2)
+- UI-202b Sprite renderer — done (commit 7ca2fb2)
+- UI-202c Icon widget — done (commit 7ca2fb2)
+- UI-202d Placeholder sprites — skipped (art task)
+- UI-203 Checkbox — done (commit 217b3d0)
+- UI-204 Dropdown — done (commit ac114e3)
+- UI-205 Slider — done (commit 437d928)
+- UI-206 TextInput — done (commit 366e1ec)
+
+## Widget Enum Variants (15 total)
+Row, Column, Panel, Label, Button, RichText, ScrollList,
+ProgressBar, Separator, Icon, Checkbox, Dropdown, Slider, TextInput
 
 ## Next Action
-UI-202d placeholder sprites, or UI-203/UI-204/UI-205/UI-206
+Phase UI-3 — Interaction Patterns (starts with UI-307 Z-order tiers or UI-305 callbacks)
