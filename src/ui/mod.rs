@@ -174,6 +174,8 @@ pub(crate) struct WidgetNode {
     pub tooltip: Option<widget::TooltipContent>,
     /// Optional min/max size constraints applied after Sizing resolution (UI-103).
     pub constraints: Option<Constraints>,
+    /// Scissor-rect clip region inherited from parent (UI-104).
+    pub clip_rect: Option<Rect>,
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +212,7 @@ impl WidgetTree {
             measured: Size::default(),
             tooltip: None,
             constraints: None,
+            clip_rect: None,
         });
         self.roots.push(id);
         id
@@ -231,6 +234,7 @@ impl WidgetTree {
             measured: Size::default(),
             tooltip: None,
             constraints: None,
+            clip_rect: None,
         });
         if let Some(parent_node) = self.arena.get_mut(parent) {
             parent_node.children.push(id);
@@ -336,6 +340,14 @@ impl WidgetTree {
         if let Some(node) = self.arena.get_mut(id) {
             node.constraints = Some(constraints);
             node.dirty = true;
+        }
+    }
+
+    /// Set a scissor-rect clip region on a widget (UI-104).
+    /// Children inherit the clip region during layout.
+    pub fn set_clip_rect(&mut self, id: WidgetId, clip: Option<Rect>) {
+        if let Some(node) = self.arena.get_mut(id) {
+            node.clip_rect = clip;
         }
     }
 
@@ -752,7 +764,14 @@ impl WidgetTree {
             return;
         }
 
+        // Propagate clip_rect from parent to children (UI-104).
+        let parent_clip = node.clip_rect;
         let children: Vec<WidgetId> = node.children.clone();
+        for child in &children {
+            if let Some(child_node) = self.arena.get_mut(*child) {
+                child_node.clip_rect = parent_clip;
+            }
+        }
         for child in children {
             self.layout_node(child, content, line_height);
         }
@@ -955,6 +974,8 @@ impl WidgetTree {
             return;
         };
 
+        let clip = node.clip_rect;
+
         match &node.widget {
             // Row and Column are transparent containers — no draw commands.
             Widget::Row { .. } | Widget::Column { .. } => {}
@@ -973,6 +994,7 @@ impl WidgetTree {
                     border_color: *border_color,
                     border_width: *border_width,
                     shadow_width: *shadow_width,
+                    clip,
                 });
             }
             Widget::Label {
@@ -983,8 +1005,7 @@ impl WidgetTree {
                 wrap,
             } => {
                 if *wrap && node.rect.width > 0.0 {
-                    // Word-wrap: break text into lines that fit within rect width.
-                    let scale = font_size / 14.0; // approximate; consistent with measure_node
+                    let scale = font_size / 14.0;
                     let char_w = 14.0 * 0.6 * scale;
                     let line_h = 14.0 * scale;
                     let max_chars = (node.rect.width / char_w).max(1.0) as usize;
@@ -997,6 +1018,7 @@ impl WidgetTree {
                             color: *color,
                             font_size: *font_size,
                             font_family: *font_family,
+                            clip,
                         });
                     }
                 } else {
@@ -1007,6 +1029,7 @@ impl WidgetTree {
                         color: *color,
                         font_size: *font_size,
                         font_family: *font_family,
+                        clip,
                     });
                 }
             }
@@ -1018,7 +1041,6 @@ impl WidgetTree {
                 font_size,
                 font_family,
             } => {
-                // Button = panel background + centered text.
                 draw_list.panels.push(PanelCommand {
                     x: node.rect.x,
                     y: node.rect.y,
@@ -1028,8 +1050,8 @@ impl WidgetTree {
                     border_color: *border_color,
                     border_width: 1.0,
                     shadow_width: 0.0,
+                    clip,
                 });
-                // Text offset by internal button padding.
                 draw_list.texts.push(TextCommand {
                     text: text.clone(),
                     x: node.rect.x + 8.0,
@@ -1037,6 +1059,7 @@ impl WidgetTree {
                     color: *color,
                     font_size: *font_size,
                     font_family: *font_family,
+                    clip,
                 });
             }
             Widget::RichText { spans, font_size } => {
@@ -1045,6 +1068,7 @@ impl WidgetTree {
                     x: node.rect.x,
                     y: node.rect.y,
                     font_size: *font_size,
+                    clip,
                 });
             }
             Widget::ScrollList {
@@ -1066,6 +1090,7 @@ impl WidgetTree {
                     border_color: *border_color,
                     border_width: *border_width,
                     shadow_width: 0.0,
+                    clip,
                 });
 
                 let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
@@ -1110,6 +1135,7 @@ impl WidgetTree {
                         border_color: [0.0; 4],
                         border_width: 0.0,
                         shadow_width: 0.0,
+                        clip,
                     });
                 }
 
@@ -4338,6 +4364,101 @@ mod tests {
             rect.width <= 50.0,
             "max_width constraint should enforce width <= 50, got {}",
             rect.width
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Scissor-rect clipping (UI-104)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn clip_rect_propagates_to_draw_commands() {
+        let mut tree = WidgetTree::new();
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: [1.0; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+        tree.set_sizing(panel, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
+        let clip = Rect {
+            x: 10.0,
+            y: 10.0,
+            width: 180.0,
+            height: 80.0,
+        };
+        tree.set_clip_rect(panel, Some(clip));
+
+        let label = tree.insert(
+            panel,
+            Widget::Label {
+                text: "Clipped text".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        // Child should inherit parent's clip_rect.
+        let child_node = tree.get(label).unwrap();
+        assert!(
+            child_node.clip_rect.is_some(),
+            "child should inherit clip_rect"
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // Panel command should carry the clip rect.
+        assert!(
+            draw_list.panels[0].clip.is_some(),
+            "panel command should have clip"
+        );
+        let pc = draw_list.panels[0].clip.unwrap();
+        assert!((pc.x - 10.0).abs() < 0.1);
+        assert!((pc.width - 180.0).abs() < 0.1);
+
+        // Text command should also carry the inherited clip rect.
+        assert!(
+            draw_list.texts[0].clip.is_some(),
+            "text command should have clip"
+        );
+    }
+
+    #[test]
+    fn no_clip_by_default() {
+        let mut tree = WidgetTree::new();
+        let _label = tree.insert_root(Widget::Label {
+            text: "No clip".into(),
+            color: [1.0; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+            wrap: false,
+        });
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        assert!(
+            draw_list.texts[0].clip.is_none(),
+            "default should have no clip"
         );
     }
 }

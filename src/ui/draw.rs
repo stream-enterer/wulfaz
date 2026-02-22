@@ -18,6 +18,8 @@ impl FontFamily {
     }
 }
 
+use super::Rect;
+
 /// Intermediate draw command for a panel quad.
 /// Consumed by `PanelRenderer::add_panel()`.
 #[derive(Debug, Clone)]
@@ -30,6 +32,8 @@ pub struct PanelCommand {
     pub border_color: [f32; 4], // sRGB RGBA
     pub border_width: f32,
     pub shadow_width: f32,
+    /// Scissor-rect clip region (UI-104). None = no clipping.
+    pub clip: Option<Rect>,
 }
 
 /// Intermediate draw command for a text run.
@@ -42,6 +46,8 @@ pub struct TextCommand {
     pub color: [f32; 4], // sRGB RGBA
     pub font_size: f32,
     pub font_family: FontFamily,
+    /// Scissor-rect clip region (UI-104). None = no clipping.
+    pub clip: Option<Rect>,
 }
 
 /// A styled text span within a RichText widget (DD-4).
@@ -62,6 +68,8 @@ pub struct RichTextCommand {
     pub x: f32,
     pub y: f32,
     pub font_size: f32, // shared across all spans
+    /// Scissor-rect clip region (UI-104). None = no clipping.
+    pub clip: Option<Rect>,
 }
 
 /// Collects draw commands from the widget tree.
