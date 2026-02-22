@@ -1066,6 +1066,15 @@ impl WidgetTree {
                     height: thumb_size,
                 }
             }
+            Widget::TextInput { font_size, .. } => {
+                let scale = font_size / line_height;
+                let h = line_height * scale;
+                // Stretch-width (intrinsic 0), height = text + 8px vertical padding.
+                Size {
+                    width: 0.0,
+                    height: h + 8.0,
+                }
+            }
         }
     }
 
@@ -1409,6 +1418,68 @@ impl WidgetTree {
                     clip,
                 });
             }
+            Widget::TextInput {
+                text,
+                cursor_pos,
+                color,
+                bg_color,
+                font_size,
+                placeholder,
+                focused,
+            } => {
+                // Background.
+                draw_list.panels.push(PanelCommand {
+                    x: node.rect.x,
+                    y: node.rect.y,
+                    width: node.rect.width,
+                    height: node.rect.height,
+                    bg_color: *bg_color,
+                    border_color: *color,
+                    border_width: 1.0,
+                    shadow_width: 0.0,
+                    clip,
+                });
+                // Text content or placeholder.
+                let display_text = if text.is_empty() {
+                    placeholder.clone()
+                } else {
+                    text.clone()
+                };
+                let text_color = if text.is_empty() {
+                    // Placeholder: dimmed color.
+                    [color[0], color[1], color[2], color[3] * 0.5]
+                } else {
+                    *color
+                };
+                draw_list.texts.push(TextCommand {
+                    text: display_text,
+                    x: node.rect.x + 4.0,
+                    y: node.rect.y + 4.0,
+                    color: text_color,
+                    font_size: *font_size,
+                    font_family: FontFamily::default(),
+                    clip,
+                });
+                // Cursor line when focused.
+                if *focused {
+                    let scale = font_size / line_height;
+                    let char_w = line_height * 0.6 * scale;
+                    let cursor_x =
+                        node.rect.x + 4.0 + (*cursor_pos).min(text.len()) as f32 * char_w;
+                    let cursor_h = line_height * scale;
+                    draw_list.panels.push(PanelCommand {
+                        x: cursor_x,
+                        y: node.rect.y + 4.0,
+                        width: 1.0,
+                        height: cursor_h,
+                        bg_color: *color,
+                        border_color: [0.0; 4],
+                        border_width: 0.0,
+                        shadow_width: 0.0,
+                        clip,
+                    });
+                }
+            }
             Widget::ScrollList {
                 bg_color,
                 border_color,
@@ -1660,6 +1731,12 @@ impl WidgetTree {
             } => {
                 track_color[3] *= opacity;
                 thumb_color[3] *= opacity;
+            }
+            Widget::TextInput {
+                color, bg_color, ..
+            } => {
+                color[3] *= opacity;
+                bg_color[3] *= opacity;
             }
         }
     }
@@ -5810,6 +5887,121 @@ mod tests {
             "thumb at max: x {:.1} should be near {:.1}",
             thumb.x,
             expected_x
+        );
+    }
+
+    #[test]
+    fn text_input_stretch_width_intrinsic_zero() {
+        let mut tree = WidgetTree::new();
+        let ti = tree.insert_root(Widget::TextInput {
+            text: "hello".into(),
+            cursor_pos: 5,
+            color: [1.0; 4],
+            bg_color: [0.1; 4],
+            font_size: 14.0,
+            placeholder: "Type here".into(),
+            focused: false,
+        });
+        let size = tree.measure_node(ti, 14.0);
+        assert!(
+            (size.width - 0.0).abs() < 0.01,
+            "intrinsic width should be 0 (stretch)"
+        );
+        assert!(size.height > 14.0, "height should include text + padding");
+    }
+
+    #[test]
+    fn text_input_shows_text_when_non_empty() {
+        let mut tree = WidgetTree::new();
+        let ti = tree.insert_root(Widget::TextInput {
+            text: "hello".into(),
+            cursor_pos: 5,
+            color: [1.0; 4],
+            bg_color: [0.1; 4],
+            font_size: 14.0,
+            placeholder: "Type here".into(),
+            focused: false,
+        });
+        tree.set_sizing(ti, Sizing::Fixed(200.0), Sizing::Fixed(22.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // 1 panel (bg), 1 text (content). No cursor when not focused.
+        assert_eq!(draw_list.panels.len(), 1, "unfocused: 1 panel (bg)");
+        assert_eq!(draw_list.texts.len(), 1, "unfocused: 1 text");
+        assert_eq!(draw_list.texts[0].text, "hello");
+    }
+
+    #[test]
+    fn text_input_shows_placeholder_when_empty() {
+        let mut tree = WidgetTree::new();
+        let ti = tree.insert_root(Widget::TextInput {
+            text: String::new(),
+            cursor_pos: 0,
+            color: [1.0, 1.0, 1.0, 1.0],
+            bg_color: [0.1; 4],
+            font_size: 14.0,
+            placeholder: "Search...".into(),
+            focused: false,
+        });
+        tree.set_sizing(ti, Sizing::Fixed(200.0), Sizing::Fixed(22.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        assert_eq!(draw_list.texts[0].text, "Search...");
+        // Placeholder should be dimmed (alpha * 0.5).
+        assert!(
+            (draw_list.texts[0].color[3] - 0.5).abs() < 0.01,
+            "placeholder alpha should be dimmed"
+        );
+    }
+
+    #[test]
+    fn text_input_focused_shows_cursor() {
+        let mut tree = WidgetTree::new();
+        let ti = tree.insert_root(Widget::TextInput {
+            text: "abc".into(),
+            cursor_pos: 2,
+            color: [1.0; 4],
+            bg_color: [0.1; 4],
+            font_size: 14.0,
+            placeholder: String::new(),
+            focused: true,
+        });
+        tree.set_sizing(ti, Sizing::Fixed(200.0), Sizing::Fixed(22.0));
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut draw_list = DrawList::new();
+        tree.draw(&mut draw_list);
+
+        // 2 panels: bg + cursor line.
+        assert_eq!(draw_list.panels.len(), 2, "focused: bg + cursor");
+        let cursor = &draw_list.panels[1];
+        assert!(
+            (cursor.width - 1.0).abs() < 0.01,
+            "cursor should be 1px wide"
         );
     }
 }

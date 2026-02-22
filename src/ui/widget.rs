@@ -151,4 +151,17 @@ pub enum Widget {
         thumb_color: [f32; 4], // thumb sRGB RGBA
         width: f32,            // total track width in pixels
     },
+
+    /// Single-line text input field (UI-206).
+    /// Draws background, text content (or placeholder if empty),
+    /// and a cursor line when focused.
+    TextInput {
+        text: String,
+        cursor_pos: usize,   // byte offset within text
+        color: [f32; 4],     // text color sRGB RGBA
+        bg_color: [f32; 4],  // background sRGB RGBA
+        font_size: f32,      // pixels
+        placeholder: String, // shown when text is empty
+        focused: bool,       // whether cursor is visible
+    },
 }
