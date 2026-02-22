@@ -98,6 +98,16 @@ pub struct Theme {
     pub overlay_selection: [f32; 4],
     /// Wander target tile highlight color (semi-transparent).
     pub overlay_path: [f32; 4],
+
+    // -- Animation defaults (UI-W05) --
+    /// Hover tooltip fade-in duration (milliseconds).
+    pub anim_tooltip_fade_ms: u64,
+    /// Inspector panel slide-in duration (milliseconds).
+    pub anim_inspector_slide_ms: u64,
+    /// Button hover highlight transition duration (milliseconds).
+    pub anim_hover_highlight_ms: u64,
+    /// Button hover highlight alpha (0.0 = transparent, 1.0 = opaque).
+    pub anim_hover_highlight_alpha: f32,
 }
 
 /// Convert a hex color (#RRGGBB) to sRGB [f32; 4] with alpha 1.0.
@@ -166,6 +176,12 @@ impl Default for Theme {
             overlay_hover: hex_a(0xF0, 0xE6, 0xD2, 0.15), // light parchment, subtle
             overlay_selection: hex_a(0xC8, 0xA8, 0x50, 0.35), // gold, prominent
             overlay_path: hex_a(0x60, 0xA0, 0x60, 0.25),  // muted green
+
+            // Animation defaults (UI-W05)
+            anim_tooltip_fade_ms: 150,
+            anim_inspector_slide_ms: 200,
+            anim_hover_highlight_ms: 200,
+            anim_hover_highlight_alpha: 0.3,
         }
     }
 }

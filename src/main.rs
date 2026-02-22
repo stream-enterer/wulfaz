@@ -306,6 +306,10 @@ struct App {
     ui_state: ui::UiState,
     ui_tree: ui::WidgetTree,
     ui_theme: ui::Theme,
+    // Animation system (UI-W05)
+    animator: ui::Animator,
+    last_hover_tile: Option<(i32, i32)>,
+    last_selected_entity: Option<components::Entity>,
     // Entity inspector (UI-I01d)
     selected_entity: Option<components::Entity>,
     inspector_close_id: Option<ui::WidgetId>,
@@ -742,6 +746,8 @@ impl ApplicationHandler for App {
                             self.camera.y = self.camera.y.clamp(0, max_cam_y);
 
                             // Build hover tooltip if cursor is over a map tile (UI-I01b).
+                            let now = Instant::now();
+                            let mut hover_tooltip_id = None;
                             {
                                 let px = self.cursor_pos.x as f32;
                                 let py = self.cursor_pos.y as f32;
@@ -757,7 +763,7 @@ impl ApplicationHandler for App {
                                     if let Some(info) =
                                         collect_hover_info(&self.world, tile_x, tile_y)
                                     {
-                                        ui::build_hover_tooltip(
+                                        let tooltip_id = ui::build_hover_tooltip(
                                             &mut self.ui_tree,
                                             &self.ui_theme,
                                             &info,
@@ -765,37 +771,127 @@ impl ApplicationHandler for App {
                                             screen_size,
                                             m.line_height,
                                         );
+                                        hover_tooltip_id = Some(tooltip_id);
+
+                                        // Start fade-in when hovering a new tile (UI-W05).
+                                        let current_tile = (tile_x, tile_y);
+                                        if self.last_hover_tile != Some(current_tile) {
+                                            self.last_hover_tile = Some(current_tile);
+                                            self.animator.start(
+                                                "hover_tooltip",
+                                                0.0,
+                                                1.0,
+                                                std::time::Duration::from_millis(
+                                                    self.ui_theme.anim_tooltip_fade_ms,
+                                                ),
+                                                ui::Easing::EaseOut,
+                                                now,
+                                            );
+                                        }
                                     }
+                                }
+                                if hover_tooltip_id.is_none() {
+                                    self.last_hover_tile = None;
+                                    self.animator.remove("hover_tooltip");
                                 }
                             }
 
                             // Build entity inspector if selected (UI-I01d).
                             self.inspector_close_id = None;
+                            let mut _inspector_panel_id = None;
                             if let Some(entity) = self.selected_entity {
                                 if let Some(info) = ui::collect_inspector_info(entity, &self.world)
                                 {
+                                    // Start slide-in when entity first selected (UI-W05).
+                                    if self.last_selected_entity != Some(entity) {
+                                        self.last_selected_entity = Some(entity);
+                                        self.animator.start(
+                                            "inspector_slide",
+                                            1.0,
+                                            0.0,
+                                            std::time::Duration::from_millis(
+                                                self.ui_theme.anim_inspector_slide_ms,
+                                            ),
+                                            ui::Easing::EaseOut,
+                                            now,
+                                        );
+                                    }
+
                                     let (inspector_id, close_id) = ui::build_entity_inspector(
                                         &mut self.ui_tree,
                                         &self.ui_theme,
                                         &info,
                                         screen_h as f32,
                                     );
+
+                                    // Apply slide-in offset (UI-W05).
+                                    let slide =
+                                        self.animator.get("inspector_slide", now).unwrap_or(0.0);
+                                    let target_x = screen_w as f32 - 220.0 - padding;
+                                    let slide_offset = slide * (220.0 + padding);
                                     self.ui_tree.set_position(
                                         inspector_id,
                                         ui::Position::Fixed {
-                                            x: screen_w as f32 - 220.0 - padding,
+                                            x: target_x + slide_offset,
                                             y: status_bar_h + padding,
                                         },
                                     );
                                     self.inspector_close_id = Some(close_id);
+                                    _inspector_panel_id = Some(inspector_id);
                                 } else {
                                     // Entity died or lost position — auto-close.
                                     self.selected_entity = None;
+                                    self.last_selected_entity = None;
+                                    self.animator.remove("inspector_slide");
                                 }
+                            } else {
+                                self.last_selected_entity = None;
+                                self.animator.remove("inspector_slide");
                             }
 
                             // Re-layout tree with all widgets included.
                             self.ui_tree.layout(screen_size, m.line_height);
+
+                            // Apply hover tooltip fade-in (UI-W05).
+                            if let Some(tooltip_id) = hover_tooltip_id {
+                                let opacity =
+                                    self.animator.get("hover_tooltip", now).unwrap_or(1.0);
+                                if opacity < 1.0 {
+                                    self.ui_tree.set_subtree_opacity(tooltip_id, opacity);
+                                }
+                            }
+
+                            // Apply button hover highlight on inspector close button (UI-W05).
+                            if let Some(close_id) = self.inspector_close_id {
+                                let hit = self
+                                    .ui_tree
+                                    .hit_test(self.cursor_pos.x as f32, self.cursor_pos.y as f32);
+                                let is_hovered = hit == Some(close_id);
+                                let target = if is_hovered { 1.0 } else { 0.0 };
+                                if self.animator.target("btn_hover_close") != Some(target) {
+                                    let current =
+                                        self.animator.get("btn_hover_close", now).unwrap_or(0.0);
+                                    self.animator.start(
+                                        "btn_hover_close",
+                                        current,
+                                        target,
+                                        std::time::Duration::from_millis(
+                                            self.ui_theme.anim_hover_highlight_ms,
+                                        ),
+                                        ui::Easing::EaseOut,
+                                        now,
+                                    );
+                                }
+                                let hover_alpha =
+                                    self.animator.get("btn_hover_close", now).unwrap_or(0.0);
+                                let alpha = self.ui_theme.anim_hover_highlight_alpha * hover_alpha;
+                                self.ui_tree.set_widget_bg_alpha(close_id, alpha);
+                            } else {
+                                self.animator.remove("btn_hover_close");
+                            }
+
+                            // Clean up completed animations (UI-W05).
+                            self.animator.gc(now);
 
                             let map_text = render::render_world_to_string(
                                 &self.world,
@@ -990,6 +1086,9 @@ fn main() {
         ui_state: ui::UiState::new(),
         ui_tree: ui::WidgetTree::new(),
         ui_theme,
+        animator: ui::Animator::new(),
+        last_hover_tile: None,
+        last_selected_entity: None,
         selected_entity: None,
         inspector_close_id: None,
     };

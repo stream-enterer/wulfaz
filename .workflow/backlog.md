@@ -132,10 +132,10 @@ Foundation (cosmic-text migration) is complete. Remaining work organized into 5 
 | 2 — Styled Panels | COMPLETE | Theme + mouse input |
 | 3 — Full Widget Set | COMPLETE | Rich text + scroll list + tooltips |
 | 4 — Game Integration | COMPLETE | Real game UI replaces string rendering |
-| 5 — Polish | 2 | Animation + keyboard shortcuts |
+| 5 — Polish | 1 | Animation + keyboard shortcuts |
 | DEMO | 1 | Growing showcase, verifies each tier |
 
-3 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
+2 tasks remaining. Ordering governed by per-task `Needs:` lines, not tier boundaries.
 
 ### Design Decisions
 
@@ -223,14 +223,6 @@ All tasks done: UI-I01a (status bar), UI-I01b (hover tooltip), UI-I01c (event lo
 ### Tier 5 — Polish (not on critical path)
 
 Enhancements. Buildable any time after their dependencies are met.
-
-- **UI-W05** — Animation system. Needs: UI-W01. Enhancement.
-  - Time-driven interpolation for widget properties: position (slide in/out), opacity (fade), color (hover highlight), size (expand/collapse).
-  - Core: `AnimationState` stored per-widget. `animate(property, from, to, duration, easing)`. Ticks on wall-clock delta (from `winit` `Instant`, not sim tick — UI animation is always real-time).
-  - Easing functions: linear, ease-in-out (cubic), ease-out (decel). Small enum, not a plugin system.
-  - Hover highlight: `Button` lerps background color/opacity on hover enter/leave (~200ms). Panel transitions: slide from screen edge on open/close. Tooltip fade-in ~150ms.
-  - Minimal scope: animate `f32` values only. No keyframe chains or timeline editor.
-  - Hover-driven animations need UI-W02 (input events trigger them), but the animation tick itself is independent.
 
 - **UI-I03** — Keyboard shortcut system. Needs: UI-W02. Enhancement.
   - Global keybindings processed before widget focus dispatch. Configurable map: `HashMap<KeyCombo, Action>` where `KeyCombo` is modifier flags + keycode, `Action` is an enum (PauseSim, TogglePanel(PanelId), SpeedUp, SpeedDown, etc.).
