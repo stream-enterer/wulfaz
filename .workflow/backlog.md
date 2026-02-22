@@ -104,15 +104,6 @@ Developable on test map or integrated after Phase B.
 - **SIM-011** — Crafting (Phase 4). Requires recipes.
 - **SIM-012** — Fluid flow (Phase 1). Cellular automaton. Needs: A08 (Seine placement).
 
-## Phase UI-3 — Interaction Patterns
-
-Goal: CK3's core UX patterns — modals, tabs, notifications, context menus, and panel management. These compose Phase UI-2 widgets into reusable interaction flows.
-
-Manager structs (ModalStack, NotificationManager, PanelManager, ContextMenu) each get their own file under `src/ui/`, re-exported from `mod.rs`.
-
-
-
-
 
 
 ## Phase UI-4 — Game Screens
