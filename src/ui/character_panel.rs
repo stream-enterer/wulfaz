@@ -35,8 +35,9 @@ pub fn build_character_panel(
     theme: &Theme,
     info: &CharacterPanelInfo,
 ) -> (WidgetId, WidgetId) {
+    let w = theme.s(PANEL_WIDTH);
     let title_text = format!("{} {}", info.icon, info.name);
-    let frame = build_window_frame(tree, theme, &title_text, PANEL_WIDTH, Sizing::Fit, true);
+    let frame = build_window_frame(tree, theme, &title_text, w, Sizing::Fit, true);
 
     // Replace the plain Label title with a RichText title (icon in gold Mono + name in dark Serif)
     if let Some(node) = tree.get_mut(frame.title) {

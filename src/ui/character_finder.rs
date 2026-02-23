@@ -76,12 +76,13 @@ pub fn build_character_finder(
     theme: &Theme,
     info: &CharacterFinderInfo,
 ) -> (WidgetId, WidgetId, WidgetId, WidgetId) {
+    let w = theme.s(PANEL_WIDTH);
     let frame = build_window_frame(
         tree,
         theme,
         "Character Finder",
-        PANEL_WIDTH,
-        Sizing::Fixed(PANEL_HEIGHT),
+        w,
+        Sizing::Fixed(theme.s(PANEL_HEIGHT)),
         true,
     );
     let content_w = frame.content_width;

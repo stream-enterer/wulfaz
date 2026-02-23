@@ -62,15 +62,16 @@ pub fn build_opinion_view(
     theme: &Theme,
     info: &OpinionViewInfo,
 ) -> WidgetId {
+    let w = theme.s(OPINION_WIDTH);
     let panel = tree.insert_root(Widget::Panel {
         bg_color: [0.0, 0.0, 0.0, 0.0], // transparent — embedded in parent panel
         border_color: [0.0; 4],
         border_width: 0.0,
         shadow_width: 0.0,
     });
-    tree.set_sizing(panel, Sizing::Fixed(OPINION_WIDTH), Sizing::Fit);
+    tree.set_sizing(panel, Sizing::Fixed(w), Sizing::Fit);
 
-    let content_w = OPINION_WIDTH;
+    let content_w = w;
     let mut y = 0.0_f32;
 
     // Target name header

@@ -45,7 +45,7 @@ pub fn build_main_menu(tree: &mut WidgetTree, theme: &Theme, info: &MainMenuInfo
     );
 
     // Centered menu panel
-    let menu_w = 300.0_f32;
+    let menu_w = theme.s(300.0);
     let menu = tree.insert(
         bg,
         Widget::Panel {
@@ -99,7 +99,7 @@ pub fn build_main_menu(tree: &mut WidgetTree, theme: &Theme, info: &MainMenuInfo
     );
     tree.set_sizing(sep, Sizing::Fixed(menu_w * 0.8), Sizing::Fit);
 
-    let button_w = 200.0_f32;
+    let button_w = theme.s(200.0);
 
     // New Game button
     let new_game = make_menu_button(tree, theme, col, "New Game", button_w);

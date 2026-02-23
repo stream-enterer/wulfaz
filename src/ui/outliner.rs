@@ -57,16 +57,10 @@ pub fn build_outliner(
     theme: &Theme,
     info: &OutlinerInfo,
 ) -> (WidgetId, WidgetId) {
+    let w = theme.s(OUTLINER_WIDTH);
     let panel_h = (info.screen_height * 0.5).min(500.0);
 
-    let frame = build_window_frame(
-        tree,
-        theme,
-        "Outliner",
-        OUTLINER_WIDTH,
-        Sizing::Fixed(panel_h),
-        true,
-    );
+    let frame = build_window_frame(tree, theme, "Outliner", w, Sizing::Fixed(panel_h), true);
     let content_w = frame.content_width;
 
     // === Pinned Characters section ===

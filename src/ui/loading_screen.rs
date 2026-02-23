@@ -75,9 +75,10 @@ pub fn build_loading_screen(
             align: super::widget::CrossAlign::Center,
         },
     );
-    tree.set_sizing(col, Sizing::Fixed(300.0), Sizing::Fit);
+    let col_w = theme.s(300.0);
+    tree.set_sizing(col, Sizing::Fixed(col_w), Sizing::Fit);
     // Center the column in the screen
-    let col_x = (info.screen_width - 300.0) / 2.0;
+    let col_x = (info.screen_width - col_w) / 2.0;
     let col_y = (info.screen_height - 100.0) / 2.0;
     tree.set_position(col, Position::Fixed { x: col_x, y: col_y });
 
@@ -106,7 +107,7 @@ pub fn build_loading_screen(
             height: theme.progress_bar_height * 2.0,
         },
     );
-    tree.set_sizing(bar, Sizing::Fixed(300.0), Sizing::Fit);
+    tree.set_sizing(bar, Sizing::Fixed(col_w), Sizing::Fit);
 
     // Status label
     tree.insert(

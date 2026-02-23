@@ -412,6 +412,18 @@ impl WidgetTree {
                 bottom: 4.0,
                 left: 8.0,
             },
+            Widget::Dropdown { .. } => Edges {
+                top: 4.0,
+                right: 8.0,
+                bottom: 4.0,
+                left: 8.0,
+            },
+            Widget::TextInput { .. } => Edges {
+                top: 4.0,
+                right: 4.0,
+                bottom: 4.0,
+                left: 4.0,
+            },
             _ => Edges::ZERO,
         }
     }
@@ -1441,8 +1453,8 @@ impl WidgetTree {
                     .measure_text("\u{25BC}\u{25BC}", FontFamily::default(), *font_size)
                     .width;
                 Size {
-                    width: widest_w + arrow_w + 16.0,
-                    height: h + 8.0,
+                    width: widest_w + arrow_w,
+                    height: h,
                 }
             }
             Widget::Slider { width, .. } => {
@@ -1456,10 +1468,10 @@ impl WidgetTree {
                 let h = tm
                     .measure_text("M", FontFamily::default(), *font_size)
                     .height;
-                // Stretch-width (intrinsic 0), height = text + 8px vertical padding.
+                // Stretch-width (intrinsic 0), height = text only (padding added by layout_node).
                 Size {
                     width: 0.0,
-                    height: h + 8.0,
+                    height: h,
                 }
             }
             Widget::Collapsible {
@@ -1807,7 +1819,8 @@ impl WidgetTree {
                 let row_h = tm
                     .measure_text("M", FontFamily::default(), *font_size)
                     .height
-                    + 8.0;
+                    + node.padding.top
+                    + node.padding.bottom;
                 // Trigger button background.
                 draw_list.panels.push(PanelCommand {
                     x: node.rect.x,
@@ -1825,8 +1838,8 @@ impl WidgetTree {
                 let label = options.get(*selected).map(|s| s.as_str()).unwrap_or("");
                 draw_list.texts.push(TextCommand {
                     text: label.to_string(),
-                    x: node.rect.x + 8.0,
-                    y: node.rect.y + 4.0,
+                    x: node.rect.x + node.padding.left,
+                    y: node.rect.y + node.padding.top,
                     color: *color,
                     font_size: *font_size,
                     font_family: FontFamily::default(),
@@ -1839,8 +1852,8 @@ impl WidgetTree {
                     .width;
                 draw_list.texts.push(TextCommand {
                     text: "\u{25BC}".to_string(),
-                    x: node.rect.x + node.rect.width - 8.0 - arrow_w,
-                    y: node.rect.y + 4.0,
+                    x: node.rect.x + node.rect.width - node.padding.right - arrow_w,
+                    y: node.rect.y + node.padding.top,
                     color: *color,
                     font_size: *font_size,
                     font_family: FontFamily::default(),
@@ -1867,8 +1880,8 @@ impl WidgetTree {
                     for (i, opt) in options.iter().enumerate() {
                         draw_list.texts.push(TextCommand {
                             text: opt.clone(),
-                            x: node.rect.x + 8.0,
-                            y: list_y + i as f32 * row_h + 4.0,
+                            x: node.rect.x + node.padding.left,
+                            y: list_y + i as f32 * row_h + node.padding.top,
                             color: *color,
                             font_size: *font_size,
                             font_family: FontFamily::default(),
@@ -1955,8 +1968,8 @@ impl WidgetTree {
                 };
                 draw_list.texts.push(TextCommand {
                     text: display_text,
-                    x: node.rect.x + 4.0,
-                    y: node.rect.y + 4.0,
+                    x: node.rect.x + node.padding.left,
+                    y: node.rect.y + node.padding.top,
                     color: text_color,
                     font_size: *font_size,
                     font_family: FontFamily::default(),
@@ -1969,13 +1982,13 @@ impl WidgetTree {
                     let cursor_offset = tm
                         .measure_text(text_before_cursor, FontFamily::default(), *font_size)
                         .width;
-                    let cursor_x = node.rect.x + 4.0 + cursor_offset;
+                    let cursor_x = node.rect.x + node.padding.left + cursor_offset;
                     let cursor_h = tm
                         .measure_text("M", FontFamily::default(), *font_size)
                         .height;
                     draw_list.panels.push(PanelCommand {
                         x: cursor_x,
-                        y: node.rect.y + 4.0,
+                        y: node.rect.y + node.padding.top,
                         width: 1.0,
                         height: cursor_h,
                         bg_color: *color,
@@ -3212,10 +3225,11 @@ pub fn build_entity_inspector(
         border_width: theme.panel_border_width,
         shadow_width: theme.panel_shadow_width,
     });
-    tree.set_sizing(panel, Sizing::Fixed(INSPECTOR_WIDTH), Sizing::Fit);
+    let inspector_w = theme.s(INSPECTOR_WIDTH);
+    tree.set_sizing(panel, Sizing::Fixed(inspector_w), Sizing::Fit);
     tree.set_padding(panel, Edges::all(theme.panel_padding));
 
-    let content_w = INSPECTOR_WIDTH - theme.panel_padding * 2.0;
+    let content_w = inspector_w - theme.panel_padding * 2.0;
     let mut y = 0.0_f32;
     let data_h = theme.font_data_size;
     let body_h = theme.font_body_size;
@@ -7251,7 +7265,10 @@ mod tests {
             (size.width - 0.0).abs() < 0.01,
             "intrinsic width should be 0 (stretch)"
         );
-        assert!(size.height > 14.0, "height should include text + padding");
+        assert!(
+            (size.height - 14.0).abs() < 0.01,
+            "intrinsic height should be text only (padding added by layout)"
+        );
     }
 
     #[test]

@@ -29,18 +29,13 @@ pub fn build_settings_screen(
     theme: &Theme,
     info: &SettingsInfo,
 ) -> (WidgetId, WidgetId, WidgetId) {
-    let frame = build_window_frame(
-        tree,
-        theme,
-        "Settings",
-        PANEL_WIDTH,
-        Sizing::Fixed(PANEL_HEIGHT),
-        true,
-    );
+    let w = theme.s(PANEL_WIDTH);
+    let h = theme.s(PANEL_HEIGHT);
+    let frame = build_window_frame(tree, theme, "Settings", w, Sizing::Fixed(h), true);
 
     // Center on screen
-    let px = (info.screen_width - PANEL_WIDTH) / 2.0;
-    let py = (info.screen_height - PANEL_HEIGHT) / 2.0;
+    let px = (info.screen_width - w) / 2.0;
+    let py = (info.screen_height - h) / 2.0;
     tree.set_position(frame.root, Position::Fixed { x: px, y: py });
 
     let content_w = frame.content_width;
