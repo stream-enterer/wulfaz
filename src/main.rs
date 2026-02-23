@@ -489,12 +489,15 @@ impl ApplicationHandler for App {
                                         self.show_demo = true;
                                         self.animator.start(
                                             "demo_slide",
-                                            -1.0,
-                                            0.0,
-                                            std::time::Duration::from_millis(
-                                                self.ui_theme.anim_inspector_slide_ms,
-                                            ),
-                                            ui::Easing::EaseOut,
+                                            ui::Anim {
+                                                from: -1.0,
+                                                to: 0.0,
+                                                duration: std::time::Duration::from_millis(
+                                                    self.ui_theme.anim_inspector_slide_ms,
+                                                ),
+                                                easing: ui::Easing::EaseOut,
+                                                ..ui::Anim::DEFAULT
+                                            },
                                             now,
                                         );
                                     } else if self.animator.target("demo_slide") != Some(-1.0) {
@@ -503,12 +506,15 @@ impl ApplicationHandler for App {
                                             self.animator.get("demo_slide", now).unwrap_or(0.0);
                                         self.animator.start(
                                             "demo_slide",
-                                            current,
-                                            -1.0,
-                                            std::time::Duration::from_millis(
-                                                self.ui_theme.anim_panel_hide_ms,
-                                            ),
-                                            ui::Easing::EaseIn,
+                                            ui::Anim {
+                                                from: current,
+                                                to: -1.0,
+                                                duration: std::time::Duration::from_millis(
+                                                    self.ui_theme.anim_panel_hide_ms,
+                                                ),
+                                                easing: ui::Easing::EaseIn,
+                                                ..ui::Anim::DEFAULT
+                                            },
                                             now,
                                         );
                                     }
@@ -539,12 +545,15 @@ impl ApplicationHandler for App {
                                             self.animator.get("demo_slide", now).unwrap_or(0.0);
                                         self.animator.start(
                                             "demo_slide",
-                                            current,
-                                            -1.0,
-                                            std::time::Duration::from_millis(
-                                                self.ui_theme.anim_panel_hide_ms,
-                                            ),
-                                            ui::Easing::EaseIn,
+                                            ui::Anim {
+                                                from: current,
+                                                to: -1.0,
+                                                duration: std::time::Duration::from_millis(
+                                                    self.ui_theme.anim_panel_hide_ms,
+                                                ),
+                                                easing: ui::Easing::EaseIn,
+                                                ..ui::Anim::DEFAULT
+                                            },
                                             now,
                                         );
                                     } else {
@@ -1045,12 +1054,15 @@ impl ApplicationHandler for App {
                                             self.last_hover_tile = Some(current_tile);
                                             self.animator.start(
                                                 "hover_tooltip",
-                                                0.0,
-                                                1.0,
-                                                std::time::Duration::from_millis(
-                                                    self.ui_theme.anim_tooltip_fade_ms,
-                                                ),
-                                                ui::Easing::EaseOut,
+                                                ui::Anim {
+                                                    from: 0.0,
+                                                    to: 1.0,
+                                                    duration: std::time::Duration::from_millis(
+                                                        self.ui_theme.anim_tooltip_fade_ms,
+                                                    ),
+                                                    easing: ui::Easing::EaseOut,
+                                                    ..ui::Anim::DEFAULT
+                                                },
                                                 now,
                                             );
                                         }
@@ -1072,12 +1084,15 @@ impl ApplicationHandler for App {
                                         self.last_selected_entity = Some(entity);
                                         self.animator.start(
                                             "inspector_slide",
-                                            1.0,
-                                            0.0,
-                                            std::time::Duration::from_millis(
-                                                self.ui_theme.anim_inspector_slide_ms,
-                                            ),
-                                            ui::Easing::EaseOut,
+                                            ui::Anim {
+                                                from: 1.0,
+                                                to: 0.0,
+                                                duration: std::time::Duration::from_millis(
+                                                    self.ui_theme.anim_inspector_slide_ms,
+                                                ),
+                                                easing: ui::Easing::EaseOut,
+                                                ..ui::Anim::DEFAULT
+                                            },
                                             now,
                                         );
                                     }
@@ -1198,12 +1213,15 @@ impl ApplicationHandler for App {
                                         self.animator.get("btn_hover_close", now).unwrap_or(0.0);
                                     self.animator.start(
                                         "btn_hover_close",
-                                        current,
-                                        target,
-                                        std::time::Duration::from_millis(
-                                            self.ui_theme.anim_hover_highlight_ms,
-                                        ),
-                                        ui::Easing::EaseOut,
+                                        ui::Anim {
+                                            from: current,
+                                            to: target,
+                                            duration: std::time::Duration::from_millis(
+                                                self.ui_theme.anim_hover_highlight_ms,
+                                            ),
+                                            easing: ui::Easing::EaseOut,
+                                            ..ui::Anim::DEFAULT
+                                        },
                                         now,
                                     );
                                 }

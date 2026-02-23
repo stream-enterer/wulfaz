@@ -24,7 +24,7 @@ mod widget;
 pub(crate) mod window;
 
 #[allow(unused_imports)] // Public API: used by main.rs for animation (UI-W05).
-pub use animation::{Animator, Easing};
+pub use animation::{Anim, Animator, Easing};
 #[allow(unused_imports)] // Public API: used by main.rs for character finder (UI-402).
 pub use character_finder::{
     CharacterFinderInfo, FinderEntry, FinderSort, build_character_finder, collect_finder_entries,
