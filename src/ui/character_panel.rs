@@ -49,7 +49,7 @@ pub fn build_character_panel(
                 },
                 TextSpan {
                     text: info.name.clone(),
-                    color: theme.text_dark,
+                    color: theme.text_medium,
                     font_family: FontFamily::Serif,
                 },
             ],
@@ -159,7 +159,7 @@ pub fn build_character_panel(
             overview_col,
             Widget::Label {
                 text: format!("Fatigue: {:.0}", fat),
-                color: theme.text_dark,
+                color: theme.text_medium,
                 font_size: theme.font_body_size,
                 font_family: FontFamily::Mono,
                 wrap: false,
@@ -173,7 +173,7 @@ pub fn build_character_panel(
             overview_col,
             Widget::Label {
                 text: format!("ATK {:.0}  DEF {:.0}  AGG {:.1}", atk, def, agg),
-                color: theme.text_dark,
+                color: theme.text_low,
                 font_size: theme.font_data_size,
                 font_family: FontFamily::Mono,
                 wrap: false,
@@ -187,7 +187,7 @@ pub fn build_character_panel(
             overview_col,
             Widget::Label {
                 text: format!("Gait: {}", gait),
-                color: theme.text_dark,
+                color: theme.text_low,
                 font_size: theme.font_data_size,
                 font_family: FontFamily::Mono,
                 wrap: false,
@@ -201,7 +201,7 @@ pub fn build_character_panel(
             overview_col,
             Widget::Label {
                 text: format!("Action: {}", action),
-                color: theme.text_dark,
+                color: theme.text_low,
                 font_size: theme.font_data_size,
                 font_family: FontFamily::Mono,
                 wrap: false,
@@ -342,11 +342,11 @@ pub fn collect_character_info(
 /// Pick color by severity ratio (current/max).
 fn severity_color(theme: &Theme, ratio: f32) -> [f32; 4] {
     if ratio > 0.5 {
-        theme.text_dark
+        theme.text_positive
     } else if ratio > 0.25 {
-        theme.gold
+        theme.text_warning
     } else {
-        theme.danger
+        theme.text_negative
     }
 }
 

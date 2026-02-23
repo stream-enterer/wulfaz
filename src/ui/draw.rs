@@ -18,7 +18,18 @@ impl FontFamily {
     }
 }
 
-use super::Rect;
+use super::{Rect, Size};
+
+/// Trait for measuring text dimensions during layout.
+///
+/// Decouples the widget tree layout pass from the GPU font renderer.
+/// The layout engine calls `measure_text` instead of using a hardcoded
+/// char-width heuristic, producing pixel-accurate widget sizes.
+pub trait TextMeasurer {
+    /// Measure the pixel dimensions of `text` rendered with `family` at `font_size_px`.
+    /// Returns `(width, height)`.
+    fn measure_text(&mut self, text: &str, family: FontFamily, font_size_px: f32) -> Size;
+}
 
 /// Intermediate draw command for a panel quad.
 /// Consumed by `PanelRenderer::add_panel()`.
@@ -92,6 +103,23 @@ pub struct SpriteCommand {
     pub clip: Option<Rect>,
     /// Z-tier of the root that owns this widget (for per-tier rendering).
     pub tier: u8,
+}
+
+/// Fallback measurer using the 0.6× char-width heuristic.
+///
+/// Used in tests where no GPU font renderer is available.
+/// Approximates char width as `0.6 × font_size` (monospace-like).
+pub struct HeuristicMeasurer;
+
+impl TextMeasurer for HeuristicMeasurer {
+    fn measure_text(&mut self, text: &str, _family: FontFamily, font_size_px: f32) -> Size {
+        let char_w = font_size_px * 0.6;
+        let n = text.chars().count() as f32;
+        Size {
+            width: n * char_w,
+            height: font_size_px,
+        }
+    }
 }
 
 /// Collects draw commands from the widget tree.

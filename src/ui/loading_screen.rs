@@ -113,7 +113,7 @@ pub fn build_loading_screen(
         col,
         Widget::Label {
             text: info.stage.label().to_string(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
             wrap: false,

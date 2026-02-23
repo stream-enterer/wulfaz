@@ -75,7 +75,7 @@ impl ModalStack {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::{Edges, Size};
+    use crate::ui::{Edges, HeuristicMeasurer, Size};
 
     fn make_modal_panel(tree: &mut WidgetTree) -> WidgetId {
         let panel = tree.insert_root(Widget::Panel {
@@ -165,7 +165,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         // Click on the dim layer area (outside modal but on screen).

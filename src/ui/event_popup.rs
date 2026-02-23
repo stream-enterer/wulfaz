@@ -78,7 +78,7 @@ pub fn build_event_popup(
         frame.content,
         Widget::Label {
             text: event.body.clone(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
             wrap: true,
@@ -100,7 +100,7 @@ pub fn build_event_popup(
             button_row,
             Widget::Button {
                 text: choice.label.clone(),
-                color: theme.text_dark,
+                color: theme.text_medium,
                 bg_color: theme.tab_inactive_color,
                 border_color: theme.gold,
                 font_size: theme.font_body_size,

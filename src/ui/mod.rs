@@ -35,7 +35,8 @@ pub use character_panel::{CharacterPanelInfo, build_character_panel, collect_cha
 pub use context_menu::{ContextMenu, MenuItem};
 #[allow(unused_imports)] // Public API: used by game panels constructing widgets.
 pub use draw::{
-    DrawList, FontFamily, PanelCommand, RichTextCommand, SpriteCommand, TextCommand, TextSpan,
+    DrawList, FontFamily, HeuristicMeasurer, PanelCommand, RichTextCommand, SpriteCommand,
+    TextCommand, TextMeasurer, TextSpan,
 };
 #[allow(unused_imports)] // Public API: used by main.rs for event popups (UI-401).
 pub use event_popup::{EventChoice, NarrativeEvent, build_event_popup};
@@ -627,7 +628,7 @@ impl WidgetTree {
     // ------------------------------------------------------------------
 
     /// Run the full layout pass over the tree. `screen` is the available area.
-    pub fn layout(&mut self, screen: Size, line_height: f32) {
+    pub fn layout(&mut self, screen: Size, tm: &mut dyn TextMeasurer) {
         let root_ids = self.roots_draw_order();
         for root in root_ids {
             self.layout_node(
@@ -638,14 +639,14 @@ impl WidgetTree {
                     width: screen.width,
                     height: screen.height,
                 },
-                line_height,
+                tm,
             );
         }
     }
 
-    fn layout_node(&mut self, id: WidgetId, parent_content: Rect, line_height: f32) {
+    fn layout_node(&mut self, id: WidgetId, parent_content: Rect, tm: &mut dyn TextMeasurer) {
         // Measure intrinsic size.
-        let measured = self.measure_node(id, line_height);
+        let measured = self.measure_node(id, tm);
 
         let Some(node) = self.arena.get_mut(id) else {
             return;
@@ -674,14 +675,15 @@ impl WidgetTree {
         let resolved_h = if let Widget::Label {
             text,
             font_size,
+            font_family,
             wrap: true,
             ..
         } = &node.widget
         {
             if matches!(node.height, Sizing::Fit) && resolved_w > 0.0 {
-                let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale;
-                let line_h = line_height * scale;
+                let ts = tm.measure_text("M", *font_family, *font_size);
+                let char_w = ts.width;
+                let line_h = ts.height;
                 let content_w = (resolved_w - node.padding.horizontal()).max(0.0);
                 let n_lines = wrapped_line_count(text, content_w, char_w);
                 n_lines as f32 * line_h + node.padding.vertical()
@@ -731,7 +733,7 @@ impl WidgetTree {
             let mut fixed_total_w: f32 = 0.0;
             let mut percent_total: f32 = 0.0;
             for &child_id in &children {
-                let child_measured = self.measure_node(child_id, line_height);
+                let child_measured = self.measure_node(child_id, tm);
                 let Some(child) = self.arena.get(child_id) else {
                     continue;
                 };
@@ -819,7 +821,7 @@ impl WidgetTree {
                     .map(|n| n.children.clone())
                     .unwrap_or_default();
                 for gc in grandchildren {
-                    self.layout_node(gc, child_content, line_height);
+                    self.layout_node(gc, child_content, tm);
                 }
 
                 cursor_x += child_total_w + gap;
@@ -839,7 +841,7 @@ impl WidgetTree {
             let mut fixed_total_h: f32 = 0.0;
             let mut percent_total: f32 = 0.0;
             for &child_id in &children {
-                let child_measured = self.measure_node(child_id, line_height);
+                let child_measured = self.measure_node(child_id, tm);
                 let Some(child) = self.arena.get(child_id) else {
                     continue;
                 };
@@ -927,7 +929,7 @@ impl WidgetTree {
                     .map(|n| n.children.clone())
                     .unwrap_or_default();
                 for gc in grandchildren {
-                    self.layout_node(gc, child_content, line_height);
+                    self.layout_node(gc, child_content, tm);
                 }
 
                 cursor_y += child_total_h + gap;
@@ -993,7 +995,7 @@ impl WidgetTree {
                     content.y + item_y,
                     content_w,
                     item_h,
-                    line_height,
+                    tm,
                 );
             }
             return;
@@ -1007,8 +1009,10 @@ impl WidgetTree {
         } = &node.widget
         {
             let expanded = *expanded;
-            let scale = font_size / line_height;
-            let header_h = line_height * scale + 4.0; // header row height
+            let header_h = tm
+                .measure_text("M", FontFamily::default(), *font_size)
+                .height
+                + 4.0;
             let children: Vec<WidgetId> = node.children.clone();
             let parent_clip = node.clip_rect;
 
@@ -1016,7 +1020,7 @@ impl WidgetTree {
                 // Lay out children below the header, Column-style.
                 let mut cursor_y = content.y + header_h;
                 for &child_id in &children {
-                    let child_measured = self.measure_node(child_id, line_height);
+                    let child_measured = self.measure_node(child_id, tm);
                     let Some(child) = self.arena.get(child_id) else {
                         continue;
                     };
@@ -1057,7 +1061,7 @@ impl WidgetTree {
                         .map(|n| n.children.clone())
                         .unwrap_or_default();
                     for gc in grandchildren {
-                        self.layout_node(gc, child_content, line_height);
+                        self.layout_node(gc, child_content, tm);
                     }
 
                     cursor_y += child_h + cm.vertical();
@@ -1069,15 +1073,17 @@ impl WidgetTree {
 
         // TabContainer: tab bar + Column-style content children (UI-301).
         if let Widget::TabContainer { font_size, .. } = &node.widget {
-            let scale = font_size / line_height;
-            let tab_bar_h = line_height * scale + 6.0;
+            let tab_bar_h = tm
+                .measure_text("M", FontFamily::default(), *font_size)
+                .height
+                + 6.0;
             let children: Vec<WidgetId> = node.children.clone();
             let parent_clip = node.clip_rect;
 
             // Lay out children Column-style below the tab bar.
             let mut cursor_y = content.y + tab_bar_h;
             for &child_id in &children {
-                let child_measured = self.measure_node(child_id, line_height);
+                let child_measured = self.measure_node(child_id, tm);
                 let Some(child) = self.arena.get(child_id) else {
                     continue;
                 };
@@ -1117,7 +1123,7 @@ impl WidgetTree {
                     .map(|n| n.children.clone())
                     .unwrap_or_default();
                 for gc in grandchildren {
-                    self.layout_node(gc, child_content, line_height);
+                    self.layout_node(gc, child_content, tm);
                 }
 
                 cursor_y += child_h + cm.vertical();
@@ -1134,7 +1140,7 @@ impl WidgetTree {
             }
         }
         for child in children {
-            self.layout_node(child, content, line_height);
+            self.layout_node(child, content, tm);
         }
     }
 
@@ -1155,9 +1161,9 @@ impl WidgetTree {
         y: f32,
         width: f32,
         height: f32,
-        line_height: f32,
+        tm: &mut dyn TextMeasurer,
     ) {
-        let measured = self.measure_node(id, line_height);
+        let measured = self.measure_node(id, tm);
 
         let Some(node) = self.arena.get_mut(id) else {
             return;
@@ -1181,50 +1187,54 @@ impl WidgetTree {
 
         let children: Vec<WidgetId> = node.children.clone();
         for child in children {
-            self.layout_node(child, content, line_height);
+            self.layout_node(child, content, tm);
         }
     }
 
     /// Measure intrinsic size of a widget (content only, no padding).
-    pub fn measure_node(&self, id: WidgetId, line_height: f32) -> Size {
+    pub fn measure_node(&self, id: WidgetId, tm: &mut dyn TextMeasurer) -> Size {
         let Some(node) = self.arena.get(id) else {
             return Size::default();
         };
 
         match &node.widget {
             Widget::Label {
-                text, font_size, ..
+                text,
+                font_size,
+                font_family,
+                ..
             } => {
-                // Approximate: char count * estimated glyph width, one line height.
-                // Font size ratio relative to base line_height.
-                let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale; // rough estimate
-                let h = line_height * scale;
+                let ts = tm.measure_text(text, *font_family, *font_size);
+                let h = tm.measure_text("M", *font_family, *font_size).height;
                 Size {
-                    width: text.len() as f32 * char_w,
+                    width: ts.width,
                     height: h,
                 }
             }
             Widget::Button {
-                text, font_size, ..
+                text,
+                font_size,
+                font_family,
+                ..
             } => {
-                let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale;
-                let h = line_height * scale;
+                let ts = tm.measure_text(text, *font_family, *font_size);
+                let h = tm.measure_text("M", *font_family, *font_size).height;
                 // Button adds internal padding (8px horizontal, 4px vertical).
                 Size {
-                    width: text.len() as f32 * char_w + 16.0,
+                    width: ts.width + 16.0,
                     height: h + 8.0,
                 }
             }
             Widget::RichText { spans, font_size } => {
-                // Approximate: sum of all span char counts * estimated glyph width.
-                let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale;
-                let h = line_height * scale;
-                let total_chars: usize = spans.iter().map(|s| s.text.len()).sum();
+                let total_w: f32 = spans
+                    .iter()
+                    .map(|s| tm.measure_text(&s.text, s.font_family, *font_size).width)
+                    .sum();
+                let h = tm
+                    .measure_text("M", FontFamily::default(), *font_size)
+                    .height;
                 Size {
-                    width: total_chars as f32 * char_w,
+                    width: total_w,
                     height: h,
                 }
             }
@@ -1235,7 +1245,7 @@ impl WidgetTree {
                 let mut max_h: f32 = 0.0;
                 for &child_id in &node.children {
                     if let Some(child) = self.arena.get(child_id) {
-                        let child_measured = self.measure_node(child_id, line_height);
+                        let child_measured = self.measure_node(child_id, tm);
                         let child_w = child_measured.width
                             + child.padding.horizontal()
                             + child.margin.horizontal();
@@ -1261,7 +1271,7 @@ impl WidgetTree {
                 let mut total_h: f32 = 0.0;
                 for &child_id in &node.children {
                     if let Some(child) = self.arena.get(child_id) {
-                        let child_measured = self.measure_node(child_id, line_height);
+                        let child_measured = self.measure_node(child_id, tm);
                         let child_w = child_measured.width
                             + child.padding.horizontal()
                             + child.margin.horizontal();
@@ -1286,7 +1296,7 @@ impl WidgetTree {
                 let mut max_h: f32 = 0.0;
                 for &child_id in &node.children {
                     if let Some(child) = self.arena.get(child_id) {
-                        let child_measured = self.measure_node(child_id, line_height);
+                        let child_measured = self.measure_node(child_id, tm);
                         let (cx, cy) = match child.position {
                             Position::Fixed { x, y } => (x, y),
                             Position::Percent { .. } => (0.0, 0.0),
@@ -1318,7 +1328,7 @@ impl WidgetTree {
                 // Width = widest child + scrollbar.
                 let mut max_w: f32 = 0.0;
                 for &child_id in &node.children {
-                    let child_measured = self.measure_node(child_id, line_height);
+                    let child_measured = self.measure_node(child_id, tm);
                     max_w = max_w.max(child_measured.width);
                 }
                 let n = node.children.len();
@@ -1365,13 +1375,14 @@ impl WidgetTree {
             Widget::Checkbox {
                 label, font_size, ..
             } => {
-                let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale;
-                let text_h = line_height * scale;
+                let ts = tm.measure_text(label, FontFamily::default(), *font_size);
+                let text_h = tm
+                    .measure_text("M", FontFamily::default(), *font_size)
+                    .height;
                 let box_size = 16.0;
                 let gap = 6.0;
                 Size {
-                    width: box_size + gap + label.len() as f32 * char_w,
+                    width: box_size + gap + ts.width,
                     height: box_size.max(text_h),
                 }
             }
@@ -1379,14 +1390,18 @@ impl WidgetTree {
                 options, font_size, ..
             } => {
                 // Width = widest option text + arrow "▼" + padding.
-                let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale;
-                let h = line_height * scale;
-                let widest = options.iter().map(|o| o.len()).max().unwrap_or(0);
-                // Arrow "▼" counts as ~2 chars, plus 16px internal padding.
-                let arrow_w = char_w * 2.0;
+                let widest_w: f32 = options
+                    .iter()
+                    .map(|o| tm.measure_text(o, FontFamily::default(), *font_size).width)
+                    .fold(0.0_f32, f32::max);
+                let h = tm
+                    .measure_text("M", FontFamily::default(), *font_size)
+                    .height;
+                let arrow_w = tm
+                    .measure_text("\u{25BC}\u{25BC}", FontFamily::default(), *font_size)
+                    .width;
                 Size {
-                    width: widest as f32 * char_w + arrow_w + 16.0,
+                    width: widest_w + arrow_w + 16.0,
                     height: h + 8.0,
                 }
             }
@@ -1398,8 +1413,9 @@ impl WidgetTree {
                 }
             }
             Widget::TextInput { font_size, .. } => {
-                let scale = font_size / line_height;
-                let h = line_height * scale;
+                let h = tm
+                    .measure_text("M", FontFamily::default(), *font_size)
+                    .height;
                 // Stretch-width (intrinsic 0), height = text + 8px vertical padding.
                 Size {
                     width: 0.0,
@@ -1412,18 +1428,23 @@ impl WidgetTree {
                 font_size,
                 ..
             } => {
-                let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale;
-                let header_h = line_height * scale + 4.0;
+                let m_size = tm.measure_text("M", FontFamily::default(), *font_size);
+                let header_h = m_size.height + 4.0;
                 // Triangle indicator (~2 chars) + header text.
-                let header_w = char_w * 2.0 + header.len() as f32 * char_w;
+                let indicator_w = tm
+                    .measure_text("\u{25BC}\u{25BC}", FontFamily::default(), *font_size)
+                    .width;
+                let header_text_w = tm
+                    .measure_text(header, FontFamily::default(), *font_size)
+                    .width;
+                let header_w = indicator_w + header_text_w;
                 if *expanded {
                     // Header + sum of children heights.
                     let mut max_w = header_w;
                     let mut total_h = header_h;
                     for &child_id in &node.children {
                         if let Some(child) = self.arena.get(child_id) {
-                            let child_measured = self.measure_node(child_id, line_height);
+                            let child_measured = self.measure_node(child_id, tm);
                             let child_w = child_measured.width
                                 + child.padding.horizontal()
                                 + child.margin.horizontal();
@@ -1449,19 +1470,20 @@ impl WidgetTree {
             Widget::TabContainer {
                 tabs, font_size, ..
             } => {
-                let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale;
+                let m_size = tm.measure_text("M", FontFamily::default(), *font_size);
                 let tab_pad = 8.0; // horizontal padding per tab
-                let tab_bar_h = line_height * scale + 6.0;
+                let tab_bar_h = m_size.height + 6.0;
                 let tab_bar_w: f32 = tabs
                     .iter()
-                    .map(|t| t.len() as f32 * char_w + tab_pad * 2.0)
+                    .map(|t| {
+                        tm.measure_text(t, FontFamily::default(), *font_size).width + tab_pad * 2.0
+                    })
                     .sum();
                 // Content children measured Column-style.
                 let mut content_w = 0.0_f32;
                 let mut content_h = 0.0_f32;
                 for &child_id in &node.children {
-                    let child_measured = self.measure_node(child_id, line_height);
+                    let child_measured = self.measure_node(child_id, tm);
                     if let Some(child) = self.arena.get(child_id) {
                         content_w = content_w.max(
                             child_measured.width
@@ -1488,20 +1510,26 @@ impl WidgetTree {
     // ------------------------------------------------------------------
 
     /// Walk the tree and emit draw commands into a `DrawList`.
-    pub fn draw(&self, draw_list: &mut DrawList) {
-        self.draw_with_line_height(draw_list, 14.0);
+    pub fn draw(&self, draw_list: &mut DrawList, tm: &mut dyn TextMeasurer) {
+        self.draw_with_measurer(draw_list, tm);
     }
 
-    /// Walk the tree and emit draw commands, using `line_height` for wrap metrics.
-    pub fn draw_with_line_height(&self, draw_list: &mut DrawList, line_height: f32) {
+    /// Walk the tree and emit draw commands, using a `TextMeasurer` for metrics.
+    pub fn draw_with_measurer(&self, draw_list: &mut DrawList, tm: &mut dyn TextMeasurer) {
         let mut sorted = self.roots.clone();
         sorted.sort_by_key(|(_, tier)| *tier);
         for (id, tier) in sorted {
-            self.draw_node(id, draw_list, line_height, tier as u8);
+            self.draw_node(id, draw_list, tm, tier as u8);
         }
     }
 
-    fn draw_node(&self, id: WidgetId, draw_list: &mut DrawList, line_height: f32, tier: u8) {
+    fn draw_node(
+        &self,
+        id: WidgetId,
+        draw_list: &mut DrawList,
+        tm: &mut dyn TextMeasurer,
+        tier: u8,
+    ) {
         let Some(node) = self.arena.get(id) else {
             return;
         };
@@ -1538,9 +1566,9 @@ impl WidgetTree {
                 wrap,
             } => {
                 if *wrap && node.rect.width > 0.0 {
-                    let scale = font_size / line_height;
-                    let char_w = line_height * 0.6 * scale;
-                    let line_h = line_height * scale;
+                    let ts = tm.measure_text("M", *font_family, *font_size);
+                    let char_w = ts.width;
+                    let line_h = ts.height;
                     let max_chars = (node.rect.width / char_w).max(1.0) as usize;
                     let lines = wrap_text(text, max_chars);
                     for (i, line) in lines.iter().enumerate() {
@@ -1713,8 +1741,9 @@ impl WidgetTree {
                     });
                 }
                 // Label text.
-                let scale = font_size / line_height;
-                let text_h = line_height * scale;
+                let text_h = tm
+                    .measure_text("M", FontFamily::default(), *font_size)
+                    .height;
                 let label_y = node.rect.y + (node.rect.height - text_h).max(0.0) / 2.0;
                 draw_list.texts.push(TextCommand {
                     text: label.clone(),
@@ -1735,8 +1764,10 @@ impl WidgetTree {
                 bg_color,
                 font_size,
             } => {
-                let scale = font_size / line_height;
-                let row_h = line_height * scale + 8.0;
+                let row_h = tm
+                    .measure_text("M", FontFamily::default(), *font_size)
+                    .height
+                    + 8.0;
                 // Trigger button background.
                 draw_list.panels.push(PanelCommand {
                     x: node.rect.x,
@@ -1763,9 +1794,12 @@ impl WidgetTree {
                     tier,
                 });
                 // Down-arrow indicator.
+                let arrow_w = tm
+                    .measure_text("\u{25BC}", FontFamily::default(), *font_size)
+                    .width;
                 draw_list.texts.push(TextCommand {
                     text: "\u{25BC}".to_string(),
-                    x: node.rect.x + node.rect.width - 8.0 - line_height * 0.6 * scale,
+                    x: node.rect.x + node.rect.width - 8.0 - arrow_w,
                     y: node.rect.y + 4.0,
                     color: *color,
                     font_size: *font_size,
@@ -1891,11 +1925,14 @@ impl WidgetTree {
                 });
                 // Cursor line when focused.
                 if *focused {
-                    let scale = font_size / line_height;
-                    let char_w = line_height * 0.6 * scale;
-                    let cursor_x =
-                        node.rect.x + 4.0 + (*cursor_pos).min(text.len()) as f32 * char_w;
-                    let cursor_h = line_height * scale;
+                    let text_before_cursor = &text[..(*cursor_pos).min(text.len())];
+                    let cursor_offset = tm
+                        .measure_text(text_before_cursor, FontFamily::default(), *font_size)
+                        .width;
+                    let cursor_x = node.rect.x + 4.0 + cursor_offset;
+                    let cursor_h = tm
+                        .measure_text("M", FontFamily::default(), *font_size)
+                        .height;
                     draw_list.panels.push(PanelCommand {
                         x: cursor_x,
                         y: node.rect.y + 4.0,
@@ -1916,8 +1953,9 @@ impl WidgetTree {
                 color,
                 font_size,
             } => {
-                let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale;
+                let indicator_w = tm
+                    .measure_text("\u{25BC}\u{25BC}", FontFamily::default(), *font_size)
+                    .width;
                 // Triangle indicator: ▶ collapsed, ▼ expanded.
                 let indicator = if *expanded { "\u{25BC}" } else { "\u{25B6}" };
                 draw_list.texts.push(TextCommand {
@@ -1933,7 +1971,7 @@ impl WidgetTree {
                 // Header label, offset past the triangle.
                 draw_list.texts.push(TextCommand {
                     text: header.clone(),
-                    x: node.rect.x + char_w * 2.0,
+                    x: node.rect.x + indicator_w,
                     y: node.rect.y + 2.0,
                     color: *color,
                     font_size: *font_size,
@@ -1953,15 +1991,17 @@ impl WidgetTree {
                 active_color,
                 font_size,
             } => {
-                let scale = font_size / line_height;
-                let char_w = line_height * 0.6 * scale;
+                let m_size = tm.measure_text("M", FontFamily::default(), *font_size);
                 let tab_pad = 8.0;
-                let tab_bar_h = line_height * scale + 6.0;
+                let tab_bar_h = m_size.height + 6.0;
 
                 // Draw tab buttons.
                 let mut tab_x = node.rect.x;
                 for (i, label) in tabs.iter().enumerate() {
-                    let tab_w = label.len() as f32 * char_w + tab_pad * 2.0;
+                    let tab_w = tm
+                        .measure_text(label, FontFamily::default(), *font_size)
+                        .width
+                        + tab_pad * 2.0;
                     let is_active = i == *active;
                     let bg = if is_active { *active_color } else { *tab_color };
 
@@ -2041,7 +2081,7 @@ impl WidgetTree {
                         && cn.rect.width > 0.0
                         && cn.rect.height > 0.0
                     {
-                        self.draw_node(child, draw_list, line_height, tier);
+                        self.draw_node(child, draw_list, tm, tier);
                     }
                 }
 
@@ -2078,7 +2118,7 @@ impl WidgetTree {
 
         // Draw children on top (non-ScrollList widgets).
         for &child in &node.children {
-            self.draw_node(child, draw_list, line_height, tier);
+            self.draw_node(child, draw_list, tm, tier);
         }
     }
 
@@ -2591,7 +2631,7 @@ pub fn build_hover_tooltip(
     info: &HoverInfo,
     cursor: (f32, f32),
     screen: Size,
-    line_height: f32,
+    tm: &mut dyn TextMeasurer,
 ) -> WidgetId {
     let panel = tree.insert_root(Widget::Panel {
         bg_color: theme.tooltip_bg_color,
@@ -2757,7 +2797,7 @@ pub fn build_hover_tooltip(
     }
 
     // Position: below-right of cursor, edge-flip if clipping screen.
-    let measured = tree.measure_node(panel, line_height);
+    let measured = tree.measure_node(panel, tm);
     let tooltip_w = measured.width + theme.tooltip_padding * 2.0;
     let tooltip_h = measured.height + theme.tooltip_padding * 2.0;
 
@@ -3419,7 +3459,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
         assert!(!tree.get(root).expect("root").dirty);
         assert!(!tree.get(child).expect("child").dirty);
@@ -3460,7 +3500,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let panel_rect = tree.get(panel).expect("panel").rect;
@@ -3491,7 +3531,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rect = tree.get(panel).expect("panel").rect;
@@ -3528,11 +3568,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         assert_eq!(dl.panels.len(), 1);
         assert_eq!(dl.texts.len(), 1);
@@ -3556,10 +3596,10 @@ mod tests {
         };
         let mut tree = WidgetTree::new();
         demo::build_demo(&mut tree, &theme, &kb, &live, screen);
-        tree.layout(screen, 14.0);
+        tree.layout(screen, &mut HeuristicMeasurer);
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // Root panel uses theme parchment background.
         assert!(!dl.panels.is_empty());
@@ -3626,11 +3666,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // Panel + two text commands
         assert_eq!(dl.panels.len(), 1);
@@ -3687,11 +3727,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         assert_eq!(dl.panels.len(), 1);
         assert_eq!(dl.texts.len(), 0);
@@ -3734,7 +3774,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let node = tree.get(rich).expect("rich text exists");
@@ -3756,11 +3796,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         assert_eq!(dl.rich_texts.len(), 1);
         assert!(dl.rich_texts[0].spans.is_empty());
@@ -3784,10 +3824,10 @@ mod tests {
         };
         let mut tree = WidgetTree::new();
         demo::build_demo(&mut tree, &theme, &kb, &live, screen);
-        tree.layout(screen, 14.0);
+        tree.layout(screen, &mut HeuristicMeasurer);
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // Demo has rich text blocks (title, population, live data, etc.).
         assert!(!dl.rich_texts.is_empty());
@@ -3848,7 +3888,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
         (tree, list)
     }
@@ -3895,11 +3935,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // Only visible items (3-7ish) should produce text commands.
         // Background panel + scrollbar thumb = 2 panel commands.
@@ -3950,7 +3990,7 @@ mod tests {
         let (tree, _list) = scroll_list_tree(3);
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // Only 1 panel (background, no scrollbar thumb).
         assert_eq!(dl.panels.len(), 1);
@@ -3962,7 +4002,7 @@ mod tests {
         let (tree, _list) = scroll_list_tree(10);
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // 2 panels: background + scrollbar thumb.
         assert_eq!(dl.panels.len(), 2);
@@ -4110,7 +4150,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         // Total content height.
@@ -4178,7 +4218,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let max_var = tree.max_scroll(list);
@@ -4235,7 +4275,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let max = tree.max_scroll(list);
@@ -4257,13 +4297,13 @@ mod tests {
         };
         let mut tree = WidgetTree::new();
         demo::build_demo(&mut tree, &theme, &kb, &live, screen);
-        tree.layout(screen, 14.0);
+        tree.layout(screen, &mut HeuristicMeasurer);
 
         // Demo is a single root panel.
         assert_eq!(tree.roots().len(), 1);
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // Should have scroll items and button texts.
         assert!(dl.texts.len() > 4, "scroll items + buttons should be drawn");
@@ -4390,7 +4430,7 @@ mod tests {
                 width: 1024.0,
                 height: 768.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rect = tree.node_rect(bar).expect("rect after layout");
@@ -4426,11 +4466,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // One panel (the status bar background).
         assert_eq!(dl.panels.len(), 1);
@@ -4545,7 +4585,14 @@ mod tests {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
         let info = hover_terrain_only();
-        let tip = build_hover_tooltip(&mut tree, &theme, &info, (100.0, 100.0), screen(), 14.0);
+        let tip = build_hover_tooltip(
+            &mut tree,
+            &theme,
+            &info,
+            (100.0, 100.0),
+            screen(),
+            &mut HeuristicMeasurer,
+        );
 
         // One root: the tooltip panel.
         assert_eq!(tree.roots().len(), 1);
@@ -4592,7 +4639,14 @@ mod tests {
             occupant_year_suffix: None,
             entities: vec![('g', "Goblin".into())],
         };
-        let tip = build_hover_tooltip(&mut tree, &theme, &info, (200.0, 200.0), screen(), 14.0);
+        let tip = build_hover_tooltip(
+            &mut tree,
+            &theme,
+            &info,
+            (200.0, 200.0),
+            screen(),
+            &mut HeuristicMeasurer,
+        );
 
         let node = tree.get(tip).expect("panel");
         // Children: coords(1) + quartier(1) + address(1) + 2 occupants(2) + 1 entity(1) = 6
@@ -4616,7 +4670,14 @@ mod tests {
             occupant_year_suffix: Some("[1842]".into()),
             entities: Vec::new(),
         };
-        let tip = build_hover_tooltip(&mut tree, &theme, &info, (50.0, 50.0), screen(), 14.0);
+        let tip = build_hover_tooltip(
+            &mut tree,
+            &theme,
+            &info,
+            (50.0, 50.0),
+            screen(),
+            &mut HeuristicMeasurer,
+        );
 
         let node = tree.get(tip).expect("panel");
         // Children: coords(1) + address(1) + 5 occupants(5) + "+3 more"(1) + year(1) = 9
@@ -4624,8 +4685,8 @@ mod tests {
 
         // Verify "+3 more" label exists.
         let mut dl = DrawList::new();
-        tree.layout(screen(), 14.0);
-        tree.draw(&mut dl);
+        tree.layout(screen(), &mut HeuristicMeasurer);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
         let has_more = dl.texts.iter().any(|t| t.text == "+3 more");
         assert!(has_more, "should show +3 more for 8 occupants (max 5)");
     }
@@ -4645,15 +4706,22 @@ mod tests {
             occupant_year_suffix: None,
             entities: vec![('g', "Goblin".into()), ('w', "Wolf".into())],
         };
-        let tip = build_hover_tooltip(&mut tree, &theme, &info, (100.0, 100.0), screen(), 14.0);
+        let tip = build_hover_tooltip(
+            &mut tree,
+            &theme,
+            &info,
+            (100.0, 100.0),
+            screen(),
+            &mut HeuristicMeasurer,
+        );
 
         let node = tree.get(tip).expect("panel");
         // coords(1) + 2 entities(2) = 3
         assert_eq!(node.children.len(), 3);
 
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // Entity entries are RichText with icon + name spans.
         let entity_rts: Vec<_> = dl
@@ -4670,11 +4738,18 @@ mod tests {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
         let info = hover_terrain_only();
-        build_hover_tooltip(&mut tree, &theme, &info, (100.0, 100.0), screen(), 14.0);
+        build_hover_tooltip(
+            &mut tree,
+            &theme,
+            &info,
+            (100.0, 100.0),
+            screen(),
+            &mut HeuristicMeasurer,
+        );
 
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // One panel (tooltip background).
         assert_eq!(dl.panels.len(), 1);
@@ -4692,9 +4767,16 @@ mod tests {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
         let info = hover_terrain_only();
-        let tip = build_hover_tooltip(&mut tree, &theme, &info, (750.0, 550.0), screen(), 14.0);
+        let tip = build_hover_tooltip(
+            &mut tree,
+            &theme,
+            &info,
+            (750.0, 550.0),
+            screen(),
+            &mut HeuristicMeasurer,
+        );
 
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let rect = tree.node_rect(tip).expect("rect");
 
         // Tooltip should be fully on screen (edge-flipped if necessary).
@@ -4877,9 +4959,9 @@ mod tests {
         let log = build_event_log(&mut tree, &theme, &entries, 800.0, 108.0);
         tree.set_position(log, Position::Fixed { x: 0.0, y: 492.0 });
 
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let mut dl = DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
 
         // One panel (ScrollList background), no scrollbar (3 items fit in viewport).
         assert_eq!(dl.panels.len(), 1);
@@ -4905,7 +4987,7 @@ mod tests {
                 width: 1024.0,
                 height: 768.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rect = tree.node_rect(log).expect("rect");
@@ -5167,7 +5249,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rect = tree.node_rect(panel_id).expect("rect after layout");
@@ -5256,7 +5338,6 @@ mod tests {
         tree.set_sizing(row, Sizing::Fixed(400.0), Sizing::Fixed(50.0));
 
         // 3 labels with known approximate widths.
-        let lh = 14.0; // line_height used in tests
         let label_a = tree.insert(
             row,
             Widget::Label {
@@ -5293,7 +5374,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            lh,
+            &mut HeuristicMeasurer,
         );
 
         let ra = tree.node_rect(label_a).unwrap();
@@ -5340,7 +5421,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rl = tree.node_rect(label).unwrap();
@@ -5400,7 +5481,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rpa = tree.node_rect(pct_a).unwrap();
@@ -5462,7 +5543,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rl = tree.node_rect(label).unwrap();
@@ -5516,7 +5597,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rs = tree.node_rect(spacer).unwrap();
@@ -5565,7 +5646,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let ra = tree.node_rect(exp_a).unwrap();
@@ -5606,7 +5687,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rr = tree.node_rect(row).unwrap();
@@ -5631,7 +5712,6 @@ mod tests {
         });
         tree.set_sizing(col, Sizing::Fixed(200.0), Sizing::Fixed(400.0));
 
-        let lh = 14.0;
         let mut labels = Vec::new();
         for i in 0..5 {
             let l = tree.insert(
@@ -5652,7 +5732,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            lh,
+            &mut HeuristicMeasurer,
         );
 
         // Each label should start where the previous one ended + gap.
@@ -5693,7 +5773,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rl = tree.node_rect(label).unwrap();
@@ -5722,11 +5802,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // Row with no children should produce no draw commands.
         assert!(draw_list.panels.is_empty());
@@ -5770,13 +5850,12 @@ mod tests {
         });
         tree.set_sizing(label, Sizing::Fixed(100.0), Sizing::Fit);
 
-        let lh = 14.0;
         tree.layout(
             Size {
                 width: 800.0,
                 height: 600.0,
             },
-            lh,
+            &mut HeuristicMeasurer,
         );
 
         let rect = tree.node_rect(label).unwrap();
@@ -5806,11 +5885,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // Should produce multiple text commands (one per wrapped line).
         assert!(
@@ -5836,11 +5915,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         assert_eq!(draw_list.texts.len(), 1);
     }
@@ -5874,7 +5953,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rect = tree.node_rect(label).unwrap();
@@ -5910,7 +5989,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rect = tree.node_rect(label).unwrap();
@@ -5959,7 +6038,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         // Child should inherit parent's clip_rect.
@@ -5970,7 +6049,7 @@ mod tests {
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // Panel command should carry the clip rect.
         assert!(
@@ -6004,11 +6083,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         assert!(
             draw_list.texts[0].clip.is_none(),
@@ -6030,7 +6109,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rect = tree.node_rect(overlay).unwrap();
@@ -6038,7 +6117,7 @@ mod tests {
         assert!((rect.height - 600.0).abs() < 0.1);
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         assert_eq!(draw_list.panels.len(), 1);
         let p = &draw_list.panels[0];
@@ -6066,7 +6145,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let node = tree.get(row).unwrap();
@@ -6088,7 +6167,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let node = tree.get(col).unwrap();
@@ -6121,7 +6200,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rl = tree.node_rect(label).unwrap();
@@ -6165,7 +6244,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let ra = tree.node_rect(a).unwrap();
@@ -6209,7 +6288,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let rl = tree.node_rect(label).unwrap();
@@ -6300,7 +6379,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let child_node = tree.get(label).unwrap();
@@ -6345,7 +6424,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let child_node = tree.get(label).unwrap();
@@ -6383,11 +6462,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // Should have at least 2 panels: background + foreground.
         assert!(draw_list.panels.len() >= 2);
@@ -6434,10 +6513,10 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // Foreground width should be clamped to full inner width, not 150%.
         let fg = &draw_list.panels[1];
@@ -6474,10 +6553,10 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // Only 1 panel: the background. No foreground for fraction 0.
         assert_eq!(
@@ -6502,7 +6581,7 @@ mod tests {
             t
         };
         let root = tree.roots()[0];
-        let measured = tree.measure_node(root, 14.0);
+        let measured = tree.measure_node(root, &mut HeuristicMeasurer);
         assert!(
             (measured.width - 0.0).abs() < 0.01,
             "intrinsic width should be 0 (stretch)"
@@ -6538,7 +6617,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let sep_node = tree.get(sep).unwrap();
@@ -6564,7 +6643,7 @@ mod tests {
             size: 16.0,
             tint: None,
         });
-        let measured = tree.measure_node(icon, 14.0);
+        let measured = tree.measure_node(icon, &mut HeuristicMeasurer);
         assert!((measured.width - 16.0).abs() < 0.01);
         assert!((measured.height - 16.0).abs() < 0.01);
     }
@@ -6583,11 +6662,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         assert_eq!(
             draw_list.sprites.len(),
@@ -6620,11 +6699,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         assert_eq!(draw_list.sprites.len(), 1);
         let tint = draw_list.sprites[0].tint;
@@ -6657,10 +6736,10 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         assert_eq!(
             draw_list.panels.len(),
@@ -6689,7 +6768,7 @@ mod tests {
             bg_color: [0.2; 4],
             font_size: 14.0,
         });
-        let size = tree.measure_node(dd, 14.0);
+        let size = tree.measure_node(dd, &mut HeuristicMeasurer);
         // Width should be based on "Long Option" (11 chars), not "A" (1 char).
         let char_w = 14.0 * 0.6; // scale = 1.0
         let expected_min = 11.0 * char_w; // widest option text
@@ -6718,11 +6797,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // 1 panel (trigger bg) + 2 texts (selected label + arrow).
         assert_eq!(draw_list.panels.len(), 1, "closed dropdown: 1 panel");
@@ -6747,11 +6826,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // 2 panels: trigger bg + options overlay bg.
         assert_eq!(draw_list.panels.len(), 2, "open dropdown: 2 panels");
@@ -6809,7 +6888,7 @@ mod tests {
             color: [1.0; 4],
             font_size: 14.0,
         });
-        let size = tree.measure_node(cb, 14.0);
+        let size = tree.measure_node(cb, &mut HeuristicMeasurer);
         // box_size=16 + gap=6 + label "Enable" (6 chars) * char_w(8.4) ≈ 72.4
         assert!(
             size.width > 60.0,
@@ -6838,11 +6917,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // 1 panel (box border), 1 text (label). No checkmark text.
         assert_eq!(draw_list.panels.len(), 1, "unchecked: 1 panel for box");
@@ -6865,11 +6944,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // 1 panel (box border), 2 texts (checkmark + label).
         assert_eq!(draw_list.panels.len(), 1, "checked: 1 panel for box");
@@ -6893,7 +6972,7 @@ mod tests {
             thumb_color: [0.8; 4],
             width: 200.0,
         });
-        let size = tree.measure_node(sl, 14.0);
+        let size = tree.measure_node(sl, &mut HeuristicMeasurer);
         assert!((size.width - 200.0).abs() < 0.01);
         assert!(
             (size.height - 16.0).abs() < 0.01,
@@ -6918,11 +6997,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // 2 panels: track + thumb.
         assert_eq!(draw_list.panels.len(), 2, "slider: track + thumb");
@@ -6955,11 +7034,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         let thumb = &draw_list.panels[1];
         // t clamped to 1.0, thumb_x = 0 + 1.0 * (100 - 16) = 84
@@ -6984,7 +7063,7 @@ mod tests {
             placeholder: "Type here".into(),
             focused: false,
         });
-        let size = tree.measure_node(ti, 14.0);
+        let size = tree.measure_node(ti, &mut HeuristicMeasurer);
         assert!(
             (size.width - 0.0).abs() < 0.01,
             "intrinsic width should be 0 (stretch)"
@@ -7010,11 +7089,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // 1 panel (bg), 1 text (content). No cursor when not focused.
         assert_eq!(draw_list.panels.len(), 1, "unfocused: 1 panel (bg)");
@@ -7040,11 +7119,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         assert_eq!(draw_list.texts[0].text, "Search...");
         // Placeholder should be dimmed (alpha * 0.5).
@@ -7072,11 +7151,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // 2 panels: bg + cursor line.
         assert_eq!(draw_list.panels.len(), 2, "focused: bg + cursor");
@@ -7107,7 +7186,7 @@ mod tests {
                 wrap: false,
             },
         );
-        let size = tree.measure_node(col, 14.0);
+        let size = tree.measure_node(col, &mut HeuristicMeasurer);
         // Header only: line_height * scale + 4.0 = 14 + 4 = 18
         assert!(
             (size.height - 18.0).abs() < 0.5,
@@ -7135,7 +7214,7 @@ mod tests {
                 wrap: false,
             },
         );
-        let size = tree.measure_node(col, 14.0);
+        let size = tree.measure_node(col, &mut HeuristicMeasurer);
         // Header (18) + child label (14) = 32
         assert!(
             size.height > 25.0,
@@ -7169,11 +7248,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // 2 texts: triangle indicator + header label. No child labels.
         assert_eq!(
@@ -7219,11 +7298,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // 4 texts: triangle + header + 2 children.
         assert_eq!(
@@ -7340,7 +7419,7 @@ mod tests {
                 width: 400.0,
                 height: 400.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         // Hit at overlay position → overlay wins (higher tier).
@@ -7409,7 +7488,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let node = tree.get(tc).unwrap();
@@ -7454,11 +7533,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // 2 tab button panels.
         assert_eq!(draw_list.panels.len(), 2, "2 tab bg panels");
@@ -7487,11 +7566,11 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut draw_list = DrawList::new();
-        tree.draw(&mut draw_list);
+        tree.draw(&mut draw_list, &mut HeuristicMeasurer);
 
         // First tab (active=0) gets active_color.
         assert!(

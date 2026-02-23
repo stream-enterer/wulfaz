@@ -1014,6 +1014,41 @@ impl FontRenderer {
     }
 }
 
+impl crate::ui::TextMeasurer for FontRenderer {
+    fn measure_text(
+        &mut self,
+        text: &str,
+        family: crate::ui::FontFamily,
+        font_size_px: f32,
+    ) -> crate::ui::Size {
+        if text.is_empty() {
+            let line_height = (font_size_px * self.metrics.line_height / self.font_size_px).ceil();
+            return crate::ui::Size {
+                width: 0.0,
+                height: line_height,
+            };
+        }
+
+        let line_height = (font_size_px * self.metrics.line_height / self.font_size_px).ceil();
+        let cosmic_metrics = CosmicMetrics::new(font_size_px, line_height);
+        let mut buffer = Buffer::new(&mut self.font_system, cosmic_metrics);
+        buffer.set_size(&mut self.font_system, None, None);
+        let attrs = Attrs::new().family(Family::Name(family.family_name()));
+        buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(&mut self.font_system, false);
+
+        let mut width: f32 = 0.0;
+        let mut height: f32 = 0.0;
+        for run in buffer.layout_runs() {
+            let run_w = run.glyphs.last().map_or(0.0, |g| g.x + g.w);
+            width = width.max(run_w);
+            height = run.line_y + line_height;
+        }
+
+        crate::ui::Size { width, height }
+    }
+}
+
 /// Fontconfig hinting configuration.
 struct HintingConfig {
     hinting: bool,

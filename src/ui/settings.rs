@@ -86,7 +86,7 @@ pub fn build_settings_screen(
         scale_row,
         Widget::Label {
             text: "UI Scale:".to_string(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
             wrap: false,
@@ -131,7 +131,7 @@ pub fn build_settings_screen(
         mode_row,
         Widget::Label {
             text: "Window:".to_string(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
             wrap: false,
@@ -148,7 +148,7 @@ pub fn build_settings_screen(
                 "Fullscreen".to_string(),
             ],
             open: false,
-            color: theme.text_dark,
+            color: theme.text_medium,
             bg_color: theme.bg_parchment,
             font_size: theme.font_data_size,
         },
@@ -191,7 +191,7 @@ pub fn build_settings_screen(
         controls_col,
         Widget::Label {
             text: "Keyboard Shortcuts".to_string(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
             wrap: false,
@@ -247,7 +247,7 @@ pub fn build_settings_screen(
             row,
             Widget::Label {
                 text: description.to_string(),
-                color: theme.text_dark,
+                color: theme.text_medium,
                 font_size: theme.font_body_size,
                 font_family: FontFamily::Serif,
                 wrap: false,

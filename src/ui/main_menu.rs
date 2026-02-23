@@ -149,7 +149,7 @@ fn make_menu_button(
         parent,
         Widget::Button {
             text: text.to_string(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             bg_color: theme.tab_inactive_color,
             border_color: theme.gold,
             font_size: theme.font_body_size,

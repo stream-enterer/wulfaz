@@ -99,7 +99,7 @@ pub fn build_character_finder(
         Widget::TextInput {
             text: info.search_text.clone(),
             cursor_pos: info.search_text.len(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             bg_color: theme.progress_bar_health_bg,
             font_size: theme.font_body_size,
             placeholder: "Search...".to_string(),
@@ -118,7 +118,7 @@ pub fn build_character_finder(
                 FinderSort::Health.label().to_string(),
             ],
             open: false,
-            color: theme.text_dark,
+            color: theme.text_medium,
             bg_color: theme.bg_parchment,
             font_size: theme.font_data_size,
         },
@@ -182,7 +182,7 @@ pub fn build_character_finder(
             row,
             Widget::Label {
                 text: entry.name.clone(),
-                color: theme.text_dark,
+                color: theme.text_medium,
                 font_size: theme.font_body_size,
                 font_family: FontFamily::Serif,
                 wrap: false,

@@ -75,7 +75,7 @@ pub fn build_outliner(
         Widget::Collapsible {
             header: format!("Pinned Characters ({})", info.pinned_characters.len()),
             expanded: true,
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
         },
     );
@@ -106,7 +106,7 @@ pub fn build_outliner(
             row,
             Widget::Label {
                 text: ch.name.clone(),
-                color: theme.text_dark,
+                color: theme.text_medium,
                 font_size: theme.font_body_size,
                 font_family: FontFamily::Serif,
                 wrap: false,
@@ -134,7 +134,7 @@ pub fn build_outliner(
         Widget::Collapsible {
             header: format!("Active Events ({})", info.active_events.len()),
             expanded: true,
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
         },
     );
@@ -145,7 +145,7 @@ pub fn build_outliner(
             events_section,
             Widget::Label {
                 text: evt.title.clone(),
-                color: theme.text_dark,
+                color: theme.text_medium,
                 font_size: theme.font_body_size,
                 font_family: FontFamily::Serif,
                 wrap: false,
@@ -175,7 +175,7 @@ pub fn build_outliner(
         Widget::Collapsible {
             header: format!("Alerts ({})", info.alerts.len()),
             expanded: !info.alerts.is_empty(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
         },
     );
@@ -183,9 +183,9 @@ pub fn build_outliner(
 
     for alert in &info.alerts {
         let color = match alert.priority {
-            AlertPriority::Info => theme.text_dark,
-            AlertPriority::Warning => theme.gold,
-            AlertPriority::Critical => theme.danger,
+            AlertPriority::Info => theme.text_medium,
+            AlertPriority::Warning => theme.text_warning,
+            AlertPriority::Critical => theme.text_negative,
         };
         let alert_label = tree.insert(
             alerts_section,

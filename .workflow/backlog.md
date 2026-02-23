@@ -175,6 +175,18 @@ Developable on test map or integrated after Phase B.
 - **UI-D10** — Per-widget focus policy. Add `focusable: bool` field to `WidgetNode` (default false). Set true for Button, ScrollList, and future EditBox. Update `collect_focusable` to check the flag instead of matching widget type. Needed when text inputs or custom focusable widgets are added.
   - Test: insert a Label with `focusable = true`, assert it appears in `focusable_widgets()`.
 
+- **UI-D11** — Text formatting DSL. Inline markup for styled text spans: `#high`, `#low`, `#P` (positive), `#N` (negative), `#bold`, `#size:18`. Parse markup into `Vec<TextSpan>` for `Widget::RichText`. CK3 uses this extensively for tooltip and event text. Enables data-driven text styling without code changes per string. Needs: UI-700 (semantic colors, done).
+  - Test: parse `"#P;+5 #N;-3 normal"` into 3 spans with correct colors.
+
+- **UI-D12** — Glow/shadow text effects. Add optional `glow_color: Option<[f32; 4]>` to `TextCommand` and `TextSpan`. Render as a second text pass with offset and blur (or pre-multiplied alpha halo in the fragment shader). CK3 uses 4 glow tiers (none/weak/medium/strong) for emphasis hierarchy on dark backgrounds.
+  - Test: emit a TextCommand with `glow_color`, assert it produces extra vertices in the draw pass.
+
+- **UI-D13** — Fourth font size tier (subheader). Add `font_subheader_size: f32` (14px) to Theme, between body (12) and header (16). Useful for section headings that don't need full header treatment. CK3 has Small(15) filling this role.
+  - Test: assert `font_subheader_size` is between `font_body_size` and `font_header_size`.
+
+- **UI-D14** — Light-background text overrides. CK3 systematically remaps all semantic text colors to dark-on-light variants when rendering on parchment/letter backgrounds. Add `TextOverrides` struct with color remapping table. Apply via a `text_overrides: Option<TextOverrides>` field on Panel or a context parameter. Needs: a use case (letter event UI, parchment dialogs).
+  - Test: create a `TextOverrides` that maps `text_light` to `text_low`, assert Label inside overridden Panel uses the remapped color.
+
 - **UI-D11** — Window dragging. Allow floating panels to be repositioned by dragging their header. Detect drag on panel header → update `Position::Fixed` with delta → re-layout. Drag infrastructure already exists in `UiState` (capture, drag threshold, DragStart/DragMove/DragEnd). Needs: floating dialog windows (window family builders).
   - Test: simulate drag on a movable panel header, assert panel position updated by drag delta.
 

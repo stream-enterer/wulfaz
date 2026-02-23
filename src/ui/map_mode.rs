@@ -78,7 +78,7 @@ pub fn build_map_mode_selector(
         row,
         Widget::Label {
             text: "Map:".to_string(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_data_size,
             font_family: FontFamily::Serif,
             wrap: false,
@@ -96,7 +96,7 @@ pub fn build_map_mode_selector(
             selected: info.current_mode.to_index(),
             options,
             open: false,
-            color: theme.text_dark,
+            color: theme.text_medium,
             bg_color: theme.bg_parchment,
             font_size: theme.font_data_size,
         },
@@ -108,7 +108,7 @@ pub fn build_map_mode_selector(
         row,
         Widget::Label {
             text: "Speed:".to_string(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_data_size,
             font_family: FontFamily::Serif,
             wrap: false,

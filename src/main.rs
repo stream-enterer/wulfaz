@@ -917,7 +917,7 @@ impl ApplicationHandler for App {
                                 width: screen_w as f32,
                                 height: screen_h as f32,
                             };
-                            self.ui_tree.layout(screen_size, m.line_height);
+                            self.ui_tree.layout(screen_size, font);
                             let status_bar_h = self
                                 .ui_tree
                                 .node_rect(status_bar_id)
@@ -1044,7 +1044,7 @@ impl ApplicationHandler for App {
                                             &info,
                                             (px, py),
                                             screen_size,
-                                            m.line_height,
+                                            font,
                                         );
                                         hover_tooltip_id = Some(tooltip_id);
 
@@ -1164,7 +1164,7 @@ impl ApplicationHandler for App {
 
                             // Re-layout tree with all widgets included.
                             let layout_start = Instant::now();
-                            self.ui_tree.layout(screen_size, m.line_height);
+                            self.ui_tree.layout(screen_size, font);
 
                             // Apply demo slide animation (UI-DEMO + UI-W05).
                             if let Some(demo_id) = demo_root_id {
@@ -1180,7 +1180,7 @@ impl ApplicationHandler for App {
                                         },
                                     );
                                     // Need re-layout after position change.
-                                    self.ui_tree.layout(screen_size, m.line_height);
+                                    self.ui_tree.layout(screen_size, font);
                                 }
                                 // Hide animation complete: panel fully off-screen.
                                 if self.animator.target("demo_slide") == Some(-1.0)
@@ -1250,7 +1250,7 @@ impl ApplicationHandler for App {
                             // Emit draw commands from UI tree.
                             let draw_start = Instant::now();
                             let mut draw_list = ui::DrawList::new();
-                            self.ui_tree.draw(&mut draw_list);
+                            self.ui_tree.draw(&mut draw_list, font);
                             let draw_us = draw_start.elapsed().as_micros() as u64;
 
                             // Panels: map overlays first, then UI panels on top.

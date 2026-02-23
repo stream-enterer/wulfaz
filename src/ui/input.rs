@@ -1,3 +1,4 @@
+use super::draw::TextMeasurer;
 use super::theme::Theme;
 use super::widget::{CrossAlign, TooltipContent, Widget};
 use super::{Constraints, Edges, Position, Size, Sizing, WidgetId, WidgetTree, ZTier};
@@ -395,6 +396,7 @@ impl UiState {
         theme: &Theme,
         screen: Size,
         now: Instant,
+        tm: &mut dyn TextMeasurer,
     ) {
         // Step 1: Dismiss stale tooltips from top of stack.
         // A tooltip stays if cursor is inside its rect or its source's rect.
@@ -447,7 +449,7 @@ impl UiState {
                 // Clone content before mutating tree.
                 let content = tree.get(sid).and_then(|n| n.tooltip.clone());
                 if let Some(content) = content {
-                    self.show_tooltip(tree, theme, sid, &content, screen);
+                    self.show_tooltip(tree, theme, sid, &content, screen, tm);
                 }
                 self.tooltip_pending = None;
             }
@@ -478,8 +480,8 @@ impl UiState {
         source: WidgetId,
         content: &TooltipContent,
         screen: Size,
+        tm: &mut dyn TextMeasurer,
     ) {
-        let line_height = theme.font_body_size;
         let nesting = self.tooltip_stack.len();
 
         // Build tooltip panel at Tooltip Z-tier (UI-307) — always on top.
@@ -533,7 +535,7 @@ impl UiState {
         }
 
         // Measure panel to compute approximate size for positioning.
-        let measured = tree.measure_node(panel, line_height);
+        let measured = tree.measure_node(panel, tm);
         let tooltip_w = measured.width + theme.tooltip_padding * 2.0;
         let tooltip_h = measured.height + theme.tooltip_padding * 2.0;
 
@@ -671,7 +673,7 @@ impl UiState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::draw::FontFamily;
+    use crate::ui::draw::{FontFamily, HeuristicMeasurer};
     use crate::ui::{Edges, Position, Rect, Size, Sizing, WidgetTree};
 
     /// Helper: build a tree with a panel containing a button.
@@ -705,7 +707,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
         (tree, panel, button)
     }
@@ -915,7 +917,7 @@ mod tests {
         });
         tree.set_position(button, Position::Fixed { x: 100.0, y: 100.0 });
         tree.set_tooltip(button, Some(TooltipContent::Text("Hello tooltip".into())));
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         (tree, button)
     }
 
@@ -931,12 +933,12 @@ mod tests {
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
 
         // Update tooltips immediately — should NOT show (delay not elapsed).
-        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 0);
 
         // Update tooltips just before delay threshold — still not shown.
         let almost = t0 + Duration::from_millis(theme.tooltip_delay_ms - 1);
-        state.update_tooltips(&mut tree, &theme, screen(), almost);
+        state.update_tooltips(&mut tree, &theme, screen(), almost, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 0);
     }
 
@@ -949,12 +951,12 @@ mod tests {
         let btn_rect = tree.get(button).unwrap().rect;
 
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
-        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 0);
 
         // Advance past delay — tooltip should appear.
         let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
-        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1);
 
         // Tooltip is a new root in the tree.
@@ -971,16 +973,16 @@ mod tests {
 
         // Show tooltip.
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
-        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0, &mut HeuristicMeasurer);
         let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
-        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1);
 
         // Move cursor far away (outside button and tooltip).
         state.handle_cursor_moved(&mut tree, 0.0, 0.0);
-        tree.layout(screen(), 14.0); // layout tooltip so it has a rect
+        tree.layout(screen(), &mut HeuristicMeasurer); // layout tooltip so it has a rect
         let t2 = t1 + Duration::from_millis(16);
-        state.update_tooltips(&mut tree, &theme, screen(), t2);
+        state.update_tooltips(&mut tree, &theme, screen(), t2, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 0);
 
         // Tooltip root removed from tree.
@@ -997,16 +999,16 @@ mod tests {
 
         // Show tooltip.
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
-        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0, &mut HeuristicMeasurer);
         let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
-        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1);
 
         // Move cursor to a different part of the button.
         state.handle_cursor_moved(&mut tree, btn_rect.x + 5.0, btn_rect.y + 5.0);
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let t2 = t1 + Duration::from_millis(16);
-        state.update_tooltips(&mut tree, &theme, screen(), t2);
+        state.update_tooltips(&mut tree, &theme, screen(), t2, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1); // still showing
     }
 
@@ -1021,18 +1023,18 @@ mod tests {
         // Show tooltip.
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
         let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
-        state.update_tooltips(&mut tree, &theme, screen(), t0);
-        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        state.update_tooltips(&mut tree, &theme, screen(), t0, &mut HeuristicMeasurer);
+        state.update_tooltips(&mut tree, &theme, screen(), t1, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1);
 
         // Layout so tooltip has a rect, then move cursor into tooltip.
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let tooltip_root = tree.roots()[1]; // second root = tooltip
         let tooltip_rect = tree.get(tooltip_root).unwrap().rect;
         state.handle_cursor_moved(&mut tree, tooltip_rect.x + 1.0, tooltip_rect.y + 1.0);
 
         let t2 = t1 + Duration::from_millis(16);
-        state.update_tooltips(&mut tree, &theme, screen(), t2);
+        state.update_tooltips(&mut tree, &theme, screen(), t2, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1); // tooltip stays
     }
 
@@ -1046,25 +1048,25 @@ mod tests {
 
         // Show and dismiss a tooltip.
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
-        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0, &mut HeuristicMeasurer);
         let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
-        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1);
 
         // Dismiss by moving away.
         state.handle_cursor_moved(&mut tree, 0.0, 0.0);
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let t2 = t1 + Duration::from_millis(16);
-        state.update_tooltips(&mut tree, &theme, screen(), t2);
+        state.update_tooltips(&mut tree, &theme, screen(), t2, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 0);
 
         // Immediately hover again — should show instantly (fast window).
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
         let t3 = t2 + Duration::from_millis(1); // 1ms later, well within fast window
-        state.update_tooltips(&mut tree, &theme, screen(), t3);
+        state.update_tooltips(&mut tree, &theme, screen(), t3, &mut HeuristicMeasurer);
         // Pending started at t3, fast delay is 0 → next update should show.
         let t4 = t3 + Duration::from_millis(1);
-        state.update_tooltips(&mut tree, &theme, screen(), t4);
+        state.update_tooltips(&mut tree, &theme, screen(), t4, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1);
     }
 
@@ -1121,19 +1123,19 @@ mod tests {
         // Long text that would exceed tooltip_max_width (400px) if unwrapped.
         let long = "A".repeat(200);
         tree.set_tooltip(button, Some(TooltipContent::Text(long)));
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
 
         let mut state = UiState::new();
         let t0 = Instant::now();
         let btn_rect = tree.get(button).unwrap().rect;
 
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
-        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0, &mut HeuristicMeasurer);
         let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
-        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1);
 
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let tooltip_root = tree.roots()[1];
         let tooltip_rect = tree.get(tooltip_root).unwrap().rect;
         assert!(
@@ -1180,20 +1182,20 @@ mod tests {
             ),
         ]);
         tree.set_tooltip(button, Some(content));
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
 
         let mut state = UiState::new();
         let t0 = Instant::now();
         let btn_rect = tree.get(button).unwrap().rect;
 
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
-        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0, &mut HeuristicMeasurer);
         let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
-        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1);
 
         // Tooltip structure: panel → column → [label1, label2].
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let tooltip_root = tree.roots()[1];
         let panel_children = tree.get(tooltip_root).unwrap().children.clone();
         assert_eq!(
@@ -1250,7 +1252,7 @@ mod tests {
             ),
         ]);
         tree.set_tooltip(button, Some(level1));
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
 
         let mut state = UiState::new();
         let t0 = Instant::now();
@@ -1258,14 +1260,14 @@ mod tests {
 
         // Hover button and show level 1 tooltip.
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
-        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0, &mut HeuristicMeasurer);
         let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
-        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1);
 
         // Layout tooltip, find the hoverable child inside it.
         // Tooltip structure: panel → column → [label1, label2].
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let tooltip1_root = tree.roots()[1];
         let col = tree.get(tooltip1_root).unwrap().children[0]; // Column wrapper
         let col_children = tree.get(col).unwrap().children.clone();
@@ -1277,19 +1279,19 @@ mod tests {
         state.handle_cursor_moved(&mut tree, sub_rect.x + 1.0, sub_rect.y + 1.0);
         // Start pending for level 2.
         let t2 = t1 + Duration::from_millis(16);
-        state.update_tooltips(&mut tree, &theme, screen(), t2);
+        state.update_tooltips(&mut tree, &theme, screen(), t2, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1); // still just level 1 (delay not met)
 
         // Advance past delay — level 2 should appear.
         let t3 = t2 + Duration::from_millis(theme.tooltip_delay_ms + 1);
-        state.update_tooltips(&mut tree, &theme, screen(), t3);
+        state.update_tooltips(&mut tree, &theme, screen(), t3, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 2); // two levels!
 
         // Move cursor away — both should be dismissed.
         state.handle_cursor_moved(&mut tree, 0.0, 0.0);
-        tree.layout(screen(), 14.0);
+        tree.layout(screen(), &mut HeuristicMeasurer);
         let t4 = t3 + Duration::from_millis(16);
-        state.update_tooltips(&mut tree, &theme, screen(), t4);
+        state.update_tooltips(&mut tree, &theme, screen(), t4, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 0);
     }
 
@@ -1303,9 +1305,9 @@ mod tests {
 
         // Show tooltip.
         state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
-        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0, &mut HeuristicMeasurer);
         let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
-        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1, &mut HeuristicMeasurer);
         assert_eq!(state.tooltip_count(), 1);
 
         // Dismiss all.
@@ -1383,7 +1385,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut state = UiState::new();
@@ -1423,7 +1425,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut state = UiState::new();
@@ -1486,7 +1488,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let mut state = UiState::new();

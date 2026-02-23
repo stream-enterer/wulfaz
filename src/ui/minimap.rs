@@ -60,7 +60,7 @@ pub fn build_minimap(tree: &mut WidgetTree, theme: &Theme, info: &MinimapInfo) -
         col,
         Widget::Label {
             text: "Map".to_string(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_data_size,
             font_family: FontFamily::Serif,
             wrap: false,

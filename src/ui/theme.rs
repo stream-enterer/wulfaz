@@ -11,14 +11,24 @@ pub struct Theme {
     pub bg_parchment: [f32; 4],
     /// Gold accent: #C8A850
     pub gold: [f32; 4],
-    /// Light text (on dark/parchment backgrounds): #F0E6D2
+    /// High-contrast text (headers, emphasis): #F0E6D2
     pub text_light: [f32; 4],
-    /// Dark text (on light backgrounds): #3C2A1A
-    pub text_dark: [f32; 4],
-    /// Danger/warning red: #C04040
+    /// Default body text: #D8C8A8
+    pub text_medium: [f32; 4],
+    /// Secondary/metadata text: #A09078
+    pub text_low: [f32; 4],
+    /// Danger/warning red accent: #C04040
     pub danger: [f32; 4],
     /// Disabled/inactive grey: #808080
     pub disabled: [f32; 4],
+
+    // -- Semantic text colors (UI-700) --
+    /// Positive values (health OK, good outcomes): green.
+    pub text_positive: [f32; 4],
+    /// Negative values (damage, bad outcomes): red.
+    pub text_negative: [f32; 4],
+    /// Caution/mixed values: gold.
+    pub text_warning: [f32; 4],
 
     // -- Panel defaults --
     /// Default panel border color (gold).
@@ -183,9 +193,15 @@ impl Default for Theme {
             bg_parchment: hex_a(0x3E, 0x2C, 0x1C, 0.95),
             gold: hex(0xC8, 0xA8, 0x50),
             text_light: hex(0xF0, 0xE6, 0xD2),
-            text_dark: hex(0xD8, 0xC8, 0xA8),
+            text_medium: hex(0xD8, 0xC8, 0xA8),
+            text_low: hex(0xA0, 0x90, 0x78),
             danger: hex(0xC0, 0x40, 0x40),
             disabled: hex(0x80, 0x80, 0x80),
+
+            // Semantic text colors (UI-700)
+            text_positive: hex(0x40, 0xA0, 0x40), // green (matches progress_bar_health_fg)
+            text_negative: hex(0xC0, 0x40, 0x40), // red (matches danger)
+            text_warning: hex(0xC8, 0xA8, 0x50),  // gold (matches gold)
 
             // Panel defaults
             panel_border_color: hex(0xC8, 0xA8, 0x50), // gold

@@ -376,7 +376,7 @@ pub fn build_demo(
             scroll_list,
             Widget::Label {
                 text: format!("Item {}", i + 1),
-                color: theme.text_dark,
+                color: theme.text_medium,
                 font_size: theme.font_data_size,
                 font_family: theme.font_data_family,
                 wrap: false,
@@ -676,6 +676,7 @@ pub fn build_demo(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::HeuristicMeasurer;
 
     #[test]
     fn demo_builds_without_entity() {
@@ -692,7 +693,7 @@ mod tests {
         };
         let mut tree = WidgetTree::new();
         let root = build_demo(&mut tree, &theme, &kb, &live, screen);
-        tree.layout(screen, 16.0);
+        tree.layout(screen, &mut HeuristicMeasurer);
         let rect = tree.node_rect(root);
         assert!(rect.is_some());
         let r = rect.unwrap();
@@ -726,7 +727,7 @@ mod tests {
         };
         let mut tree = WidgetTree::new();
         let root = build_demo(&mut tree, &theme, &kb, &live, screen);
-        tree.layout(screen, 16.0);
+        tree.layout(screen, &mut HeuristicMeasurer);
         let rect = tree.node_rect(root).unwrap();
         assert_eq!(rect.width, 400.0);
     }
@@ -746,9 +747,9 @@ mod tests {
         };
         let mut tree = WidgetTree::new();
         build_demo(&mut tree, &theme, &kb, &live, screen);
-        tree.layout(screen, 16.0);
+        tree.layout(screen, &mut HeuristicMeasurer);
         let mut dl = super::super::DrawList::new();
-        tree.draw(&mut dl);
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
         // Should have panels (root + separators + scroll list) and texts.
         assert!(!dl.panels.is_empty(), "draw list should have panels");
         assert!(

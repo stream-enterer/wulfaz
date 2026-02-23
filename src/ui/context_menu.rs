@@ -101,7 +101,7 @@ impl ContextMenu {
 
         for item in items {
             let color = if item.enabled {
-                theme.text_dark
+                theme.text_medium
             } else {
                 theme.disabled
             };
@@ -144,7 +144,7 @@ impl ContextMenu {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::{Size, WidgetTree};
+    use crate::ui::{HeuristicMeasurer, Size, WidgetTree};
 
     fn default_theme() -> Theme {
         Theme::default()
@@ -280,7 +280,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         // Walk the tree to find labels with on_click.
@@ -324,7 +324,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let root = ctx.root_id().unwrap();

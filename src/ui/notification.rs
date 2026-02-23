@@ -160,7 +160,7 @@ impl NotificationManager {
                 panel,
                 Widget::Label {
                     text: notif.message.clone(),
-                    color: theme.text_dark,
+                    color: theme.text_medium,
                     font_size: theme.font_body_size,
                     font_family: FontFamily::default(),
                     wrap: false,
@@ -176,7 +176,7 @@ impl NotificationManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::{Size, WidgetTree};
+    use crate::ui::{HeuristicMeasurer, Size, WidgetTree};
 
     #[test]
     fn push_and_count() {
@@ -225,7 +225,7 @@ mod tests {
                 width: 800.0,
                 height: 600.0,
             },
-            14.0,
+            &mut HeuristicMeasurer,
         );
 
         let root = root.unwrap();

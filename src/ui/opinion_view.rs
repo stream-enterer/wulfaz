@@ -45,8 +45,8 @@ impl Sentiment {
 
     pub fn color(self, theme: &Theme) -> [f32; 4] {
         match self {
-            Sentiment::Ally | Sentiment::Friend | Sentiment::Lover => theme.progress_bar_health_fg,
-            Sentiment::Rival => theme.danger,
+            Sentiment::Ally | Sentiment::Friend | Sentiment::Lover => theme.text_positive,
+            Sentiment::Rival => theme.text_negative,
         }
     }
 }
@@ -78,7 +78,7 @@ pub fn build_opinion_view(
         panel,
         Widget::Label {
             text: info.target_name.clone(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
             wrap: false,
@@ -118,9 +118,9 @@ pub fn build_opinion_view(
                 total_opinion
             ),
             color: if total_opinion >= 0 {
-                theme.progress_bar_health_fg
+                theme.text_positive
             } else {
-                theme.danger
+                theme.text_negative
             },
             font_size: theme.font_body_size,
             font_family: FontFamily::Mono,
@@ -157,7 +157,7 @@ pub fn build_opinion_view(
         Widget::Collapsible {
             header: "Opinion Modifiers".to_string(),
             expanded: true,
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
         },
     );
@@ -176,9 +176,9 @@ pub fn build_opinion_view(
 
         // Modifier value (colored)
         let value_color = if modifier.value >= 0 {
-            theme.progress_bar_health_fg
+            theme.text_positive
         } else {
-            theme.danger
+            theme.text_negative
         };
         tree.insert(
             row,
@@ -200,7 +200,7 @@ pub fn build_opinion_view(
             row,
             Widget::Label {
                 text: modifier.label.clone(),
-                color: theme.text_dark,
+                color: theme.text_medium,
                 font_size: theme.font_data_size,
                 font_family: FontFamily::Serif,
                 wrap: false,

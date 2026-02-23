@@ -78,7 +78,7 @@ pub fn build_save_load_screen(
         save_col,
         Widget::Label {
             text: "Save name:".to_string(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             font_size: theme.font_body_size,
             font_family: FontFamily::Serif,
             wrap: false,
@@ -89,7 +89,7 @@ pub fn build_save_load_screen(
         Widget::TextInput {
             text: String::new(),
             cursor_pos: 0,
-            color: theme.text_dark,
+            color: theme.text_medium,
             bg_color: theme.progress_bar_health_bg,
             font_size: theme.font_body_size,
             placeholder: "Enter save name...".to_string(),
@@ -103,7 +103,7 @@ pub fn build_save_load_screen(
         save_col,
         Widget::Button {
             text: "Save Game".to_string(),
-            color: theme.text_dark,
+            color: theme.text_medium,
             bg_color: theme.tab_inactive_color,
             border_color: theme.gold,
             font_size: theme.font_body_size,
@@ -178,7 +178,7 @@ pub fn build_save_load_screen(
                 row,
                 Widget::Label {
                     text: save.name.clone(),
-                    color: theme.text_dark,
+                    color: theme.text_medium,
                     font_size: theme.font_body_size,
                     font_family: FontFamily::Serif,
                     wrap: false,
@@ -201,7 +201,7 @@ pub fn build_save_load_screen(
             load_col,
             Widget::Button {
                 text: "Load Game".to_string(),
-                color: theme.text_dark,
+                color: theme.text_medium,
                 bg_color: theme.tab_inactive_color,
                 border_color: theme.gold,
                 font_size: theme.font_body_size,
