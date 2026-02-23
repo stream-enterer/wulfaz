@@ -21,6 +21,7 @@ pub(crate) mod settings;
 pub(crate) mod sprite;
 mod theme;
 mod widget;
+pub(crate) mod window;
 
 #[allow(unused_imports)] // Public API: used by main.rs for animation (UI-W05).
 pub use animation::{Animator, Easing};
@@ -71,6 +72,9 @@ pub use sprite::{SpriteAtlas, SpriteRect};
 pub use theme::Theme;
 #[allow(unused_imports)] // Public API: used by game panels setting tooltip content.
 pub use widget::{CrossAlign, TooltipContent, Widget};
+#[allow(unused_imports)]
+// Public API: used by screen builders for shared window frame (UI-600).
+pub use window::{WindowFrame, build_window_frame};
 
 use slotmap::{SlotMap, new_key_type};
 
@@ -701,7 +705,12 @@ impl WidgetTree {
                 let Some(child) = self.arena.get(child_id) else {
                     continue;
                 };
-                let cw = child.width;
+                // Expand children auto-fill remaining width (UI-601).
+                let cw = if matches!(child.widget, Widget::Expand) {
+                    Sizing::Percent(1.0)
+                } else {
+                    child.width
+                };
                 let cp = child.padding;
                 let cm = child.margin;
                 let child_w = match cw {
@@ -804,7 +813,12 @@ impl WidgetTree {
                 let Some(child) = self.arena.get(child_id) else {
                     continue;
                 };
-                let ch = child.height;
+                // Expand children auto-fill remaining height (UI-601).
+                let ch = if matches!(child.widget, Widget::Expand) {
+                    Sizing::Percent(1.0)
+                } else {
+                    child.height
+                };
                 let cp = child.padding;
                 let cm = child.margin;
                 let child_h = match ch {
@@ -1434,6 +1448,8 @@ impl WidgetTree {
                     height: tab_bar_h + content_h,
                 }
             }
+            // Expand is an invisible spacer — zero intrinsic size.
+            Widget::Expand => Size::default(),
         }
     }
 
@@ -1463,8 +1479,8 @@ impl WidgetTree {
         let clip = node.clip_rect;
 
         match &node.widget {
-            // Row and Column are transparent containers — no draw commands.
-            Widget::Row { .. } | Widget::Column { .. } => {}
+            // Row, Column, and Expand are transparent — no draw commands.
+            Widget::Row { .. } | Widget::Column { .. } | Widget::Expand => {}
             Widget::Panel {
                 bg_color,
                 border_color,
@@ -2208,8 +2224,8 @@ impl WidgetTree {
     /// Apply opacity multiplier to all color fields on a single widget.
     fn apply_opacity(widget: &mut Widget, opacity: f32) {
         match widget {
-            // Row and Column have no colors to fade.
-            Widget::Row { .. } | Widget::Column { .. } => {}
+            // Row, Column, and Expand have no colors to fade.
+            Widget::Row { .. } | Widget::Column { .. } | Widget::Expand => {}
             Widget::Panel {
                 bg_color,
                 border_color,
@@ -3031,31 +3047,26 @@ pub fn build_entity_inspector(
     tree.set_sizing(panel, Sizing::Fixed(INSPECTOR_WIDTH), Sizing::Fit);
     tree.set_padding(panel, Edges::all(theme.panel_padding));
 
+    let content_w = INSPECTOR_WIDTH - theme.panel_padding * 2.0;
     let mut y = 0.0_f32;
     let data_h = theme.font_data_size;
     let body_h = theme.font_body_size;
     let header_h = theme.font_header_size;
     let gap = theme.label_gap;
 
-    // Close button — top-right corner (positioned relative to panel content).
-    let close_btn = tree.insert(
+    // Header row: [icon+name, Expand, close button] (UI-601).
+    let header_row = tree.insert(
         panel,
-        Widget::Button {
-            text: "X".to_string(),
-            color: theme.danger,
-            bg_color: [0.0, 0.0, 0.0, 0.0], // transparent
-            border_color: theme.danger,
-            font_size: theme.font_data_size,
-            font_family: FontFamily::Mono,
+        Widget::Row {
+            gap: theme.label_gap,
+            align: widget::CrossAlign::Center,
         },
     );
-    // Position at top-right of content area. Button measures ~25px wide.
-    let close_x = INSPECTOR_WIDTH - theme.panel_padding * 2.0 - 25.0;
-    tree.set_position(close_btn, Position::Fixed { x: close_x, y: 0.0 });
+    tree.set_sizing(header_row, Sizing::Fixed(content_w), Sizing::Fit);
+    tree.set_position(header_row, Position::Fixed { x: 0.0, y: 0.0 });
 
-    // Header: icon (gold, mono) + name (text_light, serif)
-    let header = tree.insert(
-        panel,
+    tree.insert(
+        header_row,
         Widget::RichText {
             spans: vec![
                 TextSpan {
@@ -3072,7 +3083,18 @@ pub fn build_entity_inspector(
             font_size: theme.font_header_size,
         },
     );
-    tree.set_position(header, Position::Fixed { x: 0.0, y });
+    tree.insert(header_row, Widget::Expand);
+    let close_btn = tree.insert(
+        header_row,
+        Widget::Button {
+            text: "X".to_string(),
+            color: theme.danger,
+            bg_color: [0.0, 0.0, 0.0, 0.0], // transparent
+            border_color: theme.danger,
+            font_size: theme.font_data_size,
+            font_family: FontFamily::Mono,
+        },
+    );
     y += header_h + gap;
 
     // Position: "(x, y)" in disabled/mono at data size
@@ -5020,9 +5042,11 @@ mod tests {
         };
         let (panel_id, close_id) = build_entity_inspector(&mut tree, &theme, &info);
 
-        // Close button is a child of the panel.
+        // Close button is inside the header row (grandchild of panel).
         let panel_node = tree.get(panel_id).expect("panel");
-        assert!(panel_node.children.contains(&close_id));
+        let header_row_id = panel_node.children[0];
+        let header_node = tree.get(header_row_id).expect("header row");
+        assert!(header_node.children.contains(&close_id));
 
         let close_node = tree.get(close_id).expect("close button");
         assert!(matches!(close_node.widget, Widget::Button { .. }));
@@ -5363,6 +5387,204 @@ mod tests {
             rpa.width > 100.0,
             "percent child should be > 100px, got {}",
             rpa.width
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Expand spacer (UI-601)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn expand_pushes_last_child_to_end_in_row() {
+        let mut tree = WidgetTree::new();
+        let row = tree.insert_root(Widget::Row {
+            gap: 0.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(row, Sizing::Fixed(400.0), Sizing::Fixed(50.0));
+
+        // [Label, Expand, Button] — button should be at right edge.
+        let label = tree.insert(
+            row,
+            Widget::Label {
+                text: "Title".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        tree.insert(row, Widget::Expand);
+        let btn = tree.insert(
+            row,
+            Widget::Button {
+                text: "X".into(),
+                color: [1.0; 4],
+                bg_color: [0.0; 4],
+                border_color: [0.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let rl = tree.node_rect(label).unwrap();
+        let rb = tree.node_rect(btn).unwrap();
+
+        // Button should be near the right edge (400 - button_width).
+        assert!(
+            (rb.x + rb.width - 400.0).abs() < 1.0,
+            "button should be at right edge: x={}, w={}, row_w=400",
+            rb.x,
+            rb.width
+        );
+        // Label should be at the left edge.
+        assert!(rl.x < 1.0, "label should be at left edge: x={}", rl.x);
+    }
+
+    #[test]
+    fn expand_fills_remaining_in_column() {
+        let mut tree = WidgetTree::new();
+        let col = tree.insert_root(Widget::Column {
+            gap: 0.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(col, Sizing::Fixed(200.0), Sizing::Fixed(400.0));
+
+        // [Label, Expand, Label] — bottom label should be at bottom.
+        tree.insert(
+            col,
+            Widget::Label {
+                text: "Top".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        let spacer = tree.insert(col, Widget::Expand);
+        let bottom = tree.insert(
+            col,
+            Widget::Label {
+                text: "Bottom".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let rs = tree.node_rect(spacer).unwrap();
+        let rb = tree.node_rect(bottom).unwrap();
+
+        // Spacer should have consumed most of the column height.
+        assert!(
+            rs.height > 300.0,
+            "expand spacer should fill remaining height: got {}",
+            rs.height
+        );
+        // Bottom label should be near column bottom.
+        assert!(
+            (rb.y + rb.height - 400.0).abs() < 1.0,
+            "bottom label should be at column bottom: y={}, h={}, col_h=400",
+            rb.y,
+            rb.height
+        );
+    }
+
+    #[test]
+    fn two_expands_split_remaining_equally() {
+        let mut tree = WidgetTree::new();
+        let row = tree.insert_root(Widget::Row {
+            gap: 0.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(row, Sizing::Fixed(300.0), Sizing::Fixed(50.0));
+
+        // [Expand, Label, Expand] — label should be centered.
+        let exp_a = tree.insert(row, Widget::Expand);
+        let label = tree.insert(
+            row,
+            Widget::Label {
+                text: "Center".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        let exp_b = tree.insert(row, Widget::Expand);
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let ra = tree.node_rect(exp_a).unwrap();
+        let rb = tree.node_rect(exp_b).unwrap();
+        let rl = tree.node_rect(label).unwrap();
+
+        // Both expands should be equal width.
+        assert!(
+            (ra.width - rb.width).abs() < 1.0,
+            "two expands should be equal: {} vs {}",
+            ra.width,
+            rb.width
+        );
+        // Label should be roughly centered.
+        let label_center = rl.x + rl.width / 2.0;
+        assert!(
+            (label_center - 150.0).abs() < 5.0,
+            "label should be centered: center={}, expected ~150",
+            label_center
+        );
+    }
+
+    #[test]
+    fn expand_measures_as_zero() {
+        let tree = WidgetTree::new();
+        // Expand should report zero intrinsic size via the public API.
+        // We test indirectly: insert into a Fit-sized row and verify it doesn't add width.
+        let mut tree = tree;
+        let row = tree.insert_root(Widget::Row {
+            gap: 0.0,
+            align: CrossAlign::Start,
+        });
+        tree.set_sizing(row, Sizing::Fit, Sizing::Fit);
+        tree.insert(row, Widget::Expand);
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let rr = tree.node_rect(row).unwrap();
+        // Fit-sized row with only an Expand child should have ~0 width.
+        assert!(
+            rr.width < 1.0,
+            "Fit row with only Expand should be ~0 width: got {}",
+            rr.width
         );
     }
 

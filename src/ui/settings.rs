@@ -6,7 +6,8 @@
 use super::keybindings::{Action, KeyBindings};
 use super::theme::Theme;
 use super::widget::CrossAlign;
-use super::{Edges, FontFamily, Position, Sizing, Widget, WidgetId, WidgetTree};
+use super::window::build_window_frame;
+use super::{FontFamily, Position, Sizing, Widget, WidgetId, WidgetTree};
 
 /// Info needed to build the settings screen.
 pub struct SettingsInfo<'a> {
@@ -22,46 +23,31 @@ const PANEL_HEIGHT: f32 = 350.0;
 
 /// Build the settings screen (UI-413).
 ///
-/// Returns `(panel_root_id, scale_slider_id)`.
+/// Returns `(panel_root_id, close_button_id, scale_slider_id)`.
 pub fn build_settings_screen(
     tree: &mut WidgetTree,
     theme: &Theme,
     info: &SettingsInfo,
-) -> (WidgetId, WidgetId) {
-    let panel = tree.insert_root(Widget::Panel {
-        bg_color: theme.bg_parchment,
-        border_color: theme.panel_border_color,
-        border_width: theme.panel_border_width,
-        shadow_width: theme.panel_shadow_width,
-    });
-    tree.set_sizing(
-        panel,
-        Sizing::Fixed(PANEL_WIDTH),
+) -> (WidgetId, WidgetId, WidgetId) {
+    let frame = build_window_frame(
+        tree,
+        theme,
+        "Settings",
+        PANEL_WIDTH,
         Sizing::Fixed(PANEL_HEIGHT),
+        true,
     );
-    tree.set_padding(panel, Edges::all(theme.panel_padding));
+
+    // Center on screen
     let px = (info.screen_width - PANEL_WIDTH) / 2.0;
     let py = (info.screen_height - PANEL_HEIGHT) / 2.0;
-    tree.set_position(panel, Position::Fixed { x: px, y: py });
+    tree.set_position(frame.root, Position::Fixed { x: px, y: py });
 
-    let content_w = PANEL_WIDTH - theme.panel_padding * 2.0;
-
-    // Title
-    let title = tree.insert(
-        panel,
-        Widget::Label {
-            text: "Settings".to_string(),
-            color: theme.gold,
-            font_size: theme.font_header_size,
-            font_family: FontFamily::Serif,
-            wrap: false,
-        },
-    );
-    tree.set_position(title, Position::Fixed { x: 0.0, y: 0.0 });
+    let content_w = frame.content_width;
 
     // TabContainer
     let tabs = tree.insert(
-        panel,
+        frame.content,
         Widget::TabContainer {
             tabs: vec![
                 "Display".to_string(),
@@ -74,8 +60,6 @@ pub fn build_settings_screen(
             font_size: theme.font_body_size,
         },
     );
-    let tab_y = theme.font_header_size + theme.label_gap * 2.0;
-    tree.set_position(tabs, Position::Fixed { x: 0.0, y: tab_y });
     tree.set_sizing(tabs, Sizing::Fixed(content_w), Sizing::Fit);
 
     // === Display tab (child 0) ===
@@ -171,7 +155,7 @@ pub fn build_settings_screen(
     );
     tree.set_on_click(window_dropdown, "settings::window_mode");
 
-    // === Audio tab (child 1) — placeholder ===
+    // === Audio tab (child 1) -- placeholder ===
     let audio_col = tree.insert(
         tabs,
         Widget::Column {
@@ -193,7 +177,7 @@ pub fn build_settings_screen(
         },
     );
 
-    // === Controls tab (child 2) — read-only keybinding list ===
+    // === Controls tab (child 2) -- read-only keybinding list ===
     let controls_col = tree.insert(
         tabs,
         Widget::Column {
@@ -271,7 +255,12 @@ pub fn build_settings_screen(
         );
     }
 
-    (panel, scale_slider)
+    // close_btn is always Some here since closeable=true
+    (
+        frame.root,
+        frame.close_btn.expect("closeable frame"),
+        scale_slider,
+    )
 }
 
 #[cfg(test)]
@@ -289,9 +278,15 @@ mod tests {
             screen_width: 800.0,
             screen_height: 600.0,
         };
-        let (root, _slider) = build_settings_screen(&mut tree, &theme, &info);
-        let panel_node = tree.get(root).unwrap();
-        let tab_id = panel_node.children[1];
+        let (root, _close, _slider) = build_settings_screen(&mut tree, &theme, &info);
+
+        // Navigate: root -> frame_col -> content -> TabContainer
+        let root_node = tree.get(root).unwrap();
+        let frame_col = root_node.children[0];
+        let col_node = tree.get(frame_col).unwrap();
+        let content_id = col_node.children[2];
+        let content_node = tree.get(content_id).unwrap();
+        let tab_id = content_node.children[0];
         let tab_node = tree.get(tab_id).unwrap();
         if let Widget::TabContainer { tabs, .. } = &tab_node.widget {
             assert_eq!(tabs.len(), 3);
@@ -314,7 +309,7 @@ mod tests {
             screen_width: 800.0,
             screen_height: 600.0,
         };
-        let (_root, slider) = build_settings_screen(&mut tree, &theme, &info);
+        let (_root, _close, slider) = build_settings_screen(&mut tree, &theme, &info);
 
         let node = tree.get(slider).unwrap();
         if let Widget::Slider {
@@ -326,6 +321,26 @@ mod tests {
             assert_eq!(*max, 2.0);
         } else {
             panic!("Expected Slider widget");
+        }
+    }
+
+    #[test]
+    fn settings_has_close_button() {
+        let theme = Theme::default();
+        let kb = KeyBindings::defaults();
+        let mut tree = WidgetTree::new();
+        let info = SettingsInfo {
+            ui_scale: 1.0,
+            keybindings: &kb,
+            screen_width: 800.0,
+            screen_height: 600.0,
+        };
+        let (_root, close, _slider) = build_settings_screen(&mut tree, &theme, &info);
+        let close_node = tree.get(close).unwrap();
+        if let Widget::Button { text, .. } = &close_node.widget {
+            assert_eq!(text, "X");
+        } else {
+            panic!("Expected Button widget for close");
         }
     }
 }

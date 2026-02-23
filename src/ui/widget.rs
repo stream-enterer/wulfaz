@@ -187,4 +187,9 @@ pub enum Widget {
         active_color: [f32; 4], // active tab background sRGB RGBA
         font_size: f32,         // pixels
     },
+
+    /// Invisible spacer that fills remaining space in Row/Column (UI-601).
+    /// In a Row, absorbs remaining width. In a Column, absorbs remaining height.
+    /// Emits no draw commands. Used for push-to-end and centering layouts.
+    Expand,
 }

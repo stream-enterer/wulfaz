@@ -5,6 +5,7 @@
 
 use super::theme::Theme;
 use super::widget::CrossAlign;
+use super::window::build_window_frame;
 use super::{Edges, FontFamily, Position, Sizing, Widget, WidgetId, WidgetTree};
 
 /// Info about a save file for the load list.
@@ -27,47 +28,31 @@ const PANEL_HEIGHT: f32 = 350.0;
 
 /// Build the save/load screen (UI-412).
 ///
-/// Returns the panel root ID. Register with PanelManager as `"save_load"`.
+/// Returns `(panel_root_id, close_button_id)`. Register with PanelManager as `"save_load"`.
 pub fn build_save_load_screen(
     tree: &mut WidgetTree,
     theme: &Theme,
     info: &SaveLoadInfo,
-) -> WidgetId {
-    let panel = tree.insert_root(Widget::Panel {
-        bg_color: theme.bg_parchment,
-        border_color: theme.panel_border_color,
-        border_width: theme.panel_border_width,
-        shadow_width: theme.panel_shadow_width,
-    });
-    tree.set_sizing(
-        panel,
-        Sizing::Fixed(PANEL_WIDTH),
+) -> (WidgetId, WidgetId) {
+    let frame = build_window_frame(
+        tree,
+        theme,
+        "Save / Load",
+        PANEL_WIDTH,
         Sizing::Fixed(PANEL_HEIGHT),
+        true,
     );
-    tree.set_padding(panel, Edges::all(theme.panel_padding));
+
     // Center on screen
     let px = (info.screen_width - PANEL_WIDTH) / 2.0;
     let py = (info.screen_height - PANEL_HEIGHT) / 2.0;
-    tree.set_position(panel, Position::Fixed { x: px, y: py });
+    tree.set_position(frame.root, Position::Fixed { x: px, y: py });
 
-    let content_w = PANEL_WIDTH - theme.panel_padding * 2.0;
-
-    // Title
-    let title = tree.insert(
-        panel,
-        Widget::Label {
-            text: "Save / Load".to_string(),
-            color: theme.gold,
-            font_size: theme.font_header_size,
-            font_family: FontFamily::Serif,
-            wrap: false,
-        },
-    );
-    tree.set_position(title, Position::Fixed { x: 0.0, y: 0.0 });
+    let content_w = frame.content_width;
 
     // TabContainer: Save and Load tabs
     let tabs = tree.insert(
-        panel,
+        frame.content,
         Widget::TabContainer {
             tabs: vec!["Save".to_string(), "Load".to_string()],
             active: 0,
@@ -76,8 +61,6 @@ pub fn build_save_load_screen(
             font_size: theme.font_body_size,
         },
     );
-    let tab_y = theme.font_header_size + theme.label_gap * 2.0;
-    tree.set_position(tabs, Position::Fixed { x: 0.0, y: tab_y });
     tree.set_sizing(tabs, Sizing::Fixed(content_w), Sizing::Fit);
 
     // === Save tab content (child 0) ===
@@ -237,7 +220,8 @@ pub fn build_save_load_screen(
         );
     }
 
-    panel
+    // close_btn is always Some here since closeable=true
+    (frame.root, frame.close_btn.expect("closeable frame"))
 }
 
 #[cfg(test)]
@@ -253,11 +237,15 @@ mod tests {
             screen_width: 800.0,
             screen_height: 600.0,
         };
-        let root = build_save_load_screen(&mut tree, &theme, &info);
-        let panel_node = tree.get(root).unwrap();
+        let (root, _close) = build_save_load_screen(&mut tree, &theme, &info);
 
-        // Find TabContainer (second child after title)
-        let tab_id = panel_node.children[1];
+        // Navigate: root -> frame_col -> content -> TabContainer
+        let root_node = tree.get(root).unwrap();
+        let frame_col = root_node.children[0];
+        let col_node = tree.get(frame_col).unwrap();
+        let content_id = col_node.children[2];
+        let content_node = tree.get(content_id).unwrap();
+        let tab_id = content_node.children[0];
         let tab_node = tree.get(tab_id).unwrap();
         if let Widget::TabContainer { tabs, .. } = &tab_node.widget {
             assert_eq!(tabs.len(), 2);
@@ -277,9 +265,15 @@ mod tests {
             screen_width: 800.0,
             screen_height: 600.0,
         };
-        let root = build_save_load_screen(&mut tree, &theme, &info);
-        let panel_node = tree.get(root).unwrap();
-        let tab_id = panel_node.children[1];
+        let (root, _close) = build_save_load_screen(&mut tree, &theme, &info);
+
+        // Navigate: root -> frame_col -> content -> tabs -> save_col
+        let root_node = tree.get(root).unwrap();
+        let frame_col = root_node.children[0];
+        let col_node = tree.get(frame_col).unwrap();
+        let content_id = col_node.children[2];
+        let content_node = tree.get(content_id).unwrap();
+        let tab_id = content_node.children[0];
         let tab_node = tree.get(tab_id).unwrap();
 
         // Tab child 0 = save column
@@ -314,9 +308,15 @@ mod tests {
             screen_width: 800.0,
             screen_height: 600.0,
         };
-        let root = build_save_load_screen(&mut tree, &theme, &info);
-        let panel_node = tree.get(root).unwrap();
-        let tab_id = panel_node.children[1];
+        let (root, _close) = build_save_load_screen(&mut tree, &theme, &info);
+
+        // Navigate: root -> frame_col -> content -> tabs -> load_col
+        let root_node = tree.get(root).unwrap();
+        let frame_col = root_node.children[0];
+        let col_node = tree.get(frame_col).unwrap();
+        let content_id = col_node.children[2];
+        let content_node = tree.get(content_id).unwrap();
+        let tab_id = content_node.children[0];
         let tab_node = tree.get(tab_id).unwrap();
 
         // Tab child 1 = load column
@@ -334,5 +334,23 @@ mod tests {
             has_scroll_list,
             "Load tab should contain a ScrollList with saves"
         );
+    }
+
+    #[test]
+    fn save_load_has_close_button() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let info = SaveLoadInfo {
+            saves: vec![],
+            screen_width: 800.0,
+            screen_height: 600.0,
+        };
+        let (_root, close) = build_save_load_screen(&mut tree, &theme, &info);
+        let close_node = tree.get(close).unwrap();
+        if let Widget::Button { text, .. } = &close_node.widget {
+            assert_eq!(text, "X");
+        } else {
+            panic!("Expected Button widget for close");
+        }
     }
 }

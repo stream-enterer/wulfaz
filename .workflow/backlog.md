@@ -106,6 +106,11 @@ Developable on test map or integrated after Phase B.
 
 
 
+## Phase UI-6 — Window Frame Consolidation (done)
+
+- ~~**UI-600** — Shared `build_window_frame()` builder. Created `src/ui/window.rs` with `WindowFrame` struct. Produces standard Panel -> Column -> [Header Row, Separator, Content Column] tree. Close button support.~~
+- ~~**UI-601** — Migrate screens to window frame builder. Migrated: outliner, settings, save_load, character_finder, character_panel, event_popup. Added close buttons to outliner/settings/save_load/character_finder. Event popup uses overrides (gold border, 1.5x padding, 1.25x title font, 3x gap). All tests updated for new tree structure.~~
+
 ## Phase UI-5 — Polish & Architecture (remaining)
 
 - **UI-500** — Retained tree optimization (incremental rebuild). Needs: UI-505 (done). Blocks: none.

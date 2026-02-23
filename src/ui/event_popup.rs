@@ -5,7 +5,8 @@
 
 use super::theme::Theme;
 use super::widget::CrossAlign;
-use super::{Edges, FontFamily, Position, Sizing, Widget, WidgetId, WidgetTree};
+use super::window::build_window_frame;
+use super::{Edges, FontFamily, Sizing, Widget, WidgetId, WidgetTree};
 
 /// A narrative event with title, body, and choices.
 #[derive(Debug, Clone)]
@@ -36,53 +37,45 @@ pub fn build_event_popup(
     // Panel width: 60% of screen, capped at 600px
     let panel_w = (screen_width * 0.6).min(600.0);
 
-    let panel = tree.insert_root(Widget::Panel {
-        bg_color: theme.bg_parchment,
-        border_color: theme.gold,
-        border_width: theme.panel_border_width + 1.0,
-        shadow_width: theme.panel_shadow_width,
-    });
-    tree.set_sizing(panel, Sizing::Fixed(panel_w), Sizing::Fit);
-    tree.set_padding(panel, Edges::all(theme.panel_padding * 1.5));
+    let frame = build_window_frame(tree, theme, &event.title, panel_w, Sizing::Fit, false);
+
+    // Apply event popup overrides:
+    // - Gold border, +1 border_width
+    // - 1.5x padding
+    // - 1.25x title font
+    // - 3x content gap
+    if let Some(root_node) = tree.get_mut(frame.root) {
+        root_node.widget = Widget::Panel {
+            bg_color: theme.bg_parchment,
+            border_color: theme.gold,
+            border_width: theme.panel_border_width + 1.0,
+            shadow_width: theme.panel_shadow_width,
+        };
+        root_node.padding = Edges::all(theme.panel_padding * 1.5);
+    }
+
+    // Override title font size to 1.25x
+    if let Some(title_node) = tree.get_mut(frame.title)
+        && let Widget::Label { font_size, .. } = &mut title_node.widget
+    {
+        *font_size = theme.font_header_size * 1.25;
+    }
+
+    // Override frame_col gap (first child of root)
+    if let Some(frame_col_id) = tree.get(frame.root).map(|n| n.children[0])
+        && let Some(col_node) = tree.get_mut(frame_col_id)
+    {
+        col_node.widget = Widget::Column {
+            gap: theme.label_gap * 3.0,
+            align: CrossAlign::Start,
+        };
+    }
 
     let content_w = panel_w - theme.panel_padding * 3.0;
 
-    let col = tree.insert(
-        panel,
-        Widget::Column {
-            gap: theme.label_gap * 3.0,
-            align: CrossAlign::Start,
-        },
-    );
-    tree.set_position(col, Position::Fixed { x: 0.0, y: 0.0 });
-    tree.set_sizing(col, Sizing::Fixed(content_w), Sizing::Fit);
-
-    // Title (header font, gold)
-    tree.insert(
-        col,
-        Widget::Label {
-            text: event.title.clone(),
-            color: theme.gold,
-            font_size: theme.font_header_size * 1.25,
-            font_family: FontFamily::Serif,
-            wrap: false,
-        },
-    );
-
-    // Separator
-    let sep = tree.insert(
-        col,
-        Widget::Separator {
-            color: theme.gold,
-            thickness: theme.separator_thickness,
-            horizontal: true,
-        },
-    );
-    tree.set_sizing(sep, Sizing::Fixed(content_w), Sizing::Fit);
-
     // Body text (wrapped)
     tree.insert(
-        col,
+        frame.content,
         Widget::Label {
             text: event.body.clone(),
             color: theme.text_dark,
@@ -94,7 +87,7 @@ pub fn build_event_popup(
 
     // Choice buttons row
     let button_row = tree.insert(
-        col,
+        frame.content,
         Widget::Row {
             gap: theme.label_gap * 2.0,
             align: CrossAlign::Center,
@@ -133,7 +126,7 @@ pub fn build_event_popup(
         }
     }
 
-    panel
+    frame.root
 }
 
 #[cfg(test)]
@@ -169,13 +162,17 @@ mod tests {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
         let root = build_event_popup(&mut tree, &theme, &test_event(), 800.0);
-        let panel_node = tree.get(root).unwrap();
-        let col_id = panel_node.children[0];
-        let col_node = tree.get(col_id).unwrap();
 
-        // Children: title, separator, body, button_row
-        assert!(col_node.children.len() >= 4);
-        let button_row_id = col_node.children[3];
+        // Navigate: root -> frame_col -> content -> [body, button_row]
+        let panel_node = tree.get(root).unwrap();
+        let frame_col = panel_node.children[0];
+        let col_node = tree.get(frame_col).unwrap();
+        let content_id = col_node.children[2];
+        let content_node = tree.get(content_id).unwrap();
+
+        // Content children: body label, button_row
+        assert!(content_node.children.len() >= 2);
+        let button_row_id = content_node.children[1];
         let button_row_node = tree.get(button_row_id).unwrap();
         assert_eq!(
             button_row_node.children.len(),
@@ -199,10 +196,13 @@ mod tests {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
         let root = build_event_popup(&mut tree, &theme, &test_event(), 800.0);
+
         let panel_node = tree.get(root).unwrap();
-        let col_id = panel_node.children[0];
-        let col_node = tree.get(col_id).unwrap();
-        let button_row_id = col_node.children[3];
+        let frame_col = panel_node.children[0];
+        let col_node = tree.get(frame_col).unwrap();
+        let content_id = col_node.children[2];
+        let content_node = tree.get(content_id).unwrap();
+        let button_row_id = content_node.children[1];
         let button_row_node = tree.get(button_row_id).unwrap();
 
         let expected_callbacks = [
@@ -220,7 +220,7 @@ mod tests {
     fn event_popup_width_capped() {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
-        // Large screen — panel should be capped at 600px
+        // Large screen -- panel should be capped at 600px
         let root = build_event_popup(&mut tree, &theme, &test_event(), 2000.0);
         let panel_node = tree.get(root).unwrap();
         if let Sizing::Fixed(w) = panel_node.width {

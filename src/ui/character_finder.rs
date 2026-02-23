@@ -5,7 +5,8 @@
 
 use super::theme::Theme;
 use super::widget::CrossAlign;
-use super::{Edges, FontFamily, Position, Sizing, Widget, WidgetId, WidgetTree};
+use super::window::build_window_frame;
+use super::{FontFamily, Sizing, Widget, WidgetId, WidgetTree};
 
 /// Sort options for the character finder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,53 +68,31 @@ const PANEL_HEIGHT: f32 = 400.0;
 
 /// Build the character finder panel (UI-402).
 ///
-/// Returns `(panel_root_id, search_input_id, sort_dropdown_id)`.
+/// Returns `(panel_root_id, close_button_id, search_input_id, sort_dropdown_id)`.
 pub fn build_character_finder(
     tree: &mut WidgetTree,
     theme: &Theme,
     info: &CharacterFinderInfo,
-) -> (WidgetId, WidgetId, WidgetId) {
-    let panel = tree.insert_root(Widget::Panel {
-        bg_color: theme.bg_parchment,
-        border_color: theme.panel_border_color,
-        border_width: theme.panel_border_width,
-        shadow_width: theme.panel_shadow_width,
-    });
-    tree.set_sizing(
-        panel,
-        Sizing::Fixed(PANEL_WIDTH),
+) -> (WidgetId, WidgetId, WidgetId, WidgetId) {
+    let frame = build_window_frame(
+        tree,
+        theme,
+        "Character Finder",
+        PANEL_WIDTH,
         Sizing::Fixed(PANEL_HEIGHT),
+        true,
     );
-    tree.set_padding(panel, Edges::all(theme.panel_padding));
-
-    let content_w = PANEL_WIDTH - theme.panel_padding * 2.0;
-    let mut y = 0.0_f32;
-
-    // Title
-    let title = tree.insert(
-        panel,
-        Widget::Label {
-            text: "Character Finder".to_string(),
-            color: theme.gold,
-            font_size: theme.font_header_size,
-            font_family: FontFamily::Serif,
-            wrap: false,
-        },
-    );
-    tree.set_position(title, Position::Fixed { x: 0.0, y });
-    y += theme.font_header_size + theme.label_gap * 2.0;
+    let content_w = frame.content_width;
 
     // Search row: TextInput + Sort dropdown
     let search_row = tree.insert(
-        panel,
+        frame.content,
         Widget::Row {
             gap: theme.label_gap,
             align: CrossAlign::Center,
         },
     );
-    tree.set_position(search_row, Position::Fixed { x: 0.0, y });
     tree.set_sizing(search_row, Sizing::Fixed(content_w), Sizing::Fit);
-    y += theme.font_body_size + theme.label_gap * 3.0;
 
     let search_input = tree.insert(
         search_row,
@@ -147,8 +126,8 @@ pub fn build_character_finder(
     tree.set_on_click(sort_dropdown, "finder::sort");
 
     // Results count
-    let count_label = tree.insert(
-        panel,
+    tree.insert(
+        frame.content,
         Widget::Label {
             text: format!("{} found", info.entries.len()),
             color: theme.disabled,
@@ -157,13 +136,10 @@ pub fn build_character_finder(
             wrap: false,
         },
     );
-    tree.set_position(count_label, Position::Fixed { x: 0.0, y });
-    y += theme.font_data_size + theme.label_gap;
 
     // ScrollList of matching entities
-    let list_height = PANEL_HEIGHT - y - theme.panel_padding * 2.0 - 10.0;
     let list = tree.insert(
-        panel,
+        frame.content,
         Widget::ScrollList {
             bg_color: [0.0, 0.0, 0.0, 0.03],
             border_color: theme.panel_border_color,
@@ -175,8 +151,7 @@ pub fn build_character_finder(
             item_heights: Vec::new(),
         },
     );
-    tree.set_position(list, Position::Fixed { x: 0.0, y });
-    tree.set_sizing(list, Sizing::Fixed(content_w), Sizing::Fixed(list_height));
+    tree.set_sizing(list, Sizing::Fixed(content_w), Sizing::Fixed(250.0));
 
     let row_w = content_w - theme.scrollbar_width - 4.0;
     for entry in &info.entries {
@@ -227,7 +202,13 @@ pub fn build_character_finder(
         );
     }
 
-    (panel, search_input, sort_dropdown)
+    // close_btn is always Some here since closeable=true
+    (
+        frame.root,
+        frame.close_btn.expect("closeable frame"),
+        search_input,
+        sort_dropdown,
+    )
 }
 
 /// Filter and sort entities for the character finder.
@@ -340,7 +321,7 @@ mod tests {
             screen_width: 800.0,
             screen_height: 600.0,
         };
-        let (root, search, _sort) = build_character_finder(&mut tree, &theme, &info);
+        let (root, _close, search, _sort) = build_character_finder(&mut tree, &theme, &info);
         assert!(tree.get(root).is_some());
         assert!(tree.get(search).is_some());
     }
@@ -356,7 +337,7 @@ mod tests {
             screen_width: 800.0,
             screen_height: 600.0,
         };
-        let (_root, search, _sort) = build_character_finder(&mut tree, &theme, &info);
+        let (_root, _close, search, _sort) = build_character_finder(&mut tree, &theme, &info);
         let node = tree.get(search).unwrap();
         if let Widget::TextInput { text, .. } = &node.widget {
             assert_eq!(text, "gob");
@@ -369,6 +350,26 @@ mod tests {
     fn finder_sort_roundtrip() {
         for sort in [FinderSort::Name, FinderSort::Distance, FinderSort::Health] {
             assert_eq!(FinderSort::from_index(sort.to_index()), sort);
+        }
+    }
+
+    #[test]
+    fn finder_has_close_button() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let info = CharacterFinderInfo {
+            search_text: String::new(),
+            sort: FinderSort::Name,
+            entries: vec![],
+            screen_width: 800.0,
+            screen_height: 600.0,
+        };
+        let (_root, close, _search, _sort) = build_character_finder(&mut tree, &theme, &info);
+        let close_node = tree.get(close).unwrap();
+        if let Widget::Button { text, .. } = &close_node.widget {
+            assert_eq!(text, "X");
+        } else {
+            panic!("Expected Button widget for close");
         }
     }
 }

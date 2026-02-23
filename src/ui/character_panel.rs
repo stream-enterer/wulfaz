@@ -6,7 +6,8 @@
 use super::draw::TextSpan;
 use super::theme::Theme;
 use super::widget::CrossAlign;
-use super::{Edges, FontFamily, Position, Sizing, Widget, WidgetId, WidgetTree};
+use super::window::build_window_frame;
+use super::{FontFamily, Sizing, Widget, WidgetId, WidgetTree};
 
 /// Entity data needed to build the character panel.
 pub struct CharacterPanelInfo {
@@ -34,31 +35,12 @@ pub fn build_character_panel(
     theme: &Theme,
     info: &CharacterPanelInfo,
 ) -> (WidgetId, WidgetId) {
-    let panel = tree.insert_root(Widget::Panel {
-        bg_color: theme.bg_parchment,
-        border_color: theme.panel_border_color,
-        border_width: theme.panel_border_width,
-        shadow_width: theme.panel_shadow_width,
-    });
-    tree.set_sizing(panel, Sizing::Fixed(PANEL_WIDTH), Sizing::Fit);
-    tree.set_padding(panel, Edges::all(theme.panel_padding));
+    let title_text = format!("{} {}", info.icon, info.name);
+    let frame = build_window_frame(tree, theme, &title_text, PANEL_WIDTH, Sizing::Fit, true);
 
-    let content_w = PANEL_WIDTH - theme.panel_padding * 2.0;
-
-    // Header row: icon + name + close button
-    let header_row = tree.insert(
-        panel,
-        Widget::Row {
-            gap: theme.label_gap,
-            align: CrossAlign::Center,
-        },
-    );
-    tree.set_position(header_row, Position::Fixed { x: 0.0, y: 0.0 });
-    tree.set_sizing(header_row, Sizing::Fixed(content_w), Sizing::Fit);
-
-    tree.insert(
-        header_row,
-        Widget::RichText {
+    // Replace the plain Label title with a RichText title (icon in gold Mono + name in dark Serif)
+    if let Some(node) = tree.get_mut(frame.title) {
+        node.widget = Widget::RichText {
             spans: vec![
                 TextSpan {
                     text: format!("{} ", info.icon),
@@ -72,24 +54,14 @@ pub fn build_character_panel(
                 },
             ],
             font_size: theme.font_header_size,
-        },
-    );
+        };
+    }
 
-    let close_btn = tree.insert(
-        header_row,
-        Widget::Button {
-            text: "X".to_string(),
-            color: theme.danger,
-            bg_color: [0.0, 0.0, 0.0, 0.0],
-            border_color: theme.danger,
-            font_size: theme.font_data_size,
-            font_family: FontFamily::Mono,
-        },
-    );
+    let content_w = frame.content_width;
 
     // Tab container with 4 tabs
     let tabs = tree.insert(
-        panel,
+        frame.content,
         Widget::TabContainer {
             tabs: vec![
                 "Overview".to_string(),
@@ -103,8 +75,6 @@ pub fn build_character_panel(
             font_size: theme.font_body_size,
         },
     );
-    let tab_y = theme.font_header_size + theme.label_gap * 2.0;
-    tree.set_position(tabs, Position::Fixed { x: 0.0, y: tab_y });
     tree.set_sizing(tabs, Sizing::Fixed(content_w), Sizing::Fit);
 
     // === Overview tab content (tab child 0) ===
@@ -239,7 +209,7 @@ pub fn build_character_panel(
         );
     }
 
-    // === Family tab content (tab child 1) — placeholder ===
+    // === Family tab content (tab child 1) -- placeholder ===
     let family_col = tree.insert(
         tabs,
         Widget::Column {
@@ -269,7 +239,7 @@ pub fn build_character_panel(
         },
     );
 
-    // === Relations tab content (tab child 2) — placeholder ===
+    // === Relations tab content (tab child 2) -- placeholder ===
     let relations_col = tree.insert(
         tabs,
         Widget::Column {
@@ -289,7 +259,7 @@ pub fn build_character_panel(
         },
     );
 
-    // === Traits tab content (tab child 3) — placeholder ===
+    // === Traits tab content (tab child 3) -- placeholder ===
     let traits_col = tree.insert(
         tabs,
         Widget::Column {
@@ -309,7 +279,8 @@ pub fn build_character_panel(
         },
     );
 
-    (panel, close_btn)
+    // close_btn is always Some here since closeable=true
+    (frame.root, frame.close_btn.expect("closeable frame"))
 }
 
 /// Collect character panel info from the world.
@@ -405,9 +376,13 @@ mod tests {
         let (root, _close) = build_character_panel(&mut tree, &theme, &test_info());
         assert!(tree.get(root).is_some());
 
-        // Find TabContainer: second child of panel (after header row)
+        // Navigate: root -> frame_col -> content -> TabContainer
         let panel_node = tree.get(root).unwrap();
-        let tab_id = panel_node.children[1];
+        let frame_col = panel_node.children[0];
+        let col_node = tree.get(frame_col).unwrap();
+        let content_id = col_node.children[2];
+        let content_node = tree.get(content_id).unwrap();
+        let tab_id = content_node.children[0];
         let tab_node = tree.get(tab_id).unwrap();
         if let Widget::TabContainer { tabs, .. } = &tab_node.widget {
             assert_eq!(tabs.len(), 4);
@@ -425,8 +400,14 @@ mod tests {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
         let (root, _close) = build_character_panel(&mut tree, &theme, &test_info());
+
+        // Navigate: root -> frame_col -> content -> tabs -> overview_col
         let panel_node = tree.get(root).unwrap();
-        let tab_id = panel_node.children[1];
+        let frame_col = panel_node.children[0];
+        let col_node = tree.get(frame_col).unwrap();
+        let content_id = col_node.children[2];
+        let content_node = tree.get(content_id).unwrap();
+        let tab_id = content_node.children[0];
         let tab_node = tree.get(tab_id).unwrap();
 
         // Tab child 0 = overview column
