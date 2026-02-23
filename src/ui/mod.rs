@@ -1571,7 +1571,15 @@ impl WidgetTree {
         let mut sorted = self.roots.clone();
         sorted.sort_by_key(|(_, tier)| *tier);
         for (id, tier) in sorted {
+            let p0 = draw_list.panels.len();
+            let t0 = draw_list.texts.len();
+            let r0 = draw_list.rich_texts.len();
             self.draw_node(id, draw_list, tm, tier as u8);
+            draw_list.root_slices.push(draw::RootSlice {
+                panels: p0..draw_list.panels.len(),
+                texts: t0..draw_list.texts.len(),
+                rich_texts: r0..draw_list.rich_texts.len(),
+            });
         }
     }
 

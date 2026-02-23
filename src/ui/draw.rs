@@ -18,6 +18,8 @@ impl FontFamily {
     }
 }
 
+use std::ops::Range;
+
 use super::{Rect, Size};
 
 /// Trait for measuring text dimensions during layout.
@@ -122,6 +124,15 @@ impl TextMeasurer for HeuristicMeasurer {
     }
 }
 
+/// Per-root command index ranges for back-to-front rendering.
+/// Each root's panels+text are drawn as a unit so later roots
+/// correctly occlude both panels AND text of earlier roots.
+pub struct RootSlice {
+    pub panels: Range<usize>,
+    pub texts: Range<usize>,
+    pub rich_texts: Range<usize>,
+}
+
 /// Collects draw commands from the widget tree.
 /// Decouples widget logic from GPU renderers.
 pub struct DrawList {
@@ -129,6 +140,8 @@ pub struct DrawList {
     pub texts: Vec<TextCommand>,
     pub rich_texts: Vec<RichTextCommand>,
     pub sprites: Vec<SpriteCommand>,
+    /// Per-root slices in back-to-front draw order.
+    pub root_slices: Vec<RootSlice>,
 }
 
 impl DrawList {
@@ -138,6 +151,7 @@ impl DrawList {
             texts: Vec::new(),
             rich_texts: Vec::new(),
             sprites: Vec::new(),
+            root_slices: Vec::new(),
         }
     }
 
@@ -146,5 +160,6 @@ impl DrawList {
         self.texts.clear();
         self.rich_texts.clear();
         self.sprites.clear();
+        self.root_slices.clear();
     }
 }

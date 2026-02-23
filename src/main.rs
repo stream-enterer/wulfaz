@@ -47,19 +47,15 @@ fn srgb_to_linear(s: f64) -> f64 {
 const BG_SRGB: [f32; 3] = [40.0 / 255.0, 40.0 / 255.0, 40.0 / 255.0]; // #282828
 const FG_SRGB: [f32; 3] = [235.0 / 255.0, 219.0 / 255.0, 178.0 / 255.0]; // #ebdbb2
 
-/// Number of Z-tiers (Panel, Overlay, Modal, Tooltip).
-const Z_TIER_COUNT: usize = 4;
-
 /// Vertex counts per render layer.
 /// The render pass draws back-to-front:
-///   map text -> map overlay panels -> for each tier { tier panels -> tier text }
+///   map text -> map overlay panels -> for each root { panels -> text }
 struct FrameLayers {
     map_text_vertices: u32,
     map_overlay_panel_vertices: u32,
-    /// (start, count) in panel vertex space for each Z-tier.
-    tier_panel_ranges: [(u32, u32); Z_TIER_COUNT],
-    /// (start, count) in font vertex space for each Z-tier.
-    tier_text_ranges: [(u32, u32); Z_TIER_COUNT],
+    /// Per-root (panel_range, text_range) in back-to-front draw order.
+    /// panel_range and text_range are each (start, count) in their vertex buffers.
+    root_layers: Vec<((u32, u32), (u32, u32))>,
 }
 
 struct GpuState {
@@ -203,11 +199,11 @@ impl GpuState {
             font.render_range(&mut render_pass, 0, layers.map_text_vertices);
             // Layer 2: map overlay panels (tile highlights)
             panel.render_range(&mut render_pass, 0, layers.map_overlay_panel_vertices);
-            // Layers 3+: per-tier panels then text (fixes cross-tier text bleed-through)
-            for i in 0..Z_TIER_COUNT {
-                let (ps, pc) = layers.tier_panel_ranges[i];
+            // Layers 3+: per-root panels then text (fixes cross-root text bleed-through)
+            for &(panel_range, text_range) in &layers.root_layers {
+                let (ps, pc) = panel_range;
                 panel.render_range(&mut render_pass, ps, pc);
-                let (ts, tc) = layers.tier_text_ranges[i];
+                let (ts, tc) = text_range;
                 font.render_range(&mut render_pass, ts, tc);
             }
         }
@@ -1403,11 +1399,20 @@ impl ApplicationHandler for App {
                             // Map overlay panels are already in the buffer.
                             let map_overlay_panel_vertices = panel.pending_vertex_count();
 
-                            // UI panels: add per-tier so we can track vertex ranges.
-                            let mut tier_panel_ranges = [(0u32, 0u32); Z_TIER_COUNT];
-                            for tier in 0..Z_TIER_COUNT as u8 {
-                                let start = panel.pending_vertex_count();
-                                for cmd in draw_list.panels.iter().filter(|c| c.tier == tier) {
+                            // UI: add per-root panels and text in back-to-front order.
+                            // Text: map text first, then UI text per-root.
+                            font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
+
+                            // Map ASCII text (renders under all UI).
+                            let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
+                            font.prepare_map(&map_text, padding, map_y, fg4);
+                            let map_text_vertices = font.pending_vertex_count();
+
+                            let mut root_layers = Vec::with_capacity(draw_list.root_slices.len());
+                            for slice in &draw_list.root_slices {
+                                // Panels for this root
+                                let ps = panel.pending_vertex_count();
+                                for cmd in &draw_list.panels[slice.panels.clone()] {
                                     panel.add_panel(
                                         cmd.x,
                                         cmd.y,
@@ -1419,24 +1424,11 @@ impl ApplicationHandler for App {
                                         cmd.shadow_width,
                                     );
                                 }
-                                let end = panel.pending_vertex_count();
-                                tier_panel_ranges[tier as usize] = (start, end - start);
-                            }
-                            panel.flush(&gpu.queue, &gpu.device);
+                                let pe = panel.pending_vertex_count();
 
-                            // Text: map text first, then UI text per-tier.
-                            font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
-
-                            // Map ASCII text (renders under all UI).
-                            let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
-                            font.prepare_map(&map_text, padding, map_y, fg4);
-                            let map_text_vertices = font.pending_vertex_count();
-
-                            // UI text: add per-tier so we can track vertex ranges.
-                            let mut tier_text_ranges = [(0u32, 0u32); Z_TIER_COUNT];
-                            for tier in 0..Z_TIER_COUNT as u8 {
-                                let start = font.pending_vertex_count();
-                                for cmd in draw_list.texts.iter().filter(|c| c.tier == tier) {
+                                // Text for this root
+                                let ts = font.pending_vertex_count();
+                                for cmd in &draw_list.texts[slice.texts.clone()] {
                                     font.prepare_text_with_font(
                                         &cmd.text,
                                         cmd.x,
@@ -1446,7 +1438,7 @@ impl ApplicationHandler for App {
                                         cmd.font_size,
                                     );
                                 }
-                                for cmd in draw_list.rich_texts.iter().filter(|c| c.tier == tier) {
+                                for cmd in &draw_list.rich_texts[slice.rich_texts.clone()] {
                                     let spans: Vec<(String, [f32; 4], &str)> = cmd
                                         .spans
                                         .iter()
@@ -1456,16 +1448,17 @@ impl ApplicationHandler for App {
                                         .collect();
                                     font.prepare_rich_text(&spans, cmd.x, cmd.y, cmd.font_size);
                                 }
-                                let end = font.pending_vertex_count();
-                                tier_text_ranges[tier as usize] = (start, end - start);
+                                let te = font.pending_vertex_count();
+
+                                root_layers.push(((ps, pe - ps), (ts, te - ts)));
                             }
+                            panel.flush(&gpu.queue, &gpu.device);
                             font.flush(&gpu.queue, &gpu.device);
 
                             let layers = FrameLayers {
                                 map_text_vertices,
                                 map_overlay_panel_vertices,
-                                tier_panel_ranges,
-                                tier_text_ranges,
+                                root_layers,
                             };
                             gpu.render(font, panel, &layers);
                             let render_us = render_start.elapsed().as_micros() as u64;

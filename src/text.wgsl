@@ -68,11 +68,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Kitty contrast adjustment (§7.3)
     let adjustment = (1.0 - fg_lum + bg_lum) * 0.5;
-    let adjusted_alpha = clamp(
+    let glyph_alpha = clamp(
         mix(a, pow(a, uniforms.gamma_adj), adjustment) * uniforms.contrast,
         0.0, 1.0
     );
 
+    // Apply vertex color alpha (widget opacity) on top of glyph alpha
+    let final_alpha = glyph_alpha * in.color.a;
+
     // Premultiplied alpha output — sRGB surface auto-converts linear→sRGB
-    return vec4<f32>(fg_linear * adjusted_alpha, adjusted_alpha);
+    return vec4<f32>(fg_linear * final_alpha, final_alpha);
 }
