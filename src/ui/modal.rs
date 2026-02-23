@@ -1,17 +1,52 @@
 use super::{Position, Sizing, Widget, WidgetId, WidgetTree, ZTier};
 
+/// Options for pushing a modal onto the stack.
+pub struct ModalOptions {
+    /// Callback key fired when the modal is dismissed (ESC, click-outside).
+    pub on_dismiss: Option<String>,
+    /// Callback key fired when the modal is confirmed (Enter).
+    pub on_confirm: Option<String>,
+}
+
+impl ModalOptions {
+    pub const NONE: Self = Self {
+        on_dismiss: None,
+        on_confirm: None,
+    };
+}
+
+/// Result of popping a modal.
+pub struct ModalPop {
+    /// The content root that was removed.
+    pub content: WidgetId,
+    /// Dismiss callback from the modal's options.
+    pub on_dismiss: Option<String>,
+    /// Confirm callback from the modal's options.
+    pub on_confirm: Option<String>,
+}
+
+struct ModalEntry {
+    dim: WidgetId,
+    content: WidgetId,
+    on_dismiss: Option<String>,
+    on_confirm: Option<String>,
+}
+
+/// Callback key set on the dim layer for click-outside-to-dismiss.
+pub const DIM_CLICK_ACTION: &str = "modal::dismiss";
+
 /// Modal dialog stack (UI-300).
 ///
 /// Manages a stack of modal dialogs. Each modal is a root widget inserted
 /// at `ZTier::Modal`, with a fullscreen dim layer behind it that blocks
-/// clicks to widgets underneath.
+/// clicks to widgets underneath. Clicking the dim layer dismisses the
+/// topmost modal.
 ///
 /// The dim layer is a transparent Panel root at `ZTier::Modal` that covers
 /// the entire screen. It is inserted just before the modal's content root.
 pub struct ModalStack {
-    /// Stack of (dim_layer_id, content_root_id) pairs.
-    /// Last entry is the topmost modal.
-    modals: Vec<(WidgetId, WidgetId)>,
+    /// Stack of modal entries. Last entry is the topmost modal.
+    modals: Vec<ModalEntry>,
 }
 
 impl ModalStack {
@@ -23,16 +58,11 @@ impl ModalStack {
     ///
     /// `content_root` must already be inserted into `tree` as a root widget.
     /// This method:
-    /// 1. Creates a fullscreen dim layer behind the modal.
+    /// 1. Creates a fullscreen dim layer behind the modal (click-outside-to-dismiss).
     /// 2. Promotes the content root to `ZTier::Modal`.
-    pub fn push(
-        &mut self,
-        tree: &mut WidgetTree,
-        content_root: WidgetId,
-        screen_w: f32,
-        screen_h: f32,
-    ) {
-        // Dim layer: fullscreen semi-transparent panel.
+    /// 3. Centers the content root in the screen.
+    pub fn push(&mut self, tree: &mut WidgetTree, content_root: WidgetId, opts: ModalOptions) {
+        // Dim layer: fullscreen semi-transparent panel with click-to-dismiss.
         let dim = tree.insert_root_with_tier(
             Widget::Panel {
                 bg_color: [0.0, 0.0, 0.0, 0.4],
@@ -43,22 +73,38 @@ impl ModalStack {
             ZTier::Modal,
         );
         tree.set_position(dim, Position::Fixed { x: 0.0, y: 0.0 });
-        tree.set_sizing(dim, Sizing::Fixed(screen_w), Sizing::Fixed(screen_h));
+        tree.set_sizing(dim, Sizing::Percent(1.0), Sizing::Percent(1.0));
+        tree.set_on_click(dim, DIM_CLICK_ACTION);
 
-        // Promote the content root to Modal tier.
+        // Promote the content root to Modal tier and center it.
         tree.set_z_tier(content_root, ZTier::Modal);
+        tree.set_position(content_root, Position::Center);
 
-        self.modals.push((dim, content_root));
+        self.modals.push(ModalEntry {
+            dim,
+            content: content_root,
+            on_dismiss: opts.on_dismiss,
+            on_confirm: opts.on_confirm,
+        });
     }
 
     /// Pop the topmost modal from the stack.
     /// Removes both the dim layer and the content root from the tree.
-    /// Returns the content root id if a modal was popped.
-    pub fn pop(&mut self, tree: &mut WidgetTree) -> Option<WidgetId> {
-        let (dim, content) = self.modals.pop()?;
-        tree.remove(dim);
-        tree.remove(content);
-        Some(content)
+    /// Returns the pop result with callbacks for the caller to dispatch.
+    pub fn pop(&mut self, tree: &mut WidgetTree) -> Option<ModalPop> {
+        let entry = self.modals.pop()?;
+        tree.remove(entry.dim);
+        tree.remove(entry.content);
+        Some(ModalPop {
+            content: entry.content,
+            on_dismiss: entry.on_dismiss,
+            on_confirm: entry.on_confirm,
+        })
+    }
+
+    /// Get the confirm callback of the topmost modal (for Enter key dispatch).
+    pub fn confirm_callback(&self) -> Option<&str> {
+        self.modals.last().and_then(|e| e.on_confirm.as_deref())
     }
 
     /// Number of modals on the stack.
@@ -96,16 +142,16 @@ mod tests {
         let mut stack = ModalStack::new();
 
         let modal_a = make_modal_panel(&mut tree);
-        stack.push(&mut tree, modal_a, 800.0, 600.0);
+        stack.push(&mut tree, modal_a, ModalOptions::NONE);
         assert_eq!(stack.len(), 1);
 
         let modal_b = make_modal_panel(&mut tree);
-        stack.push(&mut tree, modal_b, 800.0, 600.0);
+        stack.push(&mut tree, modal_b, ModalOptions::NONE);
         assert_eq!(stack.len(), 2);
 
         // Pop top modal (B).
         let popped = stack.pop(&mut tree);
-        assert_eq!(popped, Some(modal_b));
+        assert_eq!(popped.as_ref().map(|p| p.content), Some(modal_b));
         assert_eq!(stack.len(), 1);
 
         // Modal A still in tree.
@@ -130,7 +176,7 @@ mod tests {
         tree.set_sizing(panel, Sizing::Fixed(800.0), Sizing::Fixed(600.0));
 
         let modal = make_modal_panel(&mut tree);
-        stack.push(&mut tree, modal, 800.0, 600.0);
+        stack.push(&mut tree, modal, ModalOptions::NONE);
 
         // Draw order: panel first, then dim + modal.
         let roots = tree.roots();
@@ -158,7 +204,7 @@ mod tests {
 
         // Modal in the center.
         let modal = make_modal_panel(&mut tree);
-        stack.push(&mut tree, modal, 800.0, 600.0);
+        stack.push(&mut tree, modal, ModalOptions::NONE);
 
         tree.layout(
             Size {
@@ -181,6 +227,122 @@ mod tests {
         let mut tree = WidgetTree::new();
         let mut stack = ModalStack::new();
         assert!(stack.is_empty());
-        assert_eq!(stack.pop(&mut tree), None);
+        assert!(stack.pop(&mut tree).is_none());
+    }
+
+    #[test]
+    fn dim_layer_has_click_callback() {
+        let mut tree = WidgetTree::new();
+        let mut stack = ModalStack::new();
+
+        let modal = make_modal_panel(&mut tree);
+        stack.push(&mut tree, modal, ModalOptions::NONE);
+
+        // Find the dim layer (first Modal-tier root that isn't the modal content).
+        let roots = tree.roots();
+        let dim_id = roots
+            .iter()
+            .find(|&&r| tree.z_tier(r) == Some(ZTier::Modal) && r != modal)
+            .unwrap();
+
+        let dim_node = tree.get(*dim_id).unwrap();
+        assert_eq!(
+            dim_node.on_click.as_deref(),
+            Some(DIM_CLICK_ACTION),
+            "dim layer has click-outside-to-dismiss callback"
+        );
+    }
+
+    #[test]
+    fn dim_layer_uses_percent_sizing() {
+        let mut tree = WidgetTree::new();
+        let mut stack = ModalStack::new();
+
+        let modal = make_modal_panel(&mut tree);
+        stack.push(&mut tree, modal, ModalOptions::NONE);
+
+        let roots = tree.roots();
+        let dim_id = roots
+            .iter()
+            .find(|&&r| tree.z_tier(r) == Some(ZTier::Modal) && r != modal)
+            .unwrap();
+
+        let dim_node = tree.get(*dim_id).unwrap();
+        assert!(
+            matches!(dim_node.width, Sizing::Percent(f) if (f - 1.0).abs() < 0.001),
+            "dim uses Percent width"
+        );
+        assert!(
+            matches!(dim_node.height, Sizing::Percent(f) if (f - 1.0).abs() < 0.001),
+            "dim uses Percent height"
+        );
+    }
+
+    #[test]
+    fn content_root_centered() {
+        let mut tree = WidgetTree::new();
+        let mut stack = ModalStack::new();
+
+        let modal = make_modal_panel(&mut tree);
+        stack.push(&mut tree, modal, ModalOptions::NONE);
+
+        let node = tree.get(modal).unwrap();
+        assert!(
+            matches!(node.position, Position::Center),
+            "modal content is centered"
+        );
+    }
+
+    #[test]
+    fn pop_returns_callbacks() {
+        let mut tree = WidgetTree::new();
+        let mut stack = ModalStack::new();
+
+        let modal = make_modal_panel(&mut tree);
+        stack.push(
+            &mut tree,
+            modal,
+            ModalOptions {
+                on_dismiss: Some("event_choice:refuse".into()),
+                on_confirm: Some("event_choice:accept".into()),
+            },
+        );
+
+        let pop = stack.pop(&mut tree).unwrap();
+        assert_eq!(pop.on_dismiss.as_deref(), Some("event_choice:refuse"));
+        assert_eq!(pop.on_confirm.as_deref(), Some("event_choice:accept"));
+    }
+
+    #[test]
+    fn confirm_callback_returns_topmost() {
+        let mut tree = WidgetTree::new();
+        let mut stack = ModalStack::new();
+
+        assert!(stack.confirm_callback().is_none());
+
+        let modal_a = make_modal_panel(&mut tree);
+        stack.push(
+            &mut tree,
+            modal_a,
+            ModalOptions {
+                on_dismiss: None,
+                on_confirm: Some("first".into()),
+            },
+        );
+        assert_eq!(stack.confirm_callback(), Some("first"));
+
+        let modal_b = make_modal_panel(&mut tree);
+        stack.push(
+            &mut tree,
+            modal_b,
+            ModalOptions {
+                on_dismiss: None,
+                on_confirm: Some("second".into()),
+            },
+        );
+        assert_eq!(stack.confirm_callback(), Some("second"));
+
+        stack.pop(&mut tree);
+        assert_eq!(stack.confirm_callback(), Some("first"));
     }
 }

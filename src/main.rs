@@ -367,6 +367,62 @@ struct App {
     ui_perf: ui::UiPerfMetrics,
 }
 
+impl App {
+    /// Clean up focus state after popping a modal.
+    fn cleanup_after_modal_pop(&mut self) {
+        // Clear focus if the focused widget was removed with the modal.
+        if let Some(f) = self.ui_state.focused
+            && self.ui_tree.get(f).is_none()
+        {
+            self.ui_state.focused = None;
+        }
+        // Reset focus tier to match remaining stack.
+        self.ui_state.focus_min_tier = if self.modal_stack.is_empty() {
+            ui::ZTier::Panel
+        } else {
+            ui::ZTier::Modal
+        };
+    }
+
+    /// Pop the topmost modal, clean up focus, and dispatch its callback.
+    fn pop_modal_with(&mut self, use_confirm: bool) {
+        if self.modal_stack.is_empty() {
+            return;
+        }
+        let pop = self.modal_stack.pop(&mut self.ui_tree);
+        self.cleanup_after_modal_pop();
+        if let Some(p) = pop {
+            let cb = if use_confirm {
+                p.on_confirm
+            } else {
+                p.on_dismiss
+            };
+            if let Some(cb) = cb {
+                self.dispatch_click(&cb);
+            }
+        }
+    }
+
+    /// Dispatch a click callback string. Centralizes all on_click handling.
+    fn dispatch_click(&mut self, action: &str) {
+        match action {
+            "inspector::close" => {
+                self.selected_entity = None;
+            }
+            ui::modal::DIM_CLICK_ACTION | ui::window::DIALOG_CANCEL => {
+                self.pop_modal_with(false);
+            }
+            ui::window::DIALOG_ACCEPT => {
+                self.pop_modal_with(true);
+            }
+            _ => {
+                // Event choice callbacks (event_choice:*) and other game callbacks
+                // will be dispatched here as the systems that consume them are built.
+            }
+        }
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.gpu.is_some() {
@@ -519,6 +575,18 @@ impl ApplicationHandler for App {
                                         );
                                     }
                                 }
+                                ui::Action::ConfirmModal => {
+                                    // Enter confirms the topmost modal dialog.
+                                    if !self.modal_stack.is_empty()
+                                        && let Some(cb) =
+                                            self.modal_stack.confirm_callback().map(String::from)
+                                    {
+                                        let pop = self.modal_stack.pop(&mut self.ui_tree);
+                                        self.cleanup_after_modal_pop();
+                                        self.dispatch_click(&cb);
+                                        drop(pop);
+                                    }
+                                }
                                 ui::Action::CloseTopmost => {
                                     // Priority: tooltips → modals → panels → inspector → demo → exit.
                                     if self.ui_state.tooltip_count() > 0 {
@@ -527,7 +595,7 @@ impl ApplicationHandler for App {
                                             Instant::now(),
                                         );
                                     } else if !self.modal_stack.is_empty() {
-                                        self.modal_stack.pop(&mut self.ui_tree);
+                                        self.pop_modal_with(false);
                                     } else if self
                                         .panel_manager
                                         .close_topmost(&mut self.ui_tree)
@@ -690,13 +758,7 @@ impl ApplicationHandler for App {
                         ) {
                             // Dispatch widget click callbacks (UI-305).
                             if let Some((_widget_id, action)) = self.ui_state.poll_click() {
-                                #[allow(clippy::single_match)]
-                                match action.as_str() {
-                                    "inspector::close" => {
-                                        self.selected_entity = None;
-                                    }
-                                    _ => {}
-                                }
+                                self.dispatch_click(&action);
                             }
                             return;
                         }

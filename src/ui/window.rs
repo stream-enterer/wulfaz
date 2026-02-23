@@ -133,6 +133,102 @@ pub fn build_window_frame(
     }
 }
 
+/// Callback keys for confirmation dialog buttons.
+pub const DIALOG_ACCEPT: &str = "dialog::accept";
+pub const DIALOG_CANCEL: &str = "dialog::cancel";
+
+/// Handles returned by `build_confirmation_dialog`.
+pub struct ConfirmationDialog {
+    /// Root Panel widget (push this onto ModalStack).
+    pub root: WidgetId,
+    /// Accept button.
+    pub accept_btn: WidgetId,
+    /// Cancel button.
+    pub cancel_btn: WidgetId,
+}
+
+/// Build a standard confirmation dialog (UI-301).
+///
+/// Layout: WindowFrame with message label + [Cancel] [Expand] [Accept] button row.
+/// Buttons have pre-wired `on_click` callbacks: `"dialog::cancel"` and `"dialog::accept"`.
+/// The caller pushes `dialog.root` onto the ModalStack with appropriate `ModalOptions`.
+pub fn build_confirmation_dialog(
+    tree: &mut WidgetTree,
+    theme: &Theme,
+    title: &str,
+    message: &str,
+    accept_text: &str,
+    cancel_text: &str,
+) -> ConfirmationDialog {
+    let width = 400.0;
+    let frame = build_window_frame(tree, theme, title, width, Sizing::Fit, false);
+
+    // Message label (wrapped)
+    tree.insert(
+        frame.content,
+        Widget::Label {
+            text: message.to_string(),
+            color: theme.text_medium,
+            font_size: theme.font_body_size,
+            font_family: FontFamily::Serif,
+            wrap: true,
+        },
+    );
+
+    // Button row: [Cancel] [Expand] [Accept]
+    let button_row = tree.insert(
+        frame.content,
+        Widget::Row {
+            gap: theme.label_gap * 2.0,
+            align: CrossAlign::Center,
+        },
+    );
+    tree.set_sizing(button_row, Sizing::Percent(1.0), Sizing::Fit);
+
+    let btn_pad = Edges {
+        top: theme.button_pad_v,
+        right: theme.button_pad_h,
+        bottom: theme.button_pad_v,
+        left: theme.button_pad_h,
+    };
+
+    let cancel_btn = tree.insert(
+        button_row,
+        Widget::Button {
+            text: cancel_text.to_string(),
+            color: theme.text_medium,
+            bg_color: theme.tab_inactive_color,
+            border_color: theme.panel_border_color,
+            font_size: theme.font_body_size,
+            font_family: FontFamily::Serif,
+        },
+    );
+    tree.set_on_click(cancel_btn, DIALOG_CANCEL);
+    tree.set_padding(cancel_btn, btn_pad);
+
+    tree.insert(button_row, Widget::Expand);
+
+    let accept_btn = tree.insert(
+        button_row,
+        Widget::Button {
+            text: accept_text.to_string(),
+            color: theme.text_medium,
+            bg_color: theme.tab_inactive_color,
+            border_color: theme.gold,
+            font_size: theme.font_body_size,
+            font_family: FontFamily::Serif,
+        },
+    );
+    tree.set_on_click(accept_btn, DIALOG_ACCEPT);
+    tree.set_padding(accept_btn, btn_pad);
+
+    ConfirmationDialog {
+        root: frame.root,
+        accept_btn,
+        cancel_btn,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +298,73 @@ mod tests {
         let frame = build_window_frame(&mut tree, &theme, "Test", 300.0, Sizing::Fit, false);
         let expected = 300.0 - theme.panel_padding * 2.0;
         assert!((frame.content_width - expected).abs() < 0.01);
+    }
+
+    #[test]
+    fn confirmation_dialog_structure() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let dialog =
+            build_confirmation_dialog(&mut tree, &theme, "Confirm", "Are you sure?", "Yes", "No");
+
+        // Root is a Panel
+        let root_node = tree.get(dialog.root).unwrap();
+        assert!(matches!(root_node.widget, Widget::Panel { .. }));
+
+        // Accept button exists and has correct callback
+        let accept_node = tree.get(dialog.accept_btn).unwrap();
+        assert_eq!(accept_node.on_click.as_deref(), Some(DIALOG_ACCEPT));
+        if let Widget::Button { text, .. } = &accept_node.widget {
+            assert_eq!(text, "Yes");
+        } else {
+            panic!("accept_btn should be a Button");
+        }
+
+        // Cancel button exists and has correct callback
+        let cancel_node = tree.get(dialog.cancel_btn).unwrap();
+        assert_eq!(cancel_node.on_click.as_deref(), Some(DIALOG_CANCEL));
+        if let Widget::Button { text, .. } = &cancel_node.widget {
+            assert_eq!(text, "No");
+        } else {
+            panic!("cancel_btn should be a Button");
+        }
+    }
+
+    #[test]
+    fn confirmation_dialog_has_message_and_buttons() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let dialog = build_confirmation_dialog(
+            &mut tree,
+            &theme,
+            "Delete",
+            "This cannot be undone.",
+            "Delete",
+            "Cancel",
+        );
+
+        // Navigate: root -> frame_col -> content -> [message, button_row]
+        let root_node = tree.get(dialog.root).unwrap();
+        let frame_col = root_node.children[0];
+        let col_node = tree.get(frame_col).unwrap();
+        // col children: header, separator, content
+        let content_id = col_node.children[2];
+        let content_node = tree.get(content_id).unwrap();
+        // content children: message label, button_row
+        assert_eq!(content_node.children.len(), 2);
+
+        // First child is the message label
+        let msg = tree.get(content_node.children[0]).unwrap();
+        if let Widget::Label { text, .. } = &msg.widget {
+            assert_eq!(text, "This cannot be undone.");
+        } else {
+            panic!("first content child should be message Label");
+        }
+
+        // Second child is the button row
+        let row = tree.get(content_node.children[1]).unwrap();
+        assert!(matches!(row.widget, Widget::Row { .. }));
+        // Row has: cancel, expand, accept
+        assert_eq!(row.children.len(), 3);
     }
 }

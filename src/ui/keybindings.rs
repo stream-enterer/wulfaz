@@ -44,6 +44,8 @@ pub enum Action {
     SpeedSet(u32),
     /// Close topmost overlay (tooltip → inspector → exit).
     CloseTopmost,
+    /// Confirm/accept the topmost modal dialog.
+    ConfirmModal,
     /// Toggle the widget showcase (UI-DEMO).
     ToggleDemo,
     /// Toggle the character finder panel (UI-402).
@@ -74,6 +76,7 @@ impl KeyBindings {
 
         map.insert(KeyCombo::plain(KeyCode::Space), Action::PauseSim);
         map.insert(KeyCombo::plain(KeyCode::Escape), Action::CloseTopmost);
+        map.insert(KeyCombo::plain(KeyCode::Enter), Action::ConfirmModal);
         map.insert(KeyCombo::plain(KeyCode::F11), Action::ToggleDemo);
         map.insert(KeyCombo::plain(KeyCode::Digit1), Action::SpeedSet(1));
         map.insert(KeyCombo::plain(KeyCode::Digit2), Action::SpeedSet(2));
@@ -273,6 +276,16 @@ mod tests {
         let kb = KeyBindings::defaults();
         let label = kb.label_for(Action::CloseTopmost);
         assert_eq!(label.as_deref(), Some("Esc"));
+    }
+
+    #[test]
+    fn label_for_confirm() {
+        let kb = KeyBindings::defaults();
+        assert_eq!(
+            kb.lookup(KeyCombo::plain(KeyCode::Enter)),
+            Some(Action::ConfirmModal)
+        );
+        assert_eq!(kb.label_for(Action::ConfirmModal).as_deref(), Some("Enter"));
     }
 
     #[test]

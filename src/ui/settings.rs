@@ -212,6 +212,7 @@ pub fn build_settings_screen(
     let bindings = [
         (Action::PauseSim, "Pause/Resume"),
         (Action::CloseTopmost, "Close Panel"),
+        (Action::ConfirmModal, "Confirm Dialog"),
         (Action::ToggleDemo, "Widget Showcase"),
         (Action::SpeedSet(1), "Speed 1x"),
         (Action::SpeedSet(2), "Speed 2x"),

@@ -11,7 +11,7 @@ pub(crate) mod loading_screen;
 pub(crate) mod main_menu;
 pub(crate) mod map_mode;
 pub(crate) mod minimap;
-mod modal;
+pub(crate) mod modal;
 mod notification;
 pub(crate) mod opinion_view;
 pub(crate) mod outliner;
@@ -53,7 +53,7 @@ pub use map_mode::{MapMode, MapModeInfo, build_map_mode_selector};
 #[allow(unused_imports)] // Public API: used by main.rs for minimap (UI-407).
 pub use minimap::{MinimapInfo, build_minimap, minimap_click_to_world};
 #[allow(unused_imports)] // Public API: used by main.rs for modal management (UI-300).
-pub use modal::ModalStack;
+pub use modal::{ModalOptions, ModalPop, ModalStack};
 #[allow(unused_imports)] // Public API: used by main.rs for notification system (UI-302).
 pub use notification::{NotificationManager, NotificationPriority};
 #[allow(unused_imports)] // Public API: used by main.rs for opinion view (UI-406).
@@ -75,7 +75,7 @@ pub use theme::Theme;
 pub use widget::{CrossAlign, TooltipContent, Widget};
 #[allow(unused_imports)]
 // Public API: used by screen builders for shared window frame (UI-600).
-pub use window::{WindowFrame, build_window_frame};
+pub use window::{ConfirmationDialog, WindowFrame, build_confirmation_dialog, build_window_frame};
 
 use slotmap::{SlotMap, new_key_type};
 
@@ -233,6 +233,9 @@ pub enum Position {
     Fixed { x: f32, y: f32 },
     /// Percentage of parent's content area (0.0–1.0).
     Percent { x: f32, y: f32 },
+    /// Centered in parent's content area.
+    /// Computed as `(parent_w - widget_w) / 2` after size resolution.
+    Center,
 }
 
 impl Default for Position {
@@ -677,6 +680,10 @@ impl WidgetTree {
         let (ox, oy) = match node.position {
             Position::Fixed { x, y } => (x, y),
             Position::Percent { x, y } => (parent_content.width * x, parent_content.height * y),
+            Position::Center => (
+                (parent_content.width - resolved_w) * 0.5,
+                (parent_content.height - resolved_h) * 0.5,
+            ),
         };
 
         // For wrapped labels with Fit height, recompute height based on resolved width (UI-102).
@@ -1307,7 +1314,7 @@ impl WidgetTree {
                         let child_measured = self.measure_node(child_id, tm);
                         let (cx, cy) = match child.position {
                             Position::Fixed { x, y } => (x, y),
-                            Position::Percent { .. } => (0.0, 0.0),
+                            Position::Percent { .. } | Position::Center => (0.0, 0.0),
                         };
                         max_w = max_w.max(
                             cx + child_measured.width
