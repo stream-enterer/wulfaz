@@ -69,6 +69,8 @@ pub struct Theme {
     pub scrollbar_color: [f32; 4],
     /// Default scroll list item height in pixels.
     pub scroll_item_height: f32,
+    /// Alpha tint for alternating (odd-indexed) scroll list rows.
+    pub scroll_row_alt_alpha: f32,
 
     // -- Status bar defaults (UI-I01a) --
     /// Status bar background color (sRGB RGBA).
@@ -226,6 +228,7 @@ impl Default for Theme {
             scrollbar_width: 6.0,
             scrollbar_color: hex_a(0xC8, 0xA8, 0x50, 0.5), // gold at 50% alpha
             scroll_item_height: 20.0,                      // pixels
+            scroll_row_alt_alpha: 0.04,                    // subtle alternation
 
             // Status bar defaults (UI-I01a)
             status_bar_bg: hex_a(0x32, 0x24, 0x16, 0.98), // darker brown

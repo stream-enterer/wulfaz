@@ -16,6 +16,9 @@ pub struct PanelManager {
     draw_order: Vec<String>,
     /// Panels waiting for their hide animation to finish before removal.
     closing: Vec<ClosingPanel>,
+    /// Persisted scroll offsets for ScrollLists inside panels.
+    /// Key format: `"panel_name"` (one scroll offset per panel).
+    scroll_offsets: HashMap<String, f32>,
 }
 
 struct PanelEntry {
@@ -35,6 +38,7 @@ impl PanelManager {
             panels: HashMap::new(),
             draw_order: Vec::new(),
             closing: Vec::new(),
+            scroll_offsets: HashMap::new(),
         }
     }
 
@@ -165,6 +169,17 @@ impl PanelManager {
     /// Whether no panels are open.
     pub fn is_empty(&self) -> bool {
         self.panels.is_empty()
+    }
+
+    /// Store the scroll offset for a panel's ScrollList.
+    /// Survives panel close/reopen cycles.
+    pub fn save_scroll_offset(&mut self, name: &str, offset: f32) {
+        self.scroll_offsets.insert(name.to_string(), offset);
+    }
+
+    /// Retrieve the persisted scroll offset for a panel (0.0 if never saved).
+    pub fn scroll_offset(&self, name: &str) -> f32 {
+        self.scroll_offsets.get(name).copied().unwrap_or(0.0)
     }
 }
 
@@ -301,5 +316,15 @@ mod tests {
         pm.flush_closed(&mut tree, t0 + Duration::from_millis(200));
         assert!(tree.get(root).is_none());
         assert!(!pm.is_closing("panel"));
+    }
+
+    #[test]
+    fn scroll_offset_persists_across_close_reopen() {
+        let mut pm = PanelManager::new();
+        pm.save_scroll_offset("finder", 42.0);
+        assert!((pm.scroll_offset("finder") - 42.0).abs() < 0.01);
+
+        // Unknown panel returns 0.
+        assert!(pm.scroll_offset("unknown").abs() < 0.01);
     }
 }

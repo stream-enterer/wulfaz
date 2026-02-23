@@ -311,6 +311,8 @@ pub enum ZTier {
 pub struct WidgetTree {
     arena: SlotMap<WidgetId, WidgetNode>,
     roots: Vec<(WidgetId, ZTier)>,
+    /// Alpha for alternating ScrollList row tint (from Theme).
+    scroll_row_alt_alpha: f32,
 }
 
 impl WidgetTree {
@@ -318,7 +320,13 @@ impl WidgetTree {
         Self {
             arena: SlotMap::with_key(),
             roots: Vec::new(),
+            scroll_row_alt_alpha: 0.04,
         }
+    }
+
+    /// Set the alternating row tint alpha from the Theme.
+    pub fn set_scroll_row_alt_alpha(&mut self, alpha: f32) {
+        self.scroll_row_alt_alpha = alpha;
     }
 
     /// Insert a widget as a root (no parent) at the default Panel tier.
@@ -2049,6 +2057,7 @@ impl WidgetTree {
                 scrollbar_color,
                 scrollbar_width,
                 item_heights,
+                empty_text,
             } => {
                 // Background panel.
                 draw_list.panels.push(PanelCommand {
@@ -2067,22 +2076,64 @@ impl WidgetTree {
                 let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
                 let n = node.children.len();
                 let total_h = Self::scroll_total_height(item_heights, *item_height, n);
+                let content_x = node.rect.x + node.padding.left;
                 let content_y = node.rect.y + node.padding.top;
                 let sb_w = *scrollbar_width;
                 let sb_color = *scrollbar_color;
                 let so = *scroll_offset;
+                let ih = *item_height;
+                let ihs = item_heights.clone();
+                let empty_msg = empty_text.clone();
                 let rect = node.rect;
                 let padding = node.padding;
                 let children: Vec<WidgetId> = node.children.clone();
+                let content_w = (rect.width - padding.horizontal() - sb_w).max(0.0);
+                let alt_alpha = self.scroll_row_alt_alpha;
 
-                // Draw only visible children (those with non-zero rects from layout).
-                for &child in &children {
-                    if let Some(cn) = self.arena.get(child)
-                        && cn.rect.width > 0.0
-                        && cn.rect.height > 0.0
-                    {
-                        self.draw_node(child, draw_list, tm, tier);
+                if children.is_empty() {
+                    // Empty state: draw centered placeholder text.
+                    if let Some(msg) = empty_msg {
+                        draw_list.texts.push(TextCommand {
+                            text: msg,
+                            x: content_x + content_w * 0.5,
+                            y: content_y + viewport_h * 0.5,
+                            color: [0.5, 0.5, 0.5, 0.7],
+                            font_size: 12.0,
+                            font_family: FontFamily::Serif,
+                            clip,
+                            tier,
+                        });
                     }
+                } else {
+                    // Alternating row tint + draw visible children.
+                    let first = Self::scroll_first_visible(&ihs, ih, n, so);
+                    for (idx, &child) in children.iter().enumerate() {
+                        if let Some(cn) = self.arena.get(child)
+                            && cn.rect.width > 0.0
+                            && cn.rect.height > 0.0
+                        {
+                            // Alternating row background on odd items.
+                            if idx % 2 == 1 && alt_alpha > 0.0 {
+                                let item_y_abs = Self::scroll_item_y(&ihs, ih, idx);
+                                let item_h = Self::scroll_item_h(&ihs, ih, idx);
+                                let item_y = item_y_abs - so;
+                                draw_list.panels.push(PanelCommand {
+                                    x: content_x,
+                                    y: content_y + item_y,
+                                    width: content_w,
+                                    height: item_h,
+                                    bg_color: [0.0, 0.0, 0.0, alt_alpha],
+                                    border_color: [0.0; 4],
+                                    border_width: 0.0,
+                                    shadow_width: 0.0,
+                                    clip,
+                                    tier,
+                                });
+                            }
+                            self.draw_node(child, draw_list, tm, tier);
+                        }
+                    }
+                    let _ = first; // used for skip logic in layout; draw uses rect check
                 }
 
                 // Scrollbar thumb (auto-hides when content fits).
@@ -2220,6 +2271,20 @@ impl WidgetTree {
             *scroll_offset = offset.clamp(0.0, max);
         }
         self.mark_dirty(id);
+    }
+
+    /// Read current scroll offset for a ScrollList (0.0 if not a ScrollList).
+    pub fn scroll_offset(&self, id: WidgetId) -> f32 {
+        self.arena
+            .get(id)
+            .and_then(|n| {
+                if let Widget::ScrollList { scroll_offset, .. } = &n.widget {
+                    Some(*scroll_offset)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0.0)
     }
 
     /// Scroll a ScrollList by a delta (positive = down).
@@ -2873,6 +2938,7 @@ pub fn build_event_log(
         scrollbar_color: theme.scrollbar_color,
         scrollbar_width: theme.scrollbar_width,
         item_heights: Vec::new(),
+        empty_text: None,
     });
     tree.set_sizing(
         list,
@@ -3864,6 +3930,7 @@ mod tests {
             scrollbar_color: [0.8, 0.6, 0.3, 0.5],
             scrollbar_width: 6.0,
             item_heights: Vec::new(),
+            empty_text: None,
         });
         tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
         // 100px tall viewport = 5 visible items at 20px each.
@@ -3992,8 +4059,8 @@ mod tests {
         let mut dl = DrawList::new();
         tree.draw(&mut dl, &mut HeuristicMeasurer);
 
-        // Only 1 panel (background, no scrollbar thumb).
-        assert_eq!(dl.panels.len(), 1);
+        // 2 panels: background + 1 alternating row tint (item index 1).
+        assert_eq!(dl.panels.len(), 2);
     }
 
     #[test]
@@ -4004,8 +4071,8 @@ mod tests {
         let mut dl = DrawList::new();
         tree.draw(&mut dl, &mut HeuristicMeasurer);
 
-        // 2 panels: background + scrollbar thumb.
-        assert_eq!(dl.panels.len(), 2);
+        // 4 panels: background + 2 alternating row tints (items 1,3) + scrollbar thumb.
+        assert_eq!(dl.panels.len(), 4);
     }
 
     #[test]
@@ -4037,6 +4104,87 @@ mod tests {
             _ => panic!(),
         };
         assert!(offset.abs() < 0.01); // scrolled to top
+    }
+
+    // ------------------------------------------------------------------
+    // Scroll offset getter + empty text + alternating rows (Area 8)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn scroll_offset_getter() {
+        let (mut tree, list) = scroll_list_tree(20);
+        assert!(tree.scroll_offset(list).abs() < 0.01);
+        tree.set_scroll_offset(list, 42.0);
+        assert!((tree.scroll_offset(list) - 42.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn scroll_list_empty_text_drawn() {
+        let mut tree = WidgetTree::new();
+        let list = tree.insert_root(Widget::ScrollList {
+            bg_color: [0.5; 4],
+            border_color: [1.0; 4],
+            border_width: 1.0,
+            item_height: 20.0,
+            scroll_offset: 0.0,
+            scrollbar_color: [0.8, 0.6, 0.3, 0.5],
+            scrollbar_width: 6.0,
+            item_heights: Vec::new(),
+            empty_text: Some("No items.".to_string()),
+        });
+        tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(list, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
+        tree.set_padding(list, Edges::all(0.0));
+        tree.layout(screen(), &mut HeuristicMeasurer);
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
+
+        // 1 panel (background) + 1 text (empty message).
+        assert_eq!(dl.panels.len(), 1);
+        assert_eq!(dl.texts.len(), 1);
+        assert_eq!(dl.texts[0].text, "No items.");
+    }
+
+    #[test]
+    fn scroll_list_empty_no_text_without_message() {
+        let mut tree = WidgetTree::new();
+        let list = tree.insert_root(Widget::ScrollList {
+            bg_color: [0.5; 4],
+            border_color: [1.0; 4],
+            border_width: 1.0,
+            item_height: 20.0,
+            scroll_offset: 0.0,
+            scrollbar_color: [0.8, 0.6, 0.3, 0.5],
+            scrollbar_width: 6.0,
+            item_heights: Vec::new(),
+            empty_text: None,
+        });
+        tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(list, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
+        tree.set_padding(list, Edges::all(0.0));
+        tree.layout(screen(), &mut HeuristicMeasurer);
+
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
+
+        // 1 panel (background), no text.
+        assert_eq!(dl.panels.len(), 1);
+        assert_eq!(dl.texts.len(), 0);
+    }
+
+    #[test]
+    fn scroll_list_alternating_row_tint() {
+        // 5 items, viewport fits all. Odd items: 1, 3. → 2 alt tint panels.
+        let (tree, _list) = scroll_list_tree(5);
+        let mut dl = DrawList::new();
+        tree.draw(&mut dl, &mut HeuristicMeasurer);
+
+        // 1 background + 2 alternating tints = 3 panels (no scrollbar, content fits).
+        assert_eq!(dl.panels.len(), 3);
+        // Alternating tint panels have near-zero alpha black.
+        assert!(dl.panels[1].bg_color[3] > 0.0 && dl.panels[1].bg_color[3] < 0.1);
+        assert!(dl.panels[2].bg_color[3] > 0.0 && dl.panels[2].bg_color[3] < 0.1);
     }
 
     // ------------------------------------------------------------------
@@ -4127,6 +4275,7 @@ mod tests {
             scrollbar_color: [0.8, 0.6, 0.3, 0.5],
             scrollbar_width: 6.0,
             item_heights: vec![20.0, 40.0, 20.0, 60.0],
+            empty_text: None,
         });
         tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
         tree.set_sizing(list, Sizing::Fixed(200.0), Sizing::Fixed(200.0));
@@ -4197,6 +4346,7 @@ mod tests {
             scrollbar_color: [0.8, 0.6, 0.3, 0.5],
             scrollbar_width: 6.0,
             item_heights: Vec::new(),
+            empty_text: None,
         });
         tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
         tree.set_sizing(list, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
@@ -4254,6 +4404,7 @@ mod tests {
             scrollbar_color: [0.8, 0.6, 0.3, 0.5],
             scrollbar_width: 6.0,
             item_heights: vec![20.0, 40.0, 20.0, 60.0],
+            empty_text: None,
         });
         tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
         tree.set_sizing(list, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
@@ -4963,8 +5114,8 @@ mod tests {
         let mut dl = DrawList::new();
         tree.draw(&mut dl, &mut HeuristicMeasurer);
 
-        // One panel (ScrollList background), no scrollbar (3 items fit in viewport).
-        assert_eq!(dl.panels.len(), 1);
+        // 2 panels: ScrollList background + 1 alternating row tint (item index 1).
+        assert_eq!(dl.panels.len(), 2);
         assert_eq!(dl.panels[0].bg_color, theme.status_bar_bg);
         assert!((dl.panels[0].width - 800.0).abs() < 0.01);
 

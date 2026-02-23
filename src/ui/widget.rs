@@ -90,6 +90,8 @@ pub enum Widget {
         scrollbar_width: f32,      // scrollbar track width (pixels)
         /// Per-child height overrides (UI-501). Empty = fixed-height mode.
         item_heights: Vec<f32>,
+        /// Text shown when the list has no children. None = no empty state.
+        empty_text: Option<String>,
     },
 
     /// Horizontal or vertical bar showing a 0.0..=1.0 fraction (UI-200).

@@ -361,6 +361,7 @@ pub fn build_demo(
             scrollbar_color: theme.scrollbar_color,
             scrollbar_width: theme.scrollbar_width,
             item_heights: Vec::new(),
+            empty_text: None,
         },
     );
     tree.set_position(scroll_list, Position::Fixed { x: 0.0, y });

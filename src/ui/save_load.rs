@@ -20,6 +20,8 @@ pub struct SaveLoadInfo {
     pub saves: Vec<SaveFileEntry>,
     pub screen_width: f32,
     pub screen_height: f32,
+    /// Persisted scroll offset for the load list (0.0 = top).
+    pub scroll_offset: f32,
 }
 
 /// Save/load panel dimensions.
@@ -151,10 +153,11 @@ pub fn build_save_load_screen(
                 border_color: theme.panel_border_color,
                 border_width: 1.0,
                 item_height: theme.scroll_item_height,
-                scroll_offset: 0.0,
+                scroll_offset: info.scroll_offset,
                 scrollbar_color: theme.scrollbar_color,
                 scrollbar_width: theme.scrollbar_width,
                 item_heights: Vec::new(),
+                empty_text: None,
             },
         );
         tree.set_sizing(list, Sizing::Fixed(content_w), Sizing::Fixed(200.0));
@@ -236,6 +239,7 @@ mod tests {
             saves: vec![],
             screen_width: 800.0,
             screen_height: 600.0,
+            scroll_offset: 0.0,
         };
         let (root, _close) = build_save_load_screen(&mut tree, &theme, &info);
 
@@ -264,6 +268,7 @@ mod tests {
             saves: vec![],
             screen_width: 800.0,
             screen_height: 600.0,
+            scroll_offset: 0.0,
         };
         let (root, _close) = build_save_load_screen(&mut tree, &theme, &info);
 
@@ -307,6 +312,7 @@ mod tests {
             ],
             screen_width: 800.0,
             screen_height: 600.0,
+            scroll_offset: 0.0,
         };
         let (root, _close) = build_save_load_screen(&mut tree, &theme, &info);
 
@@ -344,6 +350,7 @@ mod tests {
             saves: vec![],
             screen_width: 800.0,
             screen_height: 600.0,
+            scroll_offset: 0.0,
         };
         let (_root, close) = build_save_load_screen(&mut tree, &theme, &info);
         let close_node = tree.get(close).unwrap();

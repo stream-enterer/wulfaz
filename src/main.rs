@@ -890,6 +890,8 @@ impl ApplicationHandler for App {
                                 .and_then(|p| self.world.body.names.get(&p))
                                 .map(|n| n.value.as_str());
                             self.ui_tree = ui::WidgetTree::new();
+                            self.ui_tree
+                                .set_scroll_row_alt_alpha(self.ui_theme.scroll_row_alt_alpha);
                             let game_date = components::GameDate::from_tick(
                                 self.world.tick,
                                 &self.world.start_date,

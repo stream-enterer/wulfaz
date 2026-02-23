@@ -60,6 +60,8 @@ pub struct CharacterFinderInfo {
     pub entries: Vec<FinderEntry>,
     pub screen_width: f32,
     pub screen_height: f32,
+    /// Persisted scroll offset from previous frame (0.0 = top).
+    pub scroll_offset: f32,
 }
 
 /// Finder panel dimensions.
@@ -145,10 +147,11 @@ pub fn build_character_finder(
             border_color: theme.panel_border_color,
             border_width: 1.0,
             item_height: theme.scroll_item_height,
-            scroll_offset: 0.0,
+            scroll_offset: info.scroll_offset,
             scrollbar_color: theme.scrollbar_color,
             scrollbar_width: theme.scrollbar_width,
             item_heights: Vec::new(),
+            empty_text: Some("No characters found.".to_string()),
         },
     );
     tree.set_sizing(list, Sizing::Fixed(content_w), Sizing::Fixed(250.0));
@@ -320,6 +323,7 @@ mod tests {
             entries: test_entries(),
             screen_width: 800.0,
             screen_height: 600.0,
+            scroll_offset: 0.0,
         };
         let (root, _close, search, _sort) = build_character_finder(&mut tree, &theme, &info);
         assert!(tree.get(root).is_some());
@@ -336,6 +340,7 @@ mod tests {
             entries: test_entries(),
             screen_width: 800.0,
             screen_height: 600.0,
+            scroll_offset: 0.0,
         };
         let (_root, _close, search, _sort) = build_character_finder(&mut tree, &theme, &info);
         let node = tree.get(search).unwrap();
@@ -363,6 +368,7 @@ mod tests {
             entries: vec![],
             screen_width: 800.0,
             screen_height: 600.0,
+            scroll_offset: 0.0,
         };
         let (_root, close, _search, _sort) = build_character_finder(&mut tree, &theme, &info);
         let close_node = tree.get(close).unwrap();

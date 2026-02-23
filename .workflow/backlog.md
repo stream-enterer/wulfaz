@@ -205,6 +205,12 @@ Developable on test map or integrated after Phase B.
 - **UI-D16** — Animation state machine (multi-step chaining). CK3 uses `next = "state_name"` to create multi-step animation sequences (e.g., bounce: scale up → overshoot → settle; attention flash: bright → dim → bright → fade). Our `start_looping()` covers the main use case (two-state ping-pong for glow/pulse), but doesn't support: asymmetric timing per leg, 3+ state sequences, or one-shot chains (A→B→C→done). Add when effects like notification bounce (1.35s 3-stage size 72→88→72) or staggered multi-step fades are needed.
   - Test: define a 3-state chain A→B→C, assert values traverse all three segments in order, assert animation completes after total duration.
 
+- **UI-D17** — Grid layout widget. Add `Widget::Grid { col_width, row_height, columns, gap }` variant. Children placed left-to-right, wrapping to next row every `columns` items. CK3's `fixedgridbox` with `addcolumn`/`addrow`/`datamodel_wrap`. Needed for: trait displays on character panels, skill grids, inventory views, any tiled/icon layout. Defer until a concrete screen requires it.
+  - Test: insert 7 children into a 3-column grid, assert items wrap to 3 rows (3+3+1), assert child rects have correct x/y positions.
+
+- **UI-D18** — Standardized sort/filter list header. Reusable `FilterableList` builder pattern with integrated sort toggles and filter dropdown in the list header. CK3's `hbox_list_sort_buttons` + `window_character_filter` pattern. Needed when entity counts exceed ~200 and search alone is insufficient. Defer until scale demands it.
+  - Test: build a FilterableList with 3 sort columns, click a sort header, assert sort callback dispatched with correct column index.
+
 ## Pending (threshold not yet met)
 
 - **GROW-002** — Phase function grouping. Trigger: >30 system calls.
