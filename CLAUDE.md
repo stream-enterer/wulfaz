@@ -225,6 +225,11 @@ No code changes needed. `loading.rs` maps KDL nodes to spawned entities.
 - Helper functions shared across systems go as methods on `World` in `world.rs`.
   Do not create `utils.rs` or `helpers.rs`.
 - If a table entry is missing for an entity, skip that entity. Do not log, do not panic.
+- Do not use `#[allow(...)]` or `#[expect(...)]` to suppress warnings. Fix the
+  cause: remove dead code, delete unused imports, prefix unused bindings with
+  `_`, apply the clippy suggestion. If a warning is a genuine false positive
+  (FFI naming, conditional compilation), add a comment explaining why before
+  suppressing.
 
 ## What NOT To Do
 
