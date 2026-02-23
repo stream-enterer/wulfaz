@@ -176,10 +176,10 @@ impl Default for Theme {
     fn default() -> Self {
         Self {
             // DD-2 palette
-            bg_parchment: hex_a(0xD4, 0xB8, 0x96, 0.95),
+            bg_parchment: hex_a(0x3E, 0x2C, 0x1C, 0.95),
             gold: hex(0xC8, 0xA8, 0x50),
             text_light: hex(0xF0, 0xE6, 0xD2),
-            text_dark: hex(0x3C, 0x2A, 0x1A),
+            text_dark: hex(0xD8, 0xC8, 0xA8),
             danger: hex(0xC0, 0x40, 0x40),
             disabled: hex(0x80, 0x80, 0x80),
 
@@ -208,7 +208,7 @@ impl Default for Theme {
             scroll_item_height: 20.0,                      // pixels
 
             // Status bar defaults (UI-I01a)
-            status_bar_bg: hex_a(0xC0, 0xA8, 0x80, 0.98), // darker parchment (same as tooltip)
+            status_bar_bg: hex_a(0x32, 0x24, 0x16, 0.98), // darker brown
             status_bar_padding_h: 8.0,
             status_bar_padding_v: 4.0,
 
@@ -219,7 +219,7 @@ impl Default for Theme {
             tooltip_offset_y: 8.0,
             tooltip_nesting_offset: 4.0,
             tooltip_padding: 8.0,
-            tooltip_bg_color: hex_a(0xC0, 0xA8, 0x80, 0.98), // slightly darker parchment
+            tooltip_bg_color: hex_a(0x32, 0x24, 0x16, 0.98), // darker brown
             tooltip_border_color: hex(0xC8, 0xA8, 0x50),     // gold
             tooltip_border_width: 1.0,
             tooltip_shadow_width: 4.0,
@@ -233,15 +233,15 @@ impl Default for Theme {
             progress_bar_height: 8.0,
             progress_bar_border_width: 1.0,
             progress_bar_health_fg: hex(0x40, 0xA0, 0x40), // green
-            progress_bar_health_bg: hex_a(0x30, 0x20, 0x10, 0.6), // dark brown
+            progress_bar_health_bg: hex_a(0x55, 0x44, 0x30, 0.6), // medium brown
 
             // Separator defaults (UI-201)
             separator_color: hex_a(0xC8, 0xA8, 0x50, 0.3), // gold at 30% alpha
             separator_thickness: 1.0,
 
             // Tab container defaults (UI-301)
-            tab_active_color: hex_a(0xD4, 0xB8, 0x96, 0.95), // parchment (same as bg)
-            tab_inactive_color: hex_a(0xA0, 0x88, 0x68, 0.7), // darker parchment, lower alpha
+            tab_active_color: hex_a(0x3E, 0x2C, 0x1C, 0.95), // matches bg
+            tab_inactive_color: hex_a(0x2A, 0x1E, 0x12, 0.7), // darker brown
             tab_bar_height: 24.0,
 
             // Animation defaults (UI-W05)
@@ -265,10 +265,10 @@ mod tests {
     fn default_palette_matches_dd2() {
         let t = Theme::default();
 
-        // Parchment #D4B896 → 212/255, 184/255, 150/255
-        assert!((t.bg_parchment[0] - 0.831).abs() < 0.01);
-        assert!((t.bg_parchment[1] - 0.722).abs() < 0.01);
-        assert!((t.bg_parchment[2] - 0.588).abs() < 0.01);
+        // Dark brown bg #3E2C1C
+        assert!((t.bg_parchment[0] - 0x3E as f32 / 255.0).abs() < 0.01);
+        assert!((t.bg_parchment[1] - 0x2C as f32 / 255.0).abs() < 0.01);
+        assert!((t.bg_parchment[2] - 0x1C as f32 / 255.0).abs() < 0.01);
         assert!((t.bg_parchment[3] - 0.95).abs() < 0.01);
 
         // Gold #C8A850

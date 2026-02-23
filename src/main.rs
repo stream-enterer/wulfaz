@@ -47,6 +47,16 @@ fn srgb_to_linear(s: f64) -> f64 {
 const BG_SRGB: [f32; 3] = [40.0 / 255.0, 40.0 / 255.0, 40.0 / 255.0]; // #282828
 const FG_SRGB: [f32; 3] = [235.0 / 255.0, 219.0 / 255.0, 178.0 / 255.0]; // #ebdbb2
 
+/// Vertex counts per render layer.
+/// The render pass draws back-to-front: map text -> panels -> UI text.
+/// Text preparation MUST follow this order: map content first, then UI content,
+/// because vertex buffer position determines layer assignment.
+struct FrameLayers {
+    map_text_vertices: u32,
+    panel_vertices: u32,
+    ui_text_vertices: u32,
+}
+
 struct GpuState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -127,12 +137,16 @@ impl GpuState {
         self.config.format
     }
 
+    /// Render a frame with proper Z-layering:
+    /// 1. Clear background
+    /// 2. Map text (ASCII grid) — under panels
+    /// 3. UI panels (overlays + widgets)
+    /// 4. UI text (labels, buttons, etc.) — over panels
     fn render(
         &self,
-        panel: &panel::PanelRenderer,
-        panel_vertex_count: u32,
         font: &font::FontRenderer,
-        text_vertex_count: u32,
+        panel: &panel::PanelRenderer,
+        layers: &FrameLayers,
     ) {
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
@@ -162,7 +176,7 @@ impl GpuState {
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("text_pass"),
+                label: Some("main_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -180,8 +194,16 @@ impl GpuState {
                 ..Default::default()
             });
 
-            panel.render(&mut render_pass, panel_vertex_count);
-            font.render(&mut render_pass, text_vertex_count);
+            // Layer 1: map ASCII text (under panels)
+            font.render_range(&mut render_pass, 0, layers.map_text_vertices);
+            // Layer 2: UI panels
+            panel.render(&mut render_pass, layers.panel_vertices);
+            // Layer 3: UI text (over panels)
+            font.render_range(
+                &mut render_pass,
+                layers.map_text_vertices,
+                layers.ui_text_vertices,
+            );
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -1243,9 +1265,15 @@ impl ApplicationHandler for App {
                             }
                             let panel_vertex_count = panel.flush(&gpu.queue, &gpu.device);
 
-                            // Text (on top)
+                            // Text — two layers: map text under panels, UI text over panels.
                             font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
-                            // UI widget text commands (multi-font via font_family + font_size)
+
+                            // Layer 1: map ASCII text (renders under UI panels)
+                            let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
+                            font.prepare_map(&map_text, padding, map_y, fg4);
+                            let map_text_vertices = font.pending_vertex_count();
+
+                            // Layer 2: UI widget text (renders over UI panels)
                             for cmd in &draw_list.texts {
                                 font.prepare_text_with_font(
                                     &cmd.text,
@@ -1256,7 +1284,6 @@ impl ApplicationHandler for App {
                                     cmd.font_size,
                                 );
                             }
-                            // Rich text commands (per-span color + font via cosmic-text)
                             for cmd in &draw_list.rich_texts {
                                 let spans: Vec<(String, [f32; 4], &str)> = cmd
                                     .spans
@@ -1265,13 +1292,14 @@ impl ApplicationHandler for App {
                                     .collect();
                                 font.prepare_rich_text(&spans, cmd.x, cmd.y, cmd.font_size);
                             }
-                            // Map still uses string-based rendering.
-                            // Status bar, hover tooltip, and event log are widgets.
-                            let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
-                            font.prepare_map(&map_text, padding, map_y, fg4);
 
-                            let text_vertex_count = font.flush(&gpu.queue, &gpu.device);
-                            gpu.render(panel, panel_vertex_count, font, text_vertex_count);
+                            let total_text_vertices = font.flush(&gpu.queue, &gpu.device);
+                            let layers = FrameLayers {
+                                map_text_vertices,
+                                panel_vertices: panel_vertex_count,
+                                ui_text_vertices: total_text_vertices - map_text_vertices,
+                            };
+                            gpu.render(font, panel, &layers);
                             let render_us = render_start.elapsed().as_micros() as u64;
 
                             // Capture perf metrics (UI-505) — one-frame lag.

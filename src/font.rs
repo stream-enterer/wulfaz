@@ -992,14 +992,25 @@ impl FontRenderer {
         }
     }
 
-    pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, vertex_count: u32) {
-        if vertex_count == 0 {
+    /// Current number of accumulated vertices (for splitting render passes).
+    pub fn pending_vertex_count(&self) -> u32 {
+        self.frame_vertices.len() as u32
+    }
+
+    /// Render a sub-range of the vertex buffer: vertices [start..start+count).
+    pub fn render_range<'a>(
+        &'a self,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        start: u32,
+        count: u32,
+    ) {
+        if count == 0 {
             return;
         }
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.draw(0..vertex_count, 0..1);
+        render_pass.draw(start..start + count, 0..1);
     }
 }
 

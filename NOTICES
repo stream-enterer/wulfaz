@@ -80,3 +80,15 @@ technique and correctness. No kitty source code was copied. Specifically,
 kitty's approach to FreeType hinting flag selection, glyph atlas construction,
 monospace cell grid computation, and sRGB-aware contrast adjustment informed
 our implementation.
+
+--------------------------------------------------------------------------------
+
+Crusader Kings III (design reference)
+Paradox Interactive / Paradox Development Studio
+https://www.crusaderkings.com
+
+The UI system in this project draws design inspiration from Crusader Kings III.
+CK3's publicly exposed GUI layer (game/gui/*.gui) was studied as a reference
+for UI layout patterns, window hierarchy, widget composition, HUD structure,
+and interaction flows. No Paradox assets, textures, code, or data files are
+included in this project. All implementation is original.
