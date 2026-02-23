@@ -11,7 +11,7 @@ Goal: See Paris on screen. No entities.
 Map dimensions: 6,309 x 4,753 tiles at 1m/tile (vertex-crop of all buildings + 30m padding).
 That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
-- **SCALE-A09** — Water/bridge polish. Needs: A08. **Remaining known limitations:**
+- **SCALE-A09** — Water/bridge polish. Needs: A08 (done). **Remaining known limitations:**
   - **Eastern coverage gap**: ~150-tile-wide hole in ALPAGE data (tiles ~4950-5100 X, ~3500-3900 Y). Road patch in the Seine near Pont d'Austerlitz. Components #12 (2777 tiles) and #13 (424 tiles) are data-gap artifacts, not real bridges. Fix: obtain APUR PLAN D'EAU shapefile, reproject from Lambert-93 (EPSG:2154) to WGS84 via ogr2ogr, feed through `rasterize_water_polygons()`.
   - **Western bridge coverage**: ALPAGE water polygons don't extend west of ~lon 2.336 (5 bridges: Invalides, Concorde, Royal, Carrousel, Arts). Same fix — supplemental data needed.
   - **North arm bridge gap**: No detected bridge components in the north arm between Pont Neuf and Ile Saint-Louis (Pont au Change, Notre-Dame, d'Arcole). Either ALPAGE data doesn't fully cover this arm or bridges merged with island road network. Needs investigation.
@@ -22,14 +22,14 @@ That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
 Goal: ~200 entities with full AI on the real map.
 
-- **SCALE-B05** — Door placement + passage carving. Needs: A03. Blocks: B06, B03. **BLOCKED: design review required.**
+- **SCALE-B05** — Door placement + passage carving. Needs: A03 (done). Blocks: B06, B03. **BLOCKED: design review required.**
   - **Preprocessor** (extend `preprocess.rs`): runs after wall/floor classification, same pattern as classify_walls_floors. Static tile modification baked into `paris.tiles`.
   - Place Door tiles: for each building, find a wall tile adjacent to both a floor tile and a Road or Courtyard tile. That tile becomes a Door.
   - Landlocked buildings (no wall tile adjacent to Road or Courtyard): carve a 1-tile passage through intervening buildings to the nearest Road or Courtyard. This models the narrow covered passages (allées) that provided access to interior buildings in dense Parisian blocks.
   - Garden buildings (24 "parc ou jardin"): convert their interior Floor tiles to Garden instead of Floor.
   - Game loads Door/Garden terrain from binary, no runtime classification needed.
 
-- **SCALE-B06** — Building interior generation. Needs: B05, A07. **BLOCKED: design review required.**
+- **SCALE-B06** — Building interior generation. Needs: B05, A07 (done). **BLOCKED: design review required.**
   - **Preprocessor** (extend `preprocess.rs`): runs after door placement + address loading. Static tile modifications baked into `paris.tiles`.
   - Furnish building interiors based on occupant type. NAICS category from building registry (populated by A07 in preprocessor). Place furniture tiles:
     - Food stores → counters, barrels, shelves
@@ -41,7 +41,7 @@ Goal: ~200 entities with full AI on the real map.
   - Small buildings (<15 floor tiles) get minimal furnishing (bed, table).
   - Requires new Terrain variants for furniture types (or a separate furniture tile layer in Chunk).
 
-- **SCALE-B03** — GIS-aware entity spawning. Needs: A07, B05. **BLOCKED: design review required.**
+- **SCALE-B03** — GIS-aware entity spawning. Needs: A07 (done), B05. **BLOCKED: design review required.**
   - The building registry (populated by A03 + A07) already knows each building's occupants, addresses, and NAICS categories. This task spawns actual entities from that data.
   - For known occupants (3.7% of population): spawn entity with real name, real occupation, at their building's floor tiles. Position from building's tile list in the registry.
   - For generated occupants (96.3%): see C05 for the procedural generation rules.
@@ -63,11 +63,11 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
 
 - **SCALE-C03** — Zone-aware system filtering. Combat: Active only. Hunger: Active+Nearby. Statistical: no entity iteration. Needs: C02.
 
-- **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01, A07. **BLOCKED: design review required.**
+- **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01, A07 (done). **BLOCKED: design review required.**
   - Seed `population_by_type` from NAICS distribution per quartier. 22 industry categories. Aggregate from building registry occupant data (baked in by A07 preprocessor), not from raw GeoPackage.
   - City-wide distribution (1845): Manufacturing 18%, Food stores 13.5%, Clothing 11.7%, Furniture 8.2%, Legal 5.9%, Health 5.5%, Rentiers 4.5%, Arts 3.9%, Construction 3.6%. Use these as priors, adjust per quartier from actual registry data.
 
-- **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02, C04, A07. **BLOCKED: design review required.**
+- **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02, C04, A07 (done). **BLOCKED: design review required.**
   - Procedural population generation rules (for the 96% not in directories):
     - **Concierge**: every building with >4 floor tiles gets one. Ground floor.
     - **Shopkeeper household**: for each directory-listed person, generate spouse + 1-4 children + 0-1 apprentice. Place on ground floor and first upper floor.
@@ -84,7 +84,7 @@ Goal: Camera movement smoothly activates/deactivates zones.
 
 - **SCALE-D01** — Hydration. Statistical → active: spawn entities from distribution at building positions. Batch ~100/tick. Needs: C05, B03.
 - **SCALE-D02** — Dehydration. Active → statistical: collapse to district averages. Nearby zone buffers for ~200 ticks. Needs: C02.
-- **SCALE-D03** — HPA* pathfinding. Chunk-level nav graph, border nodes, precomputed intra-chunk paths. Replaces B04. Needs: A02.
+- **SCALE-D03** — HPA* pathfinding. Chunk-level nav graph, border nodes, precomputed intra-chunk paths. Replaces B04. Needs: A02 (done).
 - **SCALE-D04** — Profile and tune. Zone radii, hydration batch size, tick budget per zone, entity count limits.
 
 ## Simulation Features (parallel or post-Phase B)
@@ -102,14 +102,7 @@ Developable on test map or integrated after Phase B.
 - **SIM-009** — Reputation (Phase 5). Observed behavior.
 - **SIM-010** — Building (Phase 4). Requires inventory.
 - **SIM-011** — Crafting (Phase 4). Requires recipes.
-- **SIM-012** — Fluid flow (Phase 1). Cellular automaton. Needs: A08 (Seine placement).
-
-
-
-## Phase UI-6 — Window Frame Consolidation (done)
-
-- ~~**UI-600** — Shared `build_window_frame()` builder. Created `src/ui/window.rs` with `WindowFrame` struct. Produces standard Panel -> Column -> [Header Row, Separator, Content Column] tree. Close button support.~~
-- ~~**UI-601** — Migrate screens to window frame builder. Migrated: outliner, settings, save_load, character_finder, character_panel, event_popup. Added close buttons to outliner/settings/save_load/character_finder. Event popup uses overrides (gold border, 1.5x padding, 1.25x title font, 3x gap). All tests updated for new tree structure.~~
+- **SIM-012** — Fluid flow (Phase 1). Cellular automaton. Needs: A08 (done, Seine placement).
 
 ## Phase UI-5 — Polish & Architecture (remaining)
 
@@ -120,13 +113,12 @@ Developable on test map or integrated after Phase B.
 
 ## Deferred
 
+### Panels & Screens
+
 - **UI-D01** — egui dev tools overlay. Add `egui-wgpu` + `egui-winit`. Second render pass after game UI. Entity inspector, world state browser, system performance view. Toggle with a key (F12). Debug-only layer, not player-facing. Independent of the custom widget pipeline — can be added at any point.
   - Test: toggle egui overlay with F12, assert the second render pass executes and displays at least one egui window.
 
-- **UI-D06** — DrawList line primitives. Add `lines: Vec<LineCommand>` to DrawList and a line-rendering shader. Needed for family trees, tech trees, graph connections. Blocks: UI-D02.
-  - Test: emit 3 LineCommands, assert all 3 appear in the DrawList with correct start/end coordinates.
-
-- **UI-D02** — Family tree graph view. Scrollable/zoomable graph of entity portraits connected by lines. Requires line-drawing primitives in DrawList (`LineCommand`). Needs: UI-400, UI-104, UI-D06, SIM-008.
+- **UI-D02** — Family tree graph view. Scrollable/zoomable graph of entity portraits connected by lines. Requires line-drawing primitives in DrawList (`LineCommand`). Needs: UI-D06, SIM-008.
   - Test: build a family tree with 5 entities and 4 connections, assert correct number of LineCommands emitted.
 
 - **UI-D03** — District/holding hierarchy panel. Tree view of quartiers/blocks/buildings with holders and stats. Needs: SCALE-C01.
@@ -138,44 +130,20 @@ Developable on test map or integrated after Phase B.
 - **UI-D05** — Battle/combat viewer panel. Army list, combat progress bars, outcome display. Needs: SIM-005.
   - Test: build combat viewer with 2 armies, assert progress bars reflect HP ratios.
 
-- **UI-404** — Decision panel. Needs: UI-304 (Collapsible), UI-301 (TabContainer). Premature until SIM-008/SIM-009 provide real decision trees.
+- **UI-404** — Decision panel. Premature until SIM-008/SIM-009 provide real decision trees. Widget dependencies (Collapsible, TabContainer) done.
   - Create `src/ui/decision_panel.rs`. Lists available player actions grouped by category.
   - Each decision: label, requirement tooltip (conditions not yet met shown in red), execute button.
   - Decisions grouped into Collapsible sections: Diplomacy, Intrigue, Stewardship, etc.
   - Enabled/disabled state based on world conditions. Disabled decisions shown with `theme.disabled` color.
   - Clicking "Execute" dispatches a callback key and triggers the action in the simulation.
-  - Placeholder content until simulation systems (SIM-008, SIM-009) provide real decision trees.
   - Test: build decision panel with 2 categories and 3 decisions, assert collapsible sections contain the expected decision buttons.
 
-- **UI-502** — Drag-and-drop support. CK3 barely uses this; low priority.
-  - Current drag infrastructure in `src/ui/input.rs` tracks `captured`, `press_origin`, `dragging` — but only for scrollbar thumb dragging.
-  - Generalize: add `pub draggable: bool` and `pub drop_target: bool` fields to `WidgetNode`.
-  - When a draggable widget is dragged past the threshold: create a ghost overlay (semi-transparent copy of the widget) that follows the cursor. Store `drag_payload: Option<String>` on `UiState`.
-  - On mouse release: hit-test for the drop target under the cursor. If a `drop_target` widget is found, dispatch `UiEvent::Drop { payload: String }`.
-  - Use case: reordering pinned characters in the outliner, moving items between inventory slots (future SIM-011).
-  - Test: start drag on draggable widget, move to drop target, release, assert Drop event is dispatched with correct payload.
+### Rendering & Text
 
-- **UI-503** — Sound effect hooks. No audio backend exists; deferred until one does.
-  - Add `SoundEvent` enum: `Click`, `Hover`, `Open`, `Close`, `Error`, `Notification`.
-  - Add `pub sound_events: Vec<SoundEvent>` to `UiState`. Populated during input processing (click on button = `Click`, modal open = `Open`, etc.).
-  - Main loop drains `sound_events` each frame and plays corresponding audio. Audio backend is out of scope for this task — just emit the events.
-  - Hook points: `UiState::handle_mouse_input()` emits `Click` on button clicks, `input.rs` tooltip show emits a subtle sound, `ModalStack::push` emits `Open`.
-  - No audio crate dependency in this task. The sound playback system is a separate integration.
-  - Test: simulate button click, assert `sound_events` contains `SoundEvent::Click`.
+- **UI-D06** — DrawList line primitives. Add `lines: Vec<LineCommand>` to DrawList and a line-rendering shader. Needed for family trees, tech trees, graph connections. Blocks: UI-D02.
+  - Test: emit 3 LineCommands, assert all 3 appear in the DrawList with correct start/end coordinates.
 
-- **UI-D07** — Tooltip shortcut display. Show keyboard shortcut text at tooltip bottom-right (CK3 pattern). Add optional `shortcut: Option<String>` to `TooltipContent`. When present, render right-aligned label below content. Wire to `KeyBindings::format_binding()` at tooltip creation sites. Needs: more keybindings to be worth discovering.
-  - Test: create tooltip with shortcut "Ctrl+C", assert tooltip tree contains a right-aligned label with that text.
-
-- **UI-D08** — Nested tooltip edge-relative positioning. Position nested tooltips relative to parent tooltip rect edge instead of cursor. Use `tooltip_stack.last()` to get parent rect, place nested tooltip at `parent_rect.right + offset_x`. Guarantees no overlap between tooltip levels regardless of cursor position within parent.
-  - Test: show nested tooltip, assert nested tooltip rect does not overlap parent tooltip rect.
-
-- **UI-D09** — Modal Enter/confirm shortcut. Add `Action::Confirm` → `KeyCode::Enter` to `KeyBindings::defaults()`. In CloseTopmost handler: if modal stack is non-empty, dispatch confirm to topmost modal's accept button. CK3 binds `shortcut = "confirm"` on the accept button of every dialog. Needs: confirmation dialog infrastructure (Area 9 deliverable).
-  - Test: push modal with accept callback, simulate Enter key, assert accept callback dispatched.
-
-- **UI-D10** — Per-widget focus policy. Add `focusable: bool` field to `WidgetNode` (default false). Set true for Button, ScrollList, and future EditBox. Update `collect_focusable` to check the flag instead of matching widget type. Needed when text inputs or custom focusable widgets are added.
-  - Test: insert a Label with `focusable = true`, assert it appears in `focusable_widgets()`.
-
-- **UI-D11** — Text formatting DSL. Inline markup for styled text spans: `#high`, `#low`, `#P` (positive), `#N` (negative), `#bold`, `#size:18`. Parse markup into `Vec<TextSpan>` for `Widget::RichText`. CK3 uses this extensively for tooltip and event text. Enables data-driven text styling without code changes per string. Needs: UI-700 (semantic colors, done).
+- **UI-D11** — Text formatting DSL. Inline markup for styled text spans: `#high`, `#low`, `#P` (positive), `#N` (negative), `#bold`, `#size:18`. Parse markup into `Vec<TextSpan>` for `Widget::RichText`. CK3 uses this extensively for tooltip and event text. Enables data-driven text styling without code changes per string. Ready — semantic colors (UI-700) done.
   - Test: parse `"#P;+5 #N;-3 normal"` into 3 spans with correct colors.
 
 - **UI-D12** — Glow/shadow text effects. Add optional `glow_color: Option<[f32; 4]>` to `TextCommand` and `TextSpan`. Render as a second text pass with offset and blur (or pre-multiplied alpha halo in the fragment shader). CK3 uses 4 glow tiers (none/weak/medium/strong) for emphasis hierarchy on dark backgrounds.
@@ -187,23 +155,18 @@ Developable on test map or integrated after Phase B.
 - **UI-D14** — Light-background text overrides. CK3 systematically remaps all semantic text colors to dark-on-light variants when rendering on parchment/letter backgrounds. Add `TextOverrides` struct with color remapping table. Apply via a `text_overrides: Option<TextOverrides>` field on Panel or a context parameter. Needs: a use case (letter event UI, parchment dialogs).
   - Test: create a `TextOverrides` that maps `text_light` to `text_low`, assert Label inside overridden Panel uses the remapped color.
 
-- **UI-D11** — Window dragging. Allow floating panels to be repositioned by dragging their header. Detect drag on panel header → update `Position::Fixed` with delta → re-layout. Drag infrastructure already exists in `UiState` (capture, drag threshold, DragStart/DragMove/DragEnd). Needs: floating dialog windows (window family builders).
-  - Test: simulate drag on a movable panel header, assert panel position updated by drag delta.
+- **UI-D20** — Status-colored panel backgrounds. Apply `Theme::bg_status_good/bad/mixed` as panel background tints for at-a-glance status in dense data views. Theme colors added (UI-701), but no screens use them yet. When a screen needs colored row/cell backgrounds (e.g., character list health column, combat outcome panels), use these tints as `bg_color` on inner panel widgets. Defer until a concrete screen needs visual status scanning beyond text color.
+  - Test: build a panel with `bg_status_bad`, draw, assert panel bg_color matches theme value.
 
-- **UI-D12** — Click-outside-to-dismiss for non-blocking modals. Add optional `dismiss_on_backdrop_click: bool` flag to `ModalStack::push`. When true, clicking the dim layer pops the modal. CK3 uses an invisible button behind modal content as backdrop. Needs: non-blocking floating dialogs (info popups).
-  - Test: push modal with dismiss_on_backdrop_click, simulate click on dim layer, assert modal popped.
+### Tooltips
 
-- **UI-D13** — Widget-contextual keyboard shortcuts. Allow focused widget type to intercept keys before global dispatch. When a text input is focused, ESC cancels editing instead of closing the panel. When a settings panel with unsaved changes is focused, ESC prompts "discard changes?" instead of closing. Needs: text input widgets, settings with mutable state.
-  - Test: focus a text input, press ESC, assert ESC consumed by text input and not dispatched globally.
+- **UI-D07** — Tooltip shortcut display. Show keyboard shortcut text at tooltip bottom-right (CK3 pattern). Add optional `shortcut: Option<String>` to `TooltipContent`. When present, render right-aligned label below content. Wire to `KeyBindings::format_binding()` at tooltip creation sites. Needs: more keybindings to be worth discovering.
+  - Test: create tooltip with shortcut "Ctrl+C", assert tooltip tree contains a right-aligned label with that text.
 
-- **UI-D14** — Cubic bezier easing curves. Add `Easing::CubicBezier(f32, f32, f32, f32)` that evaluates an arbitrary cubic bezier curve (same parameterization as CSS `cubic-bezier()`). CK3's default curve is `{0.25, 0.1, 0.25, 1}` (CSS `ease`); also uses custom curves like `{0, 0.9, 1, 0.4}` and overshoot curves `{0.43, 0, 0.2, 2.2}`. Our existing EaseIn/EaseOut/EaseInOut are fixed cubics that cover common cases. Add when a specific animation needs a curve that the fixed variants can't match.
-  - Test: evaluate CubicBezier(0.25, 0.1, 0.25, 1) at t=0.5, assert result matches CSS ease reference value.
+- **UI-D08** — Nested tooltip edge-relative positioning. Position nested tooltips relative to parent tooltip rect edge instead of cursor. Use `tooltip_stack.last()` to get parent rect, place nested tooltip at `parent_rect.right + offset_x`. Guarantees no overlap between tooltip levels regardless of cursor position within parent.
+  - Test: show nested tooltip, assert nested tooltip rect does not overlap parent tooltip rect.
 
-- **UI-D15** — Inspector panel hide animation. The inspector currently vanishes instantly on close (ESC or deselect). Add a reverse slide-out animation (EaseIn, 150ms) before removal. Requires either: (a) caching the last `InspectorInfo` so the inspector can keep rendering during the hide animation after `selected_entity` is set to None, or (b) introducing an `inspector_closing` state that preserves the entity selection until the animation completes. Approach (a) is simpler but stales data; approach (b) complicates the ESC chain priority logic. Needs: retained tree (UI-500) would make this trivial since the widget survives without rebuilding.
-  - Test: deselect entity, assert inspector slide animation starts with target 1.0 (off-screen right), assert widget removed after animation duration.
-
-- **UI-D16** — Animation state machine (multi-step chaining). CK3 uses `next = "state_name"` to create multi-step animation sequences (e.g., bounce: scale up → overshoot → settle; attention flash: bright → dim → bright → fade). Our `start_looping()` covers the main use case (two-state ping-pong for glow/pulse), but doesn't support: asymmetric timing per leg, 3+ state sequences, or one-shot chains (A→B→C→done). Add when effects like notification bounce (1.35s 3-stage size 72→88→72) or staggered multi-step fades are needed.
-  - Test: define a 3-state chain A→B→C, assert values traverse all three segments in order, assert animation completes after total duration.
+### Layout & Widgets
 
 - **UI-D17** — Grid layout widget. Add `Widget::Grid { col_width, row_height, columns, gap }` variant. Children placed left-to-right, wrapping to next row every `columns` items. CK3's `fixedgridbox` with `addcolumn`/`addrow`/`datamodel_wrap`. Needed for: trait displays on character panels, skill grids, inventory views, any tiled/icon layout. Defer until a concrete screen requires it.
   - Test: insert 7 children into a 3-column grid, assert items wrap to 3 rows (3+3+1), assert child rects have correct x/y positions.
@@ -211,11 +174,48 @@ Developable on test map or integrated after Phase B.
 - **UI-D18** — Standardized sort/filter list header. Reusable `FilterableList` builder pattern with integrated sort toggles and filter dropdown in the list header. CK3's `hbox_list_sort_buttons` + `window_character_filter` pattern. Needed when entity counts exceed ~200 and search alone is insufficient. Defer until scale demands it.
   - Test: build a FilterableList with 3 sort columns, click a sort header, assert sort callback dispatched with correct column index.
 
-- **UI-D19** — Dropdown/TextInput text offset uses node.padding. Same issue as the button text offset fix (now done): Dropdown trigger text and option labels use hardcoded `+8.0/+4.0`, TextInput text uses `+4.0/+4.0`. Change draw_node for both widget types to use `node.padding`, auto-set default padding in `default_padding()`. Low priority — only matters if callers override padding on these widgets or `ui_scale != 1.0`.
-  - Test: build a Dropdown with custom padding, draw, assert text x equals rect.x + padding.left.
+- **UI-502** — Drag-and-drop support. CK3 barely uses this; low priority.
+  - Current drag infrastructure in `src/ui/input.rs` tracks `captured`, `press_origin`, `dragging` — but only for scrollbar thumb dragging.
+  - Generalize: add `pub draggable: bool` and `pub drop_target: bool` fields to `WidgetNode`.
+  - When a draggable widget is dragged past the threshold: create a ghost overlay (semi-transparent copy of the widget) that follows the cursor. Store `drag_payload: Option<String>` on `UiState`.
+  - On mouse release: hit-test for the drop target under the cursor. If a `drop_target` widget is found, dispatch `UiEvent::Drop { payload: String }`.
+  - Use case: reordering pinned characters in the outliner, moving items between inventory slots (future SIM-011).
+  - Test: start drag on draggable widget, move to drop target, release, assert Drop event is dispatched with correct payload.
 
-- **UI-D20** — Status-colored panel backgrounds. Apply `Theme::bg_status_good/bad/mixed` as panel background tints for at-a-glance status in dense data views. Theme colors added (UI-701), but no screens use them yet. When a screen needs colored row/cell backgrounds (e.g., character list health column, combat outcome panels), use these tints as `bg_color` on inner panel widgets. Defer until a concrete screen needs visual status scanning beyond text color.
-  - Test: build a panel with `bg_status_bad`, draw, assert panel bg_color matches theme value.
+### Input & Interaction
+
+- **UI-D10** — Per-widget focus policy. Add `focusable: bool` field to `WidgetNode` (default false). Set true for Button, ScrollList, and future EditBox. Update `collect_focusable` to check the flag instead of matching widget type. Needed when text inputs or custom focusable widgets are added.
+  - Test: insert a Label with `focusable = true`, assert it appears in `focusable_widgets()`.
+
+- **UI-D21** — Window dragging. Allow floating panels to be repositioned by dragging their header. Detect drag on panel header → update `Position::Fixed` with delta → re-layout. Drag infrastructure and window frame builders both exist. Implement when floating dialog UX is needed.
+  - Test: simulate drag on a movable panel header, assert panel position updated by drag delta.
+
+- **UI-D23** — Widget-contextual keyboard shortcuts. Allow focused widget type to intercept keys before global dispatch. When a text input is focused, ESC cancels editing instead of closing the panel. When a settings panel with unsaved changes is focused, ESC prompts "discard changes?" instead of closing. Needs: text input widgets with mutable state.
+  - Test: focus a text input, press ESC, assert ESC consumed by text input and not dispatched globally.
+
+### Animation
+
+- **UI-D15** — Inspector panel hide animation. The inspector currently vanishes instantly on close (ESC or deselect). Add a reverse slide-out animation (EaseIn, 150ms) before removal. Requires either: (a) caching the last `InspectorInfo` so the inspector can keep rendering during the hide animation after `selected_entity` is set to None, or (b) introducing an `inspector_closing` state that preserves the entity selection until the animation completes. Approach (a) is simpler but stales data; approach (b) complicates the ESC chain priority logic. Needs: retained tree (UI-500) would make this trivial since the widget survives without rebuilding.
+  - Test: deselect entity, assert inspector slide animation starts with target 1.0 (off-screen right), assert widget removed after animation duration.
+
+- **UI-D16** — Animation state machine (multi-step chaining). CK3 uses `next = "state_name"` to create multi-step animation sequences (e.g., bounce: scale up → overshoot → settle; attention flash: bright → dim → bright → fade). Our `start_looping()` covers the main use case (two-state ping-pong for glow/pulse), but doesn't support: asymmetric timing per leg, 3+ state sequences, or one-shot chains (A→B→C→done). Add when effects like notification bounce (1.35s 3-stage size 72→88→72) or staggered multi-step fades are needed.
+  - Test: define a 3-state chain A→B→C, assert values traverse all three segments in order, assert animation completes after total duration.
+
+- **UI-D24** — Cubic bezier easing curves. Add `Easing::CubicBezier(f32, f32, f32, f32)` that evaluates an arbitrary cubic bezier curve (same parameterization as CSS `cubic-bezier()`). CK3's default curve is `{0.25, 0.1, 0.25, 1}` (CSS `ease`); also uses custom curves like `{0, 0.9, 1, 0.4}` and overshoot curves `{0.43, 0, 0.2, 2.2}`. Our existing EaseIn/EaseOut/EaseInOut are fixed cubics that cover common cases. Add when a specific animation needs a curve that the fixed variants can't match.
+  - Test: evaluate CubicBezier(0.25, 0.1, 0.25, 1) at t=0.5, assert result matches CSS ease reference value.
+
+- **UI-D27** — Modal show/hide fade animation. Modals appear/disappear instantly. CK3 fades in over 0.25s. Use Animator to tween dim layer alpha (0→0.5) and content alpha (0→1.0) on push, reverse on pop. Requires deferring widget removal until fade-out completes (same pattern as PanelManager::close_animated). Needs: retained tree (UI-500) would simplify but not required.
+  - Test: push modal, assert dim layer alpha starts at 0.0 and reaches target after animation duration.
+
+### System Integration
+
+- **UI-503** — Sound effect hooks. No audio backend exists; deferred until one does.
+  - Add `SoundEvent` enum: `Click`, `Hover`, `Open`, `Close`, `Error`, `Notification`.
+  - Add `pub sound_events: Vec<SoundEvent>` to `UiState`. Populated during input processing (click on button = `Click`, modal open = `Open`, etc.).
+  - Main loop drains `sound_events` each frame and plays corresponding audio. Audio backend is out of scope for this task — just emit the events.
+  - Hook points: `UiState::handle_mouse_input()` emits `Click` on button clicks, `input.rs` tooltip show emits a subtle sound, `ModalStack::push` emits `Open`.
+  - No audio crate dependency in this task. The sound playback system is a separate integration.
+  - Test: simulate button click, assert `sound_events` contains `SoundEvent::Click`.
 
 ## Pending (threshold not yet met)
 
