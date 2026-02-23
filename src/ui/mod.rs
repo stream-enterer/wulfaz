@@ -1448,12 +1448,14 @@ impl WidgetTree {
 
     /// Walk the tree and emit draw commands, using `line_height` for wrap metrics.
     pub fn draw_with_line_height(&self, draw_list: &mut DrawList, line_height: f32) {
-        for root in self.roots_draw_order() {
-            self.draw_node(root, draw_list, line_height);
+        let mut sorted = self.roots.clone();
+        sorted.sort_by_key(|(_, tier)| *tier);
+        for (id, tier) in sorted {
+            self.draw_node(id, draw_list, line_height, tier as u8);
         }
     }
 
-    fn draw_node(&self, id: WidgetId, draw_list: &mut DrawList, line_height: f32) {
+    fn draw_node(&self, id: WidgetId, draw_list: &mut DrawList, line_height: f32, tier: u8) {
         let Some(node) = self.arena.get(id) else {
             return;
         };
@@ -1479,6 +1481,7 @@ impl WidgetTree {
                     border_width: *border_width,
                     shadow_width: *shadow_width,
                     clip,
+                    tier,
                 });
             }
             Widget::Label {
@@ -1503,6 +1506,7 @@ impl WidgetTree {
                             font_size: *font_size,
                             font_family: *font_family,
                             clip,
+                            tier,
                         });
                     }
                 } else {
@@ -1514,6 +1518,7 @@ impl WidgetTree {
                         font_size: *font_size,
                         font_family: *font_family,
                         clip,
+                        tier,
                     });
                 }
             }
@@ -1535,6 +1540,7 @@ impl WidgetTree {
                     border_width: 1.0,
                     shadow_width: 0.0,
                     clip,
+                    tier,
                 });
                 draw_list.texts.push(TextCommand {
                     text: text.clone(),
@@ -1544,6 +1550,7 @@ impl WidgetTree {
                     font_size: *font_size,
                     font_family: *font_family,
                     clip,
+                    tier,
                 });
             }
             Widget::RichText { spans, font_size } => {
@@ -1553,6 +1560,7 @@ impl WidgetTree {
                     y: node.rect.y,
                     font_size: *font_size,
                     clip,
+                    tier,
                 });
             }
             Widget::ProgressBar {
@@ -1575,6 +1583,7 @@ impl WidgetTree {
                     border_width: *border_width,
                     shadow_width: 0.0,
                     clip,
+                    tier,
                 });
                 // Foreground rect (fraction of width).
                 if f > 0.0 {
@@ -1592,6 +1601,7 @@ impl WidgetTree {
                         border_width: 0.0,
                         shadow_width: 0.0,
                         clip,
+                        tier,
                     });
                 }
             }
@@ -1606,6 +1616,7 @@ impl WidgetTree {
                     border_width: 0.0,
                     shadow_width: 0.0,
                     clip,
+                    tier,
                 });
             }
             Widget::Icon { sprite, tint, .. } => {
@@ -1617,6 +1628,7 @@ impl WidgetTree {
                     height: node.rect.height,
                     tint: tint.unwrap_or([1.0, 1.0, 1.0, 1.0]),
                     clip,
+                    tier,
                 });
             }
             Widget::Checkbox {
@@ -1639,6 +1651,7 @@ impl WidgetTree {
                     border_width: 1.0,
                     shadow_width: 0.0,
                     clip,
+                    tier,
                 });
                 // Checkmark when checked.
                 if *checked {
@@ -1650,6 +1663,7 @@ impl WidgetTree {
                         font_size: box_size - 4.0,
                         font_family: FontFamily::default(),
                         clip,
+                        tier,
                     });
                 }
                 // Label text.
@@ -1664,6 +1678,7 @@ impl WidgetTree {
                     font_size: *font_size,
                     font_family: FontFamily::default(),
                     clip,
+                    tier,
                 });
             }
             Widget::Dropdown {
@@ -1687,6 +1702,7 @@ impl WidgetTree {
                     border_width: 1.0,
                     shadow_width: 0.0,
                     clip,
+                    tier,
                 });
                 // Selected option text.
                 let label = options.get(*selected).map(|s| s.as_str()).unwrap_or("");
@@ -1698,6 +1714,7 @@ impl WidgetTree {
                     font_size: *font_size,
                     font_family: FontFamily::default(),
                     clip,
+                    tier,
                 });
                 // Down-arrow indicator.
                 draw_list.texts.push(TextCommand {
@@ -1708,6 +1725,7 @@ impl WidgetTree {
                     font_size: *font_size,
                     font_family: FontFamily::default(),
                     clip,
+                    tier,
                 });
                 // Open state: option list overlay below trigger.
                 if *open {
@@ -1723,6 +1741,7 @@ impl WidgetTree {
                         border_width: 1.0,
                         shadow_width: 0.0,
                         clip: None, // overlay not clipped by parent
+                        tier,
                     });
                     // Option labels.
                     for (i, opt) in options.iter().enumerate() {
@@ -1734,6 +1753,7 @@ impl WidgetTree {
                             font_size: *font_size,
                             font_family: FontFamily::default(),
                             clip: None,
+                            tier,
                         });
                     }
                 }
@@ -1760,6 +1780,7 @@ impl WidgetTree {
                     border_width: 0.0,
                     shadow_width: 0.0,
                     clip,
+                    tier,
                 });
                 // Thumb.
                 let range = (max - min).max(f32::EPSILON);
@@ -1775,6 +1796,7 @@ impl WidgetTree {
                     border_width: 1.0,
                     shadow_width: 0.0,
                     clip,
+                    tier,
                 });
             }
             Widget::TextInput {
@@ -1797,6 +1819,7 @@ impl WidgetTree {
                     border_width: 1.0,
                     shadow_width: 0.0,
                     clip,
+                    tier,
                 });
                 // Text content or placeholder.
                 let display_text = if text.is_empty() {
@@ -1818,6 +1841,7 @@ impl WidgetTree {
                     font_size: *font_size,
                     font_family: FontFamily::default(),
                     clip,
+                    tier,
                 });
                 // Cursor line when focused.
                 if *focused {
@@ -1836,6 +1860,7 @@ impl WidgetTree {
                         border_width: 0.0,
                         shadow_width: 0.0,
                         clip,
+                        tier,
                     });
                 }
             }
@@ -1857,6 +1882,7 @@ impl WidgetTree {
                     font_size: *font_size,
                     font_family: FontFamily::default(),
                     clip,
+                    tier,
                 });
                 // Header label, offset past the triangle.
                 draw_list.texts.push(TextCommand {
@@ -1867,6 +1893,7 @@ impl WidgetTree {
                     font_size: *font_size,
                     font_family: FontFamily::default(),
                     clip,
+                    tier,
                 });
                 if !*expanded {
                     return; // Skip children when collapsed.
@@ -1903,6 +1930,7 @@ impl WidgetTree {
                         border_width: 0.0,
                         shadow_width: 0.0,
                         clip,
+                        tier,
                     });
 
                     // Tab label — dimmed for inactive tabs.
@@ -1919,6 +1947,7 @@ impl WidgetTree {
                         font_size: *font_size,
                         font_family: FontFamily::default(),
                         clip,
+                        tier,
                     });
 
                     tab_x += tab_w;
@@ -1946,6 +1975,7 @@ impl WidgetTree {
                     border_width: *border_width,
                     shadow_width: 0.0,
                     clip,
+                    tier,
                 });
 
                 let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
@@ -1965,7 +1995,7 @@ impl WidgetTree {
                         && cn.rect.width > 0.0
                         && cn.rect.height > 0.0
                     {
-                        self.draw_node(child, draw_list, line_height);
+                        self.draw_node(child, draw_list, line_height, tier);
                     }
                 }
 
@@ -1992,6 +2022,7 @@ impl WidgetTree {
                         border_width: 0.0,
                         shadow_width: 0.0,
                         clip,
+                        tier,
                     });
                 }
 
@@ -2001,7 +2032,7 @@ impl WidgetTree {
 
         // Draw children on top (non-ScrollList widgets).
         for &child in &node.children {
-            self.draw_node(child, draw_list, line_height);
+            self.draw_node(child, draw_list, line_height, tier);
         }
     }
 

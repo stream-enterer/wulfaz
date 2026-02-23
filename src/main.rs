@@ -47,14 +47,19 @@ fn srgb_to_linear(s: f64) -> f64 {
 const BG_SRGB: [f32; 3] = [40.0 / 255.0, 40.0 / 255.0, 40.0 / 255.0]; // #282828
 const FG_SRGB: [f32; 3] = [235.0 / 255.0, 219.0 / 255.0, 178.0 / 255.0]; // #ebdbb2
 
+/// Number of Z-tiers (Panel, Overlay, Modal, Tooltip).
+const Z_TIER_COUNT: usize = 4;
+
 /// Vertex counts per render layer.
-/// The render pass draws back-to-front: map text -> panels -> UI text.
-/// Text preparation MUST follow this order: map content first, then UI content,
-/// because vertex buffer position determines layer assignment.
+/// The render pass draws back-to-front:
+///   map text -> map overlay panels -> for each tier { tier panels -> tier text }
 struct FrameLayers {
     map_text_vertices: u32,
-    panel_vertices: u32,
-    ui_text_vertices: u32,
+    map_overlay_panel_vertices: u32,
+    /// (start, count) in panel vertex space for each Z-tier.
+    tier_panel_ranges: [(u32, u32); Z_TIER_COUNT],
+    /// (start, count) in font vertex space for each Z-tier.
+    tier_text_ranges: [(u32, u32); Z_TIER_COUNT],
 }
 
 struct GpuState {
@@ -194,16 +199,17 @@ impl GpuState {
                 ..Default::default()
             });
 
-            // Layer 1: map ASCII text (under panels)
+            // Layer 1: map ASCII text (under all UI)
             font.render_range(&mut render_pass, 0, layers.map_text_vertices);
-            // Layer 2: UI panels
-            panel.render(&mut render_pass, layers.panel_vertices);
-            // Layer 3: UI text (over panels)
-            font.render_range(
-                &mut render_pass,
-                layers.map_text_vertices,
-                layers.ui_text_vertices,
-            );
+            // Layer 2: map overlay panels (tile highlights)
+            panel.render_range(&mut render_pass, 0, layers.map_overlay_panel_vertices);
+            // Layers 3+: per-tier panels then text (fixes cross-tier text bleed-through)
+            for i in 0..Z_TIER_COUNT {
+                let (ps, pc) = layers.tier_panel_ranges[i];
+                panel.render_range(&mut render_pass, ps, pc);
+                let (ts, tc) = layers.tier_text_ranges[i];
+                font.render_range(&mut render_pass, ts, tc);
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -1251,53 +1257,72 @@ impl ApplicationHandler for App {
                                 }
                             }
 
-                            for cmd in &draw_list.panels {
-                                panel.add_panel(
-                                    cmd.x,
-                                    cmd.y,
-                                    cmd.width,
-                                    cmd.height,
-                                    cmd.bg_color,
-                                    cmd.border_color,
-                                    cmd.border_width,
-                                    cmd.shadow_width,
-                                );
-                            }
-                            let panel_vertex_count = panel.flush(&gpu.queue, &gpu.device);
+                            // Map overlay panels are already in the buffer.
+                            let map_overlay_panel_vertices = panel.pending_vertex_count();
 
-                            // Text — two layers: map text under panels, UI text over panels.
+                            // UI panels: add per-tier so we can track vertex ranges.
+                            let mut tier_panel_ranges = [(0u32, 0u32); Z_TIER_COUNT];
+                            for tier in 0..Z_TIER_COUNT as u8 {
+                                let start = panel.pending_vertex_count();
+                                for cmd in draw_list.panels.iter().filter(|c| c.tier == tier) {
+                                    panel.add_panel(
+                                        cmd.x,
+                                        cmd.y,
+                                        cmd.width,
+                                        cmd.height,
+                                        cmd.bg_color,
+                                        cmd.border_color,
+                                        cmd.border_width,
+                                        cmd.shadow_width,
+                                    );
+                                }
+                                let end = panel.pending_vertex_count();
+                                tier_panel_ranges[tier as usize] = (start, end - start);
+                            }
+                            panel.flush(&gpu.queue, &gpu.device);
+
+                            // Text: map text first, then UI text per-tier.
                             font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
 
-                            // Layer 1: map ASCII text (renders under UI panels)
+                            // Map ASCII text (renders under all UI).
                             let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
                             font.prepare_map(&map_text, padding, map_y, fg4);
                             let map_text_vertices = font.pending_vertex_count();
 
-                            // Layer 2: UI widget text (renders over UI panels)
-                            for cmd in &draw_list.texts {
-                                font.prepare_text_with_font(
-                                    &cmd.text,
-                                    cmd.x,
-                                    cmd.y,
-                                    cmd.color,
-                                    cmd.font_family.family_name(),
-                                    cmd.font_size,
-                                );
+                            // UI text: add per-tier so we can track vertex ranges.
+                            let mut tier_text_ranges = [(0u32, 0u32); Z_TIER_COUNT];
+                            for tier in 0..Z_TIER_COUNT as u8 {
+                                let start = font.pending_vertex_count();
+                                for cmd in draw_list.texts.iter().filter(|c| c.tier == tier) {
+                                    font.prepare_text_with_font(
+                                        &cmd.text,
+                                        cmd.x,
+                                        cmd.y,
+                                        cmd.color,
+                                        cmd.font_family.family_name(),
+                                        cmd.font_size,
+                                    );
+                                }
+                                for cmd in draw_list.rich_texts.iter().filter(|c| c.tier == tier) {
+                                    let spans: Vec<(String, [f32; 4], &str)> = cmd
+                                        .spans
+                                        .iter()
+                                        .map(|s| {
+                                            (s.text.clone(), s.color, s.font_family.family_name())
+                                        })
+                                        .collect();
+                                    font.prepare_rich_text(&spans, cmd.x, cmd.y, cmd.font_size);
+                                }
+                                let end = font.pending_vertex_count();
+                                tier_text_ranges[tier as usize] = (start, end - start);
                             }
-                            for cmd in &draw_list.rich_texts {
-                                let spans: Vec<(String, [f32; 4], &str)> = cmd
-                                    .spans
-                                    .iter()
-                                    .map(|s| (s.text.clone(), s.color, s.font_family.family_name()))
-                                    .collect();
-                                font.prepare_rich_text(&spans, cmd.x, cmd.y, cmd.font_size);
-                            }
+                            font.flush(&gpu.queue, &gpu.device);
 
-                            let total_text_vertices = font.flush(&gpu.queue, &gpu.device);
                             let layers = FrameLayers {
                                 map_text_vertices,
-                                panel_vertices: panel_vertex_count,
-                                ui_text_vertices: total_text_vertices - map_text_vertices,
+                                map_overlay_panel_vertices,
+                                tier_panel_ranges,
+                                tier_text_ranges,
                             };
                             gpu.render(font, panel, &layers);
                             let render_us = render_start.elapsed().as_micros() as u64;

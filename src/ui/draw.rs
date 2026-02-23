@@ -34,6 +34,8 @@ pub struct PanelCommand {
     pub shadow_width: f32,
     /// Scissor-rect clip region (UI-104). None = no clipping.
     pub clip: Option<Rect>,
+    /// Z-tier of the root that owns this widget (for per-tier rendering).
+    pub tier: u8,
 }
 
 /// Intermediate draw command for a text run.
@@ -48,6 +50,8 @@ pub struct TextCommand {
     pub font_family: FontFamily,
     /// Scissor-rect clip region (UI-104). None = no clipping.
     pub clip: Option<Rect>,
+    /// Z-tier of the root that owns this widget (for per-tier rendering).
+    pub tier: u8,
 }
 
 /// A styled text span within a RichText widget (DD-4).
@@ -70,6 +74,8 @@ pub struct RichTextCommand {
     pub font_size: f32, // shared across all spans
     /// Scissor-rect clip region (UI-104). None = no clipping.
     pub clip: Option<Rect>,
+    /// Z-tier of the root that owns this widget (for per-tier rendering).
+    pub tier: u8,
 }
 
 /// Intermediate draw command for a sprite quad (UI-202c).
@@ -84,6 +90,8 @@ pub struct SpriteCommand {
     pub tint: [f32; 4], // sRGB RGBA tint
     /// Scissor-rect clip region (UI-104). None = no clipping.
     pub clip: Option<Rect>,
+    /// Z-tier of the root that owns this widget (for per-tier rendering).
+    pub tier: u8,
 }
 
 /// Collects draw commands from the widget tree.
