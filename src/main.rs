@@ -333,6 +333,8 @@ struct App {
     modal_stack: ui::ModalStack,
     // Widget showcase (UI-DEMO)
     show_demo: bool,
+    // Performance metrics (UI-505) — stores previous frame's metrics.
+    ui_perf: ui::UiPerfMetrics,
 }
 
 impl ApplicationHandler for App {
@@ -497,6 +499,14 @@ impl ApplicationHandler for App {
                                 }
                                 ui::Action::QuickLoad => {
                                     // TODO: quick load (UI-412)
+                                }
+                                ui::Action::ScaleUp => {
+                                    self.ui_theme.ui_scale =
+                                        (self.ui_theme.ui_scale + 0.1).min(2.0);
+                                }
+                                ui::Action::ScaleDown => {
+                                    self.ui_theme.ui_scale =
+                                        (self.ui_theme.ui_scale - 0.1).max(0.5);
                                 }
                             }
                             return;
@@ -786,6 +796,7 @@ impl ApplicationHandler for App {
                             let padding = 4.0_f32;
 
                             // Rebuild game UI tree every frame (DD-5: full rebuild).
+                            let build_start = Instant::now();
                             let player_name = self
                                 .world
                                 .player
@@ -806,6 +817,7 @@ impl ApplicationHandler for App {
                                 sim_speed: self.sim_speed,
                                 keybindings: &self.keybindings,
                                 screen_width: screen_w as f32,
+                                perf: Some(self.ui_perf),
                             };
                             let status_bar_id = ui::build_status_bar(
                                 &mut self.ui_tree,
@@ -1055,7 +1067,10 @@ impl ApplicationHandler for App {
                                 );
                             }
 
+                            let build_us = build_start.elapsed().as_micros() as u64;
+
                             // Re-layout tree with all widgets included.
+                            let layout_start = Instant::now();
                             self.ui_tree.layout(screen_size, m.line_height);
 
                             // Apply demo slide-in animation (UI-DEMO + UI-W05).
@@ -1125,11 +1140,16 @@ impl ApplicationHandler for App {
                                 viewport_rows,
                             );
 
+                            let layout_us = layout_start.elapsed().as_micros() as u64;
+
                             // Emit draw commands from UI tree.
+                            let draw_start = Instant::now();
                             let mut draw_list = ui::DrawList::new();
                             self.ui_tree.draw(&mut draw_list);
+                            let draw_us = draw_start.elapsed().as_micros() as u64;
 
                             // Panels: map overlays first, then UI panels on top.
+                            let render_start = Instant::now();
                             panel.begin_frame(&gpu.queue, screen_w, screen_h);
                             let no_border = [0.0_f32; 4];
 
@@ -1252,6 +1272,33 @@ impl ApplicationHandler for App {
 
                             let text_vertex_count = font.flush(&gpu.queue, &gpu.device);
                             gpu.render(panel, panel_vertex_count, font, text_vertex_count);
+                            let render_us = render_start.elapsed().as_micros() as u64;
+
+                            // Capture perf metrics (UI-505) — one-frame lag.
+                            self.ui_perf = ui::UiPerfMetrics {
+                                build_us,
+                                layout_us,
+                                draw_us,
+                                render_us,
+                                widget_count: self.ui_tree.widget_count(),
+                                panel_cmds: draw_list.panels.len(),
+                                text_cmds: draw_list.texts.len() + draw_list.rich_texts.len(),
+                                sprite_cmds: draw_list.sprites.len(),
+                            };
+
+                            // Warn when any UI phase exceeds 2ms (UI-505).
+                            if build_us > 2000 {
+                                log::warn!("UI build phase slow: {}us", build_us);
+                            }
+                            if layout_us > 2000 {
+                                log::warn!("UI layout phase slow: {}us", layout_us);
+                            }
+                            if draw_us > 2000 {
+                                log::warn!("UI draw phase slow: {}us", draw_us);
+                            }
+                            if render_us > 2000 {
+                                log::warn!("UI render phase slow: {}us", render_us);
+                            }
                         }
                         gpu.window.request_redraw();
                     }
@@ -1327,6 +1374,7 @@ fn main() {
         inspector_close_id: None,
         modal_stack: ui::ModalStack::new(),
         show_demo: std::env::args().any(|a| a == "--ui-demo"),
+        ui_perf: ui::UiPerfMetrics::default(),
     };
     event_loop.run_app(&mut app).expect("run event loop");
 }

@@ -88,6 +88,8 @@ pub enum Widget {
         scroll_offset: f32,        // scroll position (pixels from top, 0 = top)
         scrollbar_color: [f32; 4], // scrollbar thumb sRGB RGBA
         scrollbar_width: f32,      // scrollbar track width (pixels)
+        /// Per-child height overrides (UI-501). Empty = fixed-height mode.
+        item_heights: Vec<f32>,
     },
 
     /// Horizontal or vertical bar showing a 0.0..=1.0 fraction (UI-200).

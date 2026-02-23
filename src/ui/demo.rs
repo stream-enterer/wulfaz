@@ -360,6 +360,7 @@ pub fn build_demo(
             scroll_offset: 0.0,
             scrollbar_color: theme.scrollbar_color,
             scrollbar_width: theme.scrollbar_width,
+            item_heights: Vec::new(),
         },
     );
     tree.set_position(scroll_list, Position::Fixed { x: 0.0, y });

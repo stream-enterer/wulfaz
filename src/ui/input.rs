@@ -312,14 +312,26 @@ impl UiState {
         // ScrollList keyboard navigation.
         if let Some(focused_id) = self.focused
             && let Some(node) = tree.get(focused_id)
-            && let Widget::ScrollList { item_height, .. } = &node.widget
+            && let Widget::ScrollList {
+                item_height,
+                item_heights,
+                scroll_offset,
+                ..
+            } = &node.widget
         {
-            let ih = *item_height;
+            // For variable-height lists, scroll by the height of the item at viewport top.
+            let n = node.children.len();
+            let first =
+                WidgetTree::scroll_first_visible(item_heights, *item_height, n, *scroll_offset);
+            let ih = WidgetTree::scroll_item_h(item_heights, *item_height, first);
             let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
 
             match key {
                 KeyCode::ArrowUp => {
-                    tree.scroll_by(focused_id, -ih);
+                    // Scroll by previous item's height.
+                    let prev = if first > 0 { first - 1 } else { 0 };
+                    let prev_h = WidgetTree::scroll_item_h(item_heights, *item_height, prev);
+                    tree.scroll_by(focused_id, -prev_h);
                     return true;
                 }
                 KeyCode::ArrowDown => {
@@ -612,6 +624,7 @@ impl UiState {
             item_height,
             scroll_offset,
             scrollbar_width,
+            item_heights,
             ..
         } = &node.widget
         else {
@@ -619,7 +632,8 @@ impl UiState {
         };
 
         let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
-        let total_h = node.children.len() as f32 * item_height;
+        let n = node.children.len();
+        let total_h = WidgetTree::scroll_total_height(item_heights, *item_height, n);
 
         // No scrollbar if content fits.
         if total_h <= viewport_h {

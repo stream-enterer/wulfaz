@@ -132,6 +132,34 @@ pub struct Theme {
     pub anim_hover_highlight_ms: u64,
     /// Button hover highlight alpha (0.0 = transparent, 1.0 = opaque).
     pub anim_hover_highlight_alpha: f32,
+
+    // -- Scaling / accessibility (UI-504) --
+    /// Global UI scale factor (0.5..=2.0). Default 1.0.
+    pub ui_scale: f32,
+    /// High-contrast mode: thicker borders, full-alpha text.
+    pub high_contrast: bool,
+}
+
+impl Theme {
+    /// Scale a pixel value by `ui_scale`, rounded to nearest integer.
+    pub fn s(&self, px: f32) -> f32 {
+        (px * self.ui_scale).round()
+    }
+
+    /// Scale a font size by `ui_scale`, clamped to minimum 6px.
+    pub fn font_size(&self, base: f32) -> f32 {
+        (base * self.ui_scale).round().max(6.0)
+    }
+
+    /// Border width, thicker in high-contrast mode.
+    pub fn border_width(&self) -> f32 {
+        self.panel_border_width + if self.high_contrast { 1.0 } else { 0.0 }
+    }
+
+    /// Text alpha: 1.0 in high-contrast, unchanged otherwise.
+    pub fn text_alpha(&self) -> f32 {
+        if self.high_contrast { 1.0 } else { 0.85 }
+    }
 }
 
 /// Convert a hex color (#RRGGBB) to sRGB [f32; 4] with alpha 1.0.
@@ -221,6 +249,10 @@ impl Default for Theme {
             anim_inspector_slide_ms: 200,
             anim_hover_highlight_ms: 200,
             anim_hover_highlight_alpha: 0.3,
+
+            // Scaling / accessibility (UI-504)
+            ui_scale: 1.0,
+            high_contrast: false,
         }
     }
 }
@@ -290,5 +322,47 @@ mod tests {
         assert!(t.overlay_path[3] > 0.0 && t.overlay_path[3] < 1.0);
         // Selection should be more visible than hover.
         assert!(t.overlay_selection[3] > t.overlay_hover[3]);
+    }
+
+    #[test]
+    fn scale_default_identity() {
+        let t = Theme::default();
+        assert!((t.ui_scale - 1.0).abs() < f32::EPSILON);
+        assert!(!t.high_contrast);
+        // s() at scale 1.0 returns input unchanged (after rounding)
+        assert!((t.s(12.0) - 12.0).abs() < f32::EPSILON);
+        assert!((t.font_size(16.0) - 16.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scale_doubles_values() {
+        let mut t = Theme::default();
+        t.ui_scale = 2.0;
+        assert!((t.s(12.0) - 24.0).abs() < f32::EPSILON);
+        assert!((t.s(8.0) - 16.0).abs() < f32::EPSILON);
+        assert!((t.font_size(9.0) - 18.0).abs() < f32::EPSILON);
+        assert!((t.font_size(16.0) - 32.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn font_size_min_clamp() {
+        let mut t = Theme::default();
+        t.ui_scale = 0.5;
+        // 0.5 * 9.0 = 4.5, clamped to 6.0
+        assert!((t.font_size(9.0) - 6.0).abs() < f32::EPSILON);
+        // 0.5 * 16.0 = 8.0, above minimum
+        assert!((t.font_size(16.0) - 8.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn high_contrast_border_and_alpha() {
+        let mut t = Theme::default();
+        let normal_border = t.border_width();
+        let normal_alpha = t.text_alpha();
+
+        t.high_contrast = true;
+        assert!(t.border_width() > normal_border);
+        assert!((t.text_alpha() - 1.0).abs() < f32::EPSILON);
+        assert!(t.text_alpha() >= normal_alpha);
     }
 }

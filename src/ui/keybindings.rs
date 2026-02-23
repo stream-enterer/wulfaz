@@ -54,6 +54,10 @@ pub enum Action {
     QuickSave,
     /// Quick load (UI-412).
     QuickLoad,
+    /// Increase UI scale (UI-504).
+    ScaleUp,
+    /// Decrease UI scale (UI-504).
+    ScaleDown,
 }
 
 /// Configurable keyboard shortcut map.
@@ -93,6 +97,29 @@ impl KeyBindings {
         // UI-412: F5 = quick save, F9 = quick load.
         map.insert(KeyCombo::plain(KeyCode::F5), Action::QuickSave);
         map.insert(KeyCombo::plain(KeyCode::F9), Action::QuickLoad);
+        // UI-504: Ctrl+= scale up, Ctrl+- scale down.
+        map.insert(
+            KeyCombo {
+                modifiers: ModifierFlags {
+                    shift: false,
+                    ctrl: true,
+                    alt: false,
+                },
+                key: KeyCode::Equal,
+            },
+            Action::ScaleUp,
+        );
+        map.insert(
+            KeyCombo {
+                modifiers: ModifierFlags {
+                    shift: false,
+                    ctrl: true,
+                    alt: false,
+                },
+                key: KeyCode::Minus,
+            },
+            Action::ScaleDown,
+        );
 
         let reverse = Self::build_reverse(&map);
         Self { map, reverse }
@@ -197,6 +224,8 @@ fn key_name(key: KeyCode) -> &'static str {
         KeyCode::End => "End",
         KeyCode::PageUp => "PgUp",
         KeyCode::PageDown => "PgDn",
+        KeyCode::Equal => "=",
+        KeyCode::Minus => "-",
         _ => "?",
     }
 }
@@ -279,5 +308,32 @@ mod tests {
         assert_eq!(key_name(KeyCode::F11), "F11");
         assert_eq!(key_name(KeyCode::Enter), "Enter");
         assert_eq!(key_name(KeyCode::ArrowUp), "Up");
+        assert_eq!(key_name(KeyCode::Equal), "=");
+        assert_eq!(key_name(KeyCode::Minus), "-");
+    }
+
+    #[test]
+    fn scale_bindings() {
+        let kb = KeyBindings::defaults();
+        let ctrl_eq = KeyCombo {
+            modifiers: ModifierFlags {
+                shift: false,
+                ctrl: true,
+                alt: false,
+            },
+            key: KeyCode::Equal,
+        };
+        let ctrl_minus = KeyCombo {
+            modifiers: ModifierFlags {
+                shift: false,
+                ctrl: true,
+                alt: false,
+            },
+            key: KeyCode::Minus,
+        };
+        assert_eq!(kb.lookup(ctrl_eq), Some(Action::ScaleUp));
+        assert_eq!(kb.lookup(ctrl_minus), Some(Action::ScaleDown));
+        assert_eq!(kb.label_for(Action::ScaleUp).as_deref(), Some("Ctrl+="));
+        assert_eq!(kb.label_for(Action::ScaleDown).as_deref(), Some("Ctrl+-"));
     }
 }

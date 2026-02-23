@@ -74,6 +74,31 @@ pub use widget::{CrossAlign, TooltipContent, Widget};
 
 use slotmap::{SlotMap, new_key_type};
 
+// ---------------------------------------------------------------------------
+// Performance metrics (UI-505)
+// ---------------------------------------------------------------------------
+
+/// Per-frame UI performance metrics. Stored on App, displayed one frame late.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UiPerfMetrics {
+    /// Time spent in build phase (microseconds).
+    pub build_us: u64,
+    /// Time spent in layout phase (microseconds).
+    pub layout_us: u64,
+    /// Time spent in draw phase (microseconds).
+    pub draw_us: u64,
+    /// Time spent in render phase (microseconds).
+    pub render_us: u64,
+    /// Number of widgets in the tree.
+    pub widget_count: usize,
+    /// Number of panel draw commands.
+    pub panel_cmds: usize,
+    /// Number of text draw commands.
+    pub text_cmds: usize,
+    /// Number of sprite draw commands.
+    pub sprite_cmds: usize,
+}
+
 new_key_type! {
     /// Handle into the widget arena. Stable across insertions/removals.
     pub struct WidgetId;
@@ -294,6 +319,11 @@ impl WidgetTree {
     /// Insert a widget as a root (no parent) at the default Panel tier.
     pub fn insert_root(&mut self, widget: Widget) -> WidgetId {
         self.insert_root_with_tier(widget, ZTier::Panel)
+    }
+
+    /// Number of widgets currently in the arena (UI-505).
+    pub fn widget_count(&self) -> usize {
+        self.arena.len()
     }
 
     /// Insert a widget as a root at the specified Z-tier (UI-307).
@@ -866,27 +896,45 @@ impl WidgetTree {
             item_height,
             scroll_offset,
             scrollbar_width,
+            item_heights,
             ..
         } = &node.widget
         {
             let ih = *item_height;
             let so = *scroll_offset;
             let sbw = *scrollbar_width;
+            let ihs = item_heights.clone();
             let children: Vec<WidgetId> = node.children.clone();
             let parent_clip = node.clip_rect;
             let viewport_h = content.height;
             let content_w = (content.width - sbw).max(0.0);
+            let n = children.len();
 
+            let first = Self::scroll_first_visible(&ihs, ih, n, so);
             for (i, child_id) in children.iter().enumerate() {
-                let item_y = i as f32 * ih - so;
-
-                // Virtual scrolling: skip items outside viewport.
-                if item_y + ih < 0.0 || item_y >= viewport_h {
+                // Skip items before first visible.
+                if i < first {
                     if let Some(child_node) = self.arena.get_mut(*child_id) {
                         child_node.rect = Rect::default();
                         child_node.dirty = false;
                     }
                     continue;
+                }
+
+                let item_y_abs = Self::scroll_item_y(&ihs, ih, i);
+                let item_h = Self::scroll_item_h(&ihs, ih, i);
+                let item_y = item_y_abs - so;
+
+                // Virtual scrolling: break once past viewport.
+                if item_y >= viewport_h {
+                    // Zero-rect remaining items.
+                    for remaining_id in &children[i..] {
+                        if let Some(child_node) = self.arena.get_mut(*remaining_id) {
+                            child_node.rect = Rect::default();
+                            child_node.dirty = false;
+                        }
+                    }
+                    break;
                 }
 
                 // Propagate clip from parent (UI-104).
@@ -900,7 +948,7 @@ impl WidgetTree {
                     content.x,
                     content.y + item_y,
                     content_w,
-                    ih,
+                    item_h,
                     line_height,
                 );
             }
@@ -1219,18 +1267,21 @@ impl WidgetTree {
             Widget::ScrollList {
                 item_height,
                 scrollbar_width,
+                item_heights,
                 ..
             } => {
-                // Total content height = items * item_height.
+                // Total content height (variable or fixed).
                 // Width = widest child + scrollbar.
                 let mut max_w: f32 = 0.0;
                 for &child_id in &node.children {
                     let child_measured = self.measure_node(child_id, line_height);
                     max_w = max_w.max(child_measured.width);
                 }
+                let n = node.children.len();
+                let total_h = Self::scroll_total_height(item_heights, *item_height, n);
                 Size {
                     width: max_w + scrollbar_width,
-                    height: node.children.len() as f32 * item_height,
+                    height: total_h,
                 }
             }
             Widget::ProgressBar { height, .. } => {
@@ -1882,6 +1933,7 @@ impl WidgetTree {
                 scroll_offset,
                 scrollbar_color,
                 scrollbar_width,
+                item_heights,
             } => {
                 // Background panel.
                 draw_list.panels.push(PanelCommand {
@@ -1897,7 +1949,8 @@ impl WidgetTree {
                 });
 
                 let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
-                let total_h = node.children.len() as f32 * item_height;
+                let n = node.children.len();
+                let total_h = Self::scroll_total_height(item_heights, *item_height, n);
                 let content_y = node.rect.y + node.padding.top;
                 let sb_w = *scrollbar_width;
                 let sb_color = *scrollbar_color;
@@ -1959,17 +2012,85 @@ impl WidgetTree {
     /// Minimum scrollbar thumb height in pixels.
     const MIN_THUMB_HEIGHT: f32 = 20.0;
 
+    // Variable-height helpers (UI-501).
+    // When `item_heights` is empty or shorter than the queried index,
+    // these fall back to the fixed `item_height` value.
+    // Public for use by input.rs.
+
+    /// Cumulative Y offset for the item at `index`.
+    pub fn scroll_item_y(item_heights: &[f32], item_height: f32, index: usize) -> f32 {
+        let mut y = 0.0;
+        for i in 0..index {
+            y += if i < item_heights.len() {
+                item_heights[i]
+            } else {
+                item_height
+            };
+        }
+        y
+    }
+
+    /// Height of the item at `index`.
+    pub fn scroll_item_h(item_heights: &[f32], item_height: f32, index: usize) -> f32 {
+        if index < item_heights.len() {
+            item_heights[index]
+        } else {
+            item_height
+        }
+    }
+
+    /// Total content height for `count` items.
+    pub fn scroll_total_height(item_heights: &[f32], item_height: f32, count: usize) -> f32 {
+        let mut total = 0.0;
+        for i in 0..count {
+            total += if i < item_heights.len() {
+                item_heights[i]
+            } else {
+                item_height
+            };
+        }
+        total
+    }
+
+    /// Index of the first visible item given scroll offset.
+    pub fn scroll_first_visible(
+        item_heights: &[f32],
+        item_height: f32,
+        count: usize,
+        offset: f32,
+    ) -> usize {
+        let mut y = 0.0;
+        for i in 0..count {
+            let h = if i < item_heights.len() {
+                item_heights[i]
+            } else {
+                item_height
+            };
+            if y + h > offset {
+                return i;
+            }
+            y += h;
+        }
+        count
+    }
+
     /// Compute maximum scroll offset for a ScrollList.
     /// Returns 0.0 if content fits in viewport.
     pub fn max_scroll(&self, id: WidgetId) -> f32 {
         let Some(node) = self.arena.get(id) else {
             return 0.0;
         };
-        let Widget::ScrollList { item_height, .. } = &node.widget else {
+        let Widget::ScrollList {
+            item_height,
+            item_heights,
+            ..
+        } = &node.widget
+        else {
             return 0.0;
         };
         let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
-        let total_h = node.children.len() as f32 * item_height;
+        let n = node.children.len();
+        let total_h = Self::scroll_total_height(item_heights, *item_height, n);
         (total_h - viewport_h).max(0.0)
     }
 
@@ -2008,20 +2129,23 @@ impl WidgetTree {
         let Widget::ScrollList {
             item_height,
             scroll_offset,
+            item_heights,
             ..
         } = &node.widget
         else {
             return;
         };
         let ih = *item_height;
+        let ihs = item_heights.clone();
         let so = *scroll_offset;
         let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
         if viewport_h <= 0.0 {
             return;
         }
 
-        let item_top = child_index as f32 * ih;
-        let item_bottom = item_top + ih;
+        let item_top = Self::scroll_item_y(&ihs, ih, child_index);
+        let item_h = Self::scroll_item_h(&ihs, ih, child_index);
+        let item_bottom = item_top + item_h;
 
         let new_offset = if item_top < so {
             item_top
@@ -2220,6 +2344,8 @@ pub struct StatusBarInfo<'a> {
     pub sim_speed: u32,
     pub keybindings: &'a KeyBindings,
     pub screen_width: f32,
+    /// Previous frame's perf metrics (UI-505). None = don't display.
+    pub perf: Option<UiPerfMetrics>,
 }
 
 /// Build a fullscreen semi-transparent overlay when the simulation is paused (UI-105).
@@ -2319,6 +2445,23 @@ pub fn build_status_bar(tree: &mut WidgetTree, theme: &Theme, info: &StatusBarIn
         spans.push(TextSpan {
             text: format!("@{name}"),
             color: theme.gold,
+            font_family: FontFamily::Mono,
+        });
+    }
+
+    // Perf metrics (UI-505): right-aligned debug info from previous frame.
+    if let Some(perf) = &info.perf {
+        spans.push(sep());
+        spans.push(TextSpan {
+            text: format!(
+                "UI: build {:.1}ms | layout {:.1}ms | draw {:.1}ms | render {:.1}ms | {}w",
+                perf.build_us as f64 / 1000.0,
+                perf.layout_us as f64 / 1000.0,
+                perf.draw_us as f64 / 1000.0,
+                perf.render_us as f64 / 1000.0,
+                perf.widget_count,
+            ),
+            color: theme.disabled,
             font_family: FontFamily::Mono,
         });
     }
@@ -2612,6 +2755,7 @@ pub fn build_event_log(
         scroll_offset: auto_scroll,
         scrollbar_color: theme.scrollbar_color,
         scrollbar_width: theme.scrollbar_width,
+        item_heights: Vec::new(),
     });
     tree.set_sizing(
         list,
@@ -3596,6 +3740,7 @@ mod tests {
             scroll_offset: 0.0,
             scrollbar_color: [0.8, 0.6, 0.3, 0.5],
             scrollbar_width: 6.0,
+            item_heights: Vec::new(),
         });
         tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
         // 100px tall viewport = 5 visible items at 20px each.
@@ -3771,6 +3916,249 @@ mod tests {
         assert!(offset.abs() < 0.01); // scrolled to top
     }
 
+    // ------------------------------------------------------------------
+    // Performance metrics tests (UI-505)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn widget_count_on_demo() {
+        let theme = Theme::default();
+        let kb = keybindings::KeyBindings::defaults();
+        let live = demo::DemoLiveData {
+            entity_info: None,
+            tick: 0,
+            population: 0,
+        };
+        let screen = Size {
+            width: 800.0,
+            height: 600.0,
+        };
+        let mut tree = WidgetTree::new();
+        demo::build_demo(&mut tree, &theme, &kb, &live, screen);
+        assert!(tree.widget_count() > 0, "demo tree should have widgets");
+    }
+
+    #[test]
+    fn perf_metrics_default() {
+        let m = UiPerfMetrics::default();
+        assert_eq!(m.build_us, 0);
+        assert_eq!(m.widget_count, 0);
+    }
+
+    #[test]
+    fn status_bar_with_perf_metrics() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let kb = KeyBindings::defaults();
+        let perf = UiPerfMetrics {
+            build_us: 300,
+            layout_us: 100,
+            draw_us: 200,
+            render_us: 400,
+            widget_count: 42,
+            panel_cmds: 10,
+            text_cmds: 20,
+            sprite_cmds: 0,
+        };
+        let info = StatusBarInfo {
+            tick: 0,
+            date: "1 January 1845, 00:00".to_string(),
+            population: 0,
+            is_turn_based: false,
+            player_name: None,
+            paused: false,
+            sim_speed: 1,
+            keybindings: &kb,
+            screen_width: 800.0,
+            perf: Some(perf),
+        };
+        let bar = build_status_bar(&mut tree, &theme, &info);
+        let child_id = tree.get(bar).expect("bar").children[0];
+        let child = tree.get(child_id).expect("child");
+        if let Widget::RichText { spans, .. } = &child.widget {
+            // With perf: 5 normal + sep + perf = 7 spans.
+            assert_eq!(spans.len(), 7);
+            let perf_span = &spans[6];
+            assert!(perf_span.text.contains("build 0.3ms"));
+            assert!(perf_span.text.contains("layout 0.1ms"));
+            assert!(perf_span.text.contains("42w"));
+        } else {
+            panic!("expected RichText");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Variable-height ScrollList tests (UI-501)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn variable_height_scroll_list_layout() {
+        // 4 items with heights [20, 40, 20, 60]. Total = 140.
+        let mut tree = WidgetTree::new();
+        let list = tree.insert_root(Widget::ScrollList {
+            bg_color: [0.5; 4],
+            border_color: [1.0; 4],
+            border_width: 1.0,
+            item_height: 20.0, // fallback, unused here
+            scroll_offset: 0.0,
+            scrollbar_color: [0.8, 0.6, 0.3, 0.5],
+            scrollbar_width: 6.0,
+            item_heights: vec![20.0, 40.0, 20.0, 60.0],
+        });
+        tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(list, Sizing::Fixed(200.0), Sizing::Fixed(200.0));
+        tree.set_padding(list, Edges::all(0.0));
+
+        for i in 0..4 {
+            tree.insert(
+                list,
+                Widget::Label {
+                    text: format!("Item {}", i),
+                    color: [1.0; 4],
+                    font_size: 12.0,
+                    font_family: FontFamily::Mono,
+                    wrap: false,
+                },
+            );
+        }
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        // Total content height.
+        let total = WidgetTree::scroll_total_height(&[20.0, 40.0, 20.0, 60.0], 20.0, 4);
+        assert!((total - 140.0).abs() < 0.01);
+
+        // Item 2 starts at y=60 (20+40).
+        let item2_y = WidgetTree::scroll_item_y(&[20.0, 40.0, 20.0, 60.0], 20.0, 2);
+        assert!((item2_y - 60.0).abs() < 0.01);
+
+        // Verify layout rects.
+        let node = tree.get(list).unwrap();
+        let c0 = tree.get(node.children[0]).unwrap();
+        assert!((c0.rect.y - 0.0).abs() < 0.01);
+        assert!((c0.rect.height - 20.0).abs() < 0.01);
+
+        let c1 = tree.get(node.children[1]).unwrap();
+        assert!((c1.rect.y - 20.0).abs() < 0.01);
+        assert!((c1.rect.height - 40.0).abs() < 0.01);
+
+        let c2 = tree.get(node.children[2]).unwrap();
+        assert!((c2.rect.y - 60.0).abs() < 0.01);
+        assert!((c2.rect.height - 20.0).abs() < 0.01);
+
+        let c3 = tree.get(node.children[3]).unwrap();
+        assert!((c3.rect.y - 80.0).abs() < 0.01);
+        assert!((c3.rect.height - 60.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn variable_height_backward_compat() {
+        // Empty item_heights should behave identically to fixed-height.
+        let (tree_fixed, list_fixed) = scroll_list_tree(10);
+        let max_fixed = tree_fixed.max_scroll(list_fixed);
+
+        // Same tree but with explicit empty item_heights.
+        let mut tree = WidgetTree::new();
+        let list = tree.insert_root(Widget::ScrollList {
+            bg_color: [0.5; 4],
+            border_color: [1.0; 4],
+            border_width: 1.0,
+            item_height: 20.0,
+            scroll_offset: 0.0,
+            scrollbar_color: [0.8, 0.6, 0.3, 0.5],
+            scrollbar_width: 6.0,
+            item_heights: Vec::new(),
+        });
+        tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(list, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
+        tree.set_padding(list, Edges::all(0.0));
+        for i in 0..10 {
+            tree.insert(
+                list,
+                Widget::Label {
+                    text: format!("Item {}", i),
+                    color: [1.0; 4],
+                    font_size: 12.0,
+                    font_family: FontFamily::Mono,
+                    wrap: false,
+                },
+            );
+        }
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let max_var = tree.max_scroll(list);
+        assert!((max_fixed - max_var).abs() < 0.01);
+    }
+
+    #[test]
+    fn variable_height_first_visible() {
+        // Items: [20, 40, 20, 60], total = 140.
+        let ihs = [20.0, 40.0, 20.0, 60.0];
+        // offset 0 → first visible = 0.
+        assert_eq!(WidgetTree::scroll_first_visible(&ihs, 20.0, 4, 0.0), 0);
+        // offset 20 → item 0 ends at 20, so first visible = 1.
+        assert_eq!(WidgetTree::scroll_first_visible(&ihs, 20.0, 4, 20.0), 1);
+        // offset 50 → item 0 ends at 20, item 1 ends at 60 → 50 is within item 1.
+        assert_eq!(WidgetTree::scroll_first_visible(&ihs, 20.0, 4, 50.0), 1);
+        // offset 60 → item 2 starts at 60, first visible = 2.
+        assert_eq!(WidgetTree::scroll_first_visible(&ihs, 20.0, 4, 60.0), 2);
+        // offset 80 → item 3 starts at 80, first visible = 3.
+        assert_eq!(WidgetTree::scroll_first_visible(&ihs, 20.0, 4, 80.0), 3);
+    }
+
+    #[test]
+    fn variable_height_scrollbar_proportional() {
+        // Viewport 100px, items [20, 40, 20, 60] = 140. max_scroll = 40.
+        let mut tree = WidgetTree::new();
+        let list = tree.insert_root(Widget::ScrollList {
+            bg_color: [0.5; 4],
+            border_color: [1.0; 4],
+            border_width: 1.0,
+            item_height: 20.0,
+            scroll_offset: 0.0,
+            scrollbar_color: [0.8, 0.6, 0.3, 0.5],
+            scrollbar_width: 6.0,
+            item_heights: vec![20.0, 40.0, 20.0, 60.0],
+        });
+        tree.set_position(list, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(list, Sizing::Fixed(200.0), Sizing::Fixed(100.0));
+        tree.set_padding(list, Edges::all(0.0));
+        for i in 0..4 {
+            tree.insert(
+                list,
+                Widget::Label {
+                    text: format!("Item {}", i),
+                    color: [1.0; 4],
+                    font_size: 12.0,
+                    font_family: FontFamily::Mono,
+                    wrap: false,
+                },
+            );
+        }
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let max = tree.max_scroll(list);
+        assert!((max - 40.0).abs() < 0.01); // 140 - 100 = 40
+    }
+
     #[test]
     fn demo_tree_includes_scroll_list() {
         let theme = Theme::default();
@@ -3828,6 +4216,7 @@ mod tests {
             sim_speed: 1,
             keybindings: &kb,
             screen_width: 800.0,
+            perf: None,
         };
         let bar = build_status_bar(&mut tree, &theme, &info);
 
@@ -3875,6 +4264,7 @@ mod tests {
             sim_speed: 1,
             keybindings: &kb,
             screen_width: 800.0,
+            perf: None,
         };
         build_status_bar(&mut tree, &theme, &info);
 
@@ -3908,6 +4298,7 @@ mod tests {
             sim_speed: 1,
             keybindings: &kb,
             screen_width: 1024.0,
+            perf: None,
         };
         let bar = build_status_bar(&mut tree, &theme, &info);
 
@@ -3943,6 +4334,7 @@ mod tests {
             sim_speed: 1,
             keybindings: &kb,
             screen_width: 800.0,
+            perf: None,
         };
         build_status_bar(&mut tree, &theme, &info);
 
@@ -3988,6 +4380,7 @@ mod tests {
             sim_speed: 1,
             keybindings: &kb,
             screen_width: 800.0,
+            perf: None,
         };
         build_status_bar(&mut tree, &theme, &info);
 
@@ -4020,6 +4413,7 @@ mod tests {
             sim_speed: 3,
             keybindings: &kb,
             screen_width: 800.0,
+            perf: None,
         };
         build_status_bar(&mut tree, &theme, &info);
 

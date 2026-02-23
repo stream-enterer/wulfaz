@@ -106,43 +106,12 @@ Developable on test map or integrated after Phase B.
 
 
 
-## Phase UI-5 — Polish & Architecture
+## Phase UI-5 — Polish & Architecture (remaining)
 
-Goal: Performance, accessibility, and deferred architectural improvements. These tasks are parallelizable and can land in any order.
-
-- **UI-500** — Retained tree optimization (incremental rebuild). Needs: UI-505 (baseline measurements before optimizing). Blocks: none (performance improvement).
-  - Currently the UI tree is fully rebuilt every frame (DD-5 decision in `src/main.rs`, line ~735 onward). Every `build_*` function constructs the entire subtree from scratch.
-  - Phase 1: add a `generation: u64` counter to `WidgetTree`. Each `build_*` call stamps its widgets. After all builders run, `WidgetTree::gc()` removes widgets from previous generations — avoids rebuilding unchanged panels.
-  - Phase 2: builders check if their data has changed (hash of StatusBarInfo, event log length, etc.) and skip rebuild if unchanged. Return the existing root WidgetId instead of constructing new widgets.
-  - Phase 3: incremental layout — only re-layout subtrees whose root is dirty. The `dirty` flag on `WidgetNode` already exists but is not used to skip layout.
-  - Measure impact: add `std::time::Instant` timing around `build_*` + `layout()` + `draw()` in the main loop. Log per-frame UI cost. Target: <1ms total UI time at 60fps.
-  - Test: build tree, assert generation increments. Build again without changes, assert no new widget allocations.
-
-- **UI-501** — Variable-height ScrollList items. Blocks: none (enhancement to existing widget).
-  - Current `ScrollList` in `src/ui/widget.rs` has a fixed `item_height: f32`. All items are the same height. Event log entries with different line counts waste space or truncate.
-  - Replace `item_height` with `item_heights: Vec<f32>` (or measure each child individually).
-  - In `layout_node()` for ScrollList: compute cumulative Y offsets from variable heights. Virtual scrolling: binary search for the first visible item instead of `index * item_height`.
-  - Scrollbar thumb size: `viewport_height / total_content_height * viewport_height`. Scrollbar position: `scroll_offset / total_content_height * viewport_height`.
-  - Update `handle_key_input` in `src/ui/input.rs` to scroll by the actual height of the next/previous item rather than a fixed `item_height`. Requires knowing which item is currently at the top of the viewport.
-  - Backward-compatible: if all items have the same measured height, behaves identically to current fixed-height mode.
-  - Test: build ScrollList with items of heights [20, 40, 20, 60], assert total content height = 140 and third item starts at y=60.
-
-- **UI-504** — UI scaling / accessibility. Blocks: none (can land independently).
-  - Add `ui_scale: f32` to `Theme` (default 1.0). All pixel values in Theme are multiplied by `ui_scale`.
-  - Add `Action::ScaleUp` and `Action::ScaleDown` keybindings (Ctrl+= and Ctrl+-). Adjust `ui_scale` by 0.1 increments, clamped to 0.5..=2.0.
-  - Font sizes: `theme.font_body_size * ui_scale` passed to all `build_*` functions. This scales text uniformly.
-  - Panel dimensions, padding, margins, gap values: all multiplied by `ui_scale` at builder time.
-  - High-contrast mode: add `high_contrast: bool` to Theme. When enabled, increase border widths by 1px, boost text alpha to 1.0, use higher-contrast color pairs (pure white on dark brown instead of parchment on parchment).
-  - The `line_height` parameter in `WidgetTree::layout()` (called from `src/main.rs` in the render section) must also scale with `ui_scale`.
-  - Test: set ui_scale 2.0, build status bar, assert all rects are 2x the default size.
-
-- **UI-505** — Performance profiling of UI tree rebuild + draw. Blocks: UI-500. No other dependencies (diagnostic).
-  - Add per-phase timing to the main loop's UI section in `src/main.rs`: `build_time`, `layout_time`, `draw_emit_time`, `render_time`.
-  - Display in the status bar (or a toggleable debug overlay) as: "UI: build 0.3ms | layout 0.1ms | draw 0.2ms | render 0.4ms".
-  - Track widget count, panel command count, text command count, sprite command count per frame.
-  - Log warnings when any phase exceeds 2ms (60fps budget = 16ms total, UI should be <25% = 4ms).
-  - This is a prerequisite measurement for UI-500 (retained tree optimization) — provides the baseline numbers to prove optimization impact.
-  - Test: run a frame with the demo showcase active, assert all four timing values are populated and positive.
+- **UI-500** — Retained tree optimization (incremental rebuild). Needs: UI-505 (done). Blocks: none.
+  - Phase 1: `generation: u64` counter + `WidgetTree::gc()`.
+  - Phase 2: builders skip rebuild if data unchanged.
+  - Phase 3: incremental layout via dirty flags.
 
 ## Deferred
 

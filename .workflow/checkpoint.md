@@ -1,34 +1,24 @@
 # Checkpoint
 
 ## Active Task
-Phase UI-4 — COMPLETE
+Phase UI-5 — COMPLETE (3/3 tasks done)
 
-## Phase UI-4 Status (all 11 items done)
-- UI-400 Character panel — done
-- UI-401 Event popup — done
-- UI-402 Character finder — done
-- UI-403 Map mode selector — done
-- UI-405 Outliner panel — done
-- UI-406 Opinion view (stubbed) — done
-- UI-407 Mini-map — done
-- UI-412 Save/Load screen — done
-- UI-413 Settings screen — done
-- UI-414 Loading screen — done
-- UI-415 Main menu + AppState — done
-
-## New Files Created
-src/ui/character_panel.rs, src/ui/event_popup.rs, src/ui/character_finder.rs,
-src/ui/map_mode.rs, src/ui/outliner.rs, src/ui/opinion_view.rs,
-src/ui/minimap.rs, src/ui/save_load.rs, src/ui/settings.rs,
-src/ui/loading_screen.rs, src/ui/main_menu.rs
+## Phase UI-5 Status
+- UI-505 Performance profiling — done (UiPerfMetrics, timing instrumentation, status bar display)
+- UI-501 Variable-height ScrollList — done (helper functions, layout/draw/scroll updates, backward compat)
+- UI-504 UI scaling / accessibility — done (Theme.s()/font_size(), ScaleUp/ScaleDown keybindings)
 
 ## Modified Files
-- src/ui/mod.rs — 11 new modules + pub re-exports
-- src/ui/keybindings.rs — 4 new Action variants (ToggleFinder, ToggleOutliner, QuickSave, QuickLoad)
-- src/main.rs — keybinding dispatch stubs for new actions
+- src/ui/mod.rs — UiPerfMetrics, widget_count(), scroll helpers, perf in StatusBarInfo
+- src/ui/widget.rs — item_heights field on ScrollList
+- src/ui/theme.rs — ui_scale, high_contrast, s(), font_size(), border_width(), text_alpha()
+- src/ui/keybindings.rs — ScaleUp/ScaleDown actions, Ctrl+=/Ctrl+- bindings
+- src/ui/input.rs — variable-height scroll nav + scrollbar drag
+- src/ui/demo.rs, character_finder.rs, save_load.rs — item_heights: Vec::new()
+- src/main.rs — timing instrumentation, ScaleUp/ScaleDown handlers
 
-## New Keybindings
-Ctrl+F → ToggleFinder, O → ToggleOutliner, F5 → QuickSave, F9 → QuickLoad
+## Test Count
+456 unit + 5 determinism + 6 invariant = 467 total, all passing
 
 ## Next Action
-Phase UI-5 — Polish & Architecture (starts with UI-500 or UI-505)
+Delete Phase UI-5 from backlog. Start next phase.

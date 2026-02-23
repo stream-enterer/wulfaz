@@ -171,6 +171,7 @@ pub fn build_save_load_screen(
                 scroll_offset: 0.0,
                 scrollbar_color: theme.scrollbar_color,
                 scrollbar_width: theme.scrollbar_width,
+                item_heights: Vec::new(),
             },
         );
         tree.set_sizing(list, Sizing::Fixed(content_w), Sizing::Fixed(200.0));
