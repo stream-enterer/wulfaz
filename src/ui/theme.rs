@@ -30,6 +30,14 @@ pub struct Theme {
     /// Caution/mixed values: gold.
     pub text_warning: [f32; 4],
 
+    // -- Status background tints (UI-701) --
+    /// Good outcome panel tint (green, semi-transparent).
+    pub bg_status_good: [f32; 4],
+    /// Bad outcome panel tint (red, semi-transparent).
+    pub bg_status_bad: [f32; 4],
+    /// Mixed outcome panel tint (gold, semi-transparent).
+    pub bg_status_mixed: [f32; 4],
+
     // -- Panel defaults --
     /// Default panel border color (gold).
     pub panel_border_color: [f32; 4],
@@ -37,6 +45,8 @@ pub struct Theme {
     pub panel_border_width: f32,
     /// Default panel inner shadow width in pixels.
     pub panel_shadow_width: f32,
+    /// Default border width for control widgets (buttons, checkboxes, etc.).
+    pub control_border_width: f32,
 
     // -- Font defaults --
     /// Header font family.
@@ -167,9 +177,14 @@ impl Theme {
         (base * self.ui_scale).round().max(6.0)
     }
 
-    /// Border width, thicker in high-contrast mode.
+    /// Panel border width, thicker in high-contrast mode.
     pub fn border_width(&self) -> f32 {
         self.panel_border_width + if self.high_contrast { 1.0 } else { 0.0 }
+    }
+
+    /// Control widget border width, thicker in high-contrast mode.
+    pub fn control_border(&self) -> f32 {
+        self.control_border_width + if self.high_contrast { 1.0 } else { 0.0 }
     }
 
     /// Text alpha: 1.0 in high-contrast, unchanged otherwise.
@@ -205,10 +220,16 @@ impl Default for Theme {
             text_negative: hex(0xC0, 0x40, 0x40), // red (matches danger)
             text_warning: hex(0xC8, 0xA8, 0x50),  // gold (matches gold)
 
+            // Status background tints (UI-701)
+            bg_status_good: hex_a(0x3D, 0x52, 0x2E, 0.7), // muted green
+            bg_status_bad: hex_a(0x80, 0x33, 0x26, 0.7),  // muted red
+            bg_status_mixed: hex_a(0x80, 0x6B, 0x32, 0.7), // muted gold
+
             // Panel defaults
             panel_border_color: hex(0xC8, 0xA8, 0x50), // gold
             panel_border_width: 2.0,
             panel_shadow_width: 6.0,
+            control_border_width: 1.0,
 
             // Font defaults (DD-2)
             font_header_family: FontFamily::Serif,

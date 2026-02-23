@@ -316,6 +316,9 @@ pub struct WidgetTree {
     roots: Vec<(WidgetId, ZTier)>,
     /// Alpha for alternating ScrollList row tint (from Theme).
     scroll_row_alt_alpha: f32,
+    /// Border width for control widgets (buttons, checkboxes, etc.).
+    /// Set from `Theme::control_border()`.
+    control_border_width: f32,
 }
 
 impl WidgetTree {
@@ -324,12 +327,18 @@ impl WidgetTree {
             arena: SlotMap::with_key(),
             roots: Vec::new(),
             scroll_row_alt_alpha: 0.04,
+            control_border_width: 1.0,
         }
     }
 
     /// Set the alternating row tint alpha from the Theme.
     pub fn set_scroll_row_alt_alpha(&mut self, alpha: f32) {
         self.scroll_row_alt_alpha = alpha;
+    }
+
+    /// Set the control border width from the Theme.
+    pub fn set_control_border_width(&mut self, width: f32) {
+        self.control_border_width = width;
     }
 
     /// Insert a widget as a root (no parent) at the default Panel tier.
@@ -344,6 +353,7 @@ impl WidgetTree {
 
     /// Insert a widget as a root at the specified Z-tier (UI-307).
     pub fn insert_root_with_tier(&mut self, widget: Widget, z_tier: ZTier) -> WidgetId {
+        let padding = Self::default_padding(&widget);
         let id = self.arena.insert(WidgetNode {
             widget,
             parent: None,
@@ -351,7 +361,7 @@ impl WidgetTree {
             position: Position::default(),
             width: Sizing::default(),
             height: Sizing::default(),
-            padding: Edges::ZERO,
+            padding,
             margin: Edges::ZERO,
             dirty: true,
             rect: Rect::default(),
@@ -367,6 +377,7 @@ impl WidgetTree {
 
     /// Insert a widget as a child of `parent`. Returns the new widget's id.
     pub fn insert(&mut self, parent: WidgetId, widget: Widget) -> WidgetId {
+        let padding = Self::default_padding(&widget);
         let id = self.arena.insert(WidgetNode {
             widget,
             parent: Some(parent),
@@ -374,7 +385,7 @@ impl WidgetTree {
             position: Position::default(),
             width: Sizing::default(),
             height: Sizing::default(),
-            padding: Edges::ZERO,
+            padding,
             margin: Edges::ZERO,
             dirty: true,
             rect: Rect::default(),
@@ -389,6 +400,20 @@ impl WidgetTree {
             parent_node.dirty = true;
         }
         id
+    }
+
+    /// Default padding for widget types that have intrinsic internal spacing.
+    /// Callers can override with `set_padding()`.
+    fn default_padding(widget: &Widget) -> Edges {
+        match widget {
+            Widget::Button { .. } => Edges {
+                top: 4.0,
+                right: 8.0,
+                bottom: 4.0,
+                left: 8.0,
+            },
+            _ => Edges::ZERO,
+        }
     }
 
     /// Remove a widget and all its descendants.
@@ -1234,10 +1259,10 @@ impl WidgetTree {
             } => {
                 let ts = tm.measure_text(text, *font_family, *font_size);
                 let h = tm.measure_text("M", *font_family, *font_size).height;
-                // Button adds internal padding (8px horizontal, 4px vertical).
+                // Intrinsic content size only; padding added by layout_node.
                 Size {
-                    width: ts.width + 16.0,
-                    height: h + 8.0,
+                    width: ts.width,
+                    height: h,
                 }
             }
             Widget::RichText { spans, font_size } => {
@@ -1626,15 +1651,15 @@ impl WidgetTree {
                     height: node.rect.height,
                     bg_color: *bg_color,
                     border_color: *border_color,
-                    border_width: 1.0,
+                    border_width: self.control_border_width,
                     shadow_width: 0.0,
                     clip,
                     tier,
                 });
                 draw_list.texts.push(TextCommand {
                     text: text.clone(),
-                    x: node.rect.x + 8.0,
-                    y: node.rect.y + 4.0,
+                    x: node.rect.x + node.padding.left,
+                    y: node.rect.y + node.padding.top,
                     color: *color,
                     font_size: *font_size,
                     font_family: *font_family,
@@ -1737,7 +1762,7 @@ impl WidgetTree {
                     height: box_size,
                     bg_color: [0.0, 0.0, 0.0, 0.0],
                     border_color: *color,
-                    border_width: 1.0,
+                    border_width: self.control_border_width,
                     shadow_width: 0.0,
                     clip,
                     tier,
@@ -1791,7 +1816,7 @@ impl WidgetTree {
                     height: row_h,
                     bg_color: *bg_color,
                     border_color: *color,
-                    border_width: 1.0,
+                    border_width: self.control_border_width,
                     shadow_width: 0.0,
                     clip,
                     tier,
@@ -1833,7 +1858,7 @@ impl WidgetTree {
                         height: row_h * options.len() as f32,
                         bg_color: *bg_color,
                         border_color: *color,
-                        border_width: 1.0,
+                        border_width: self.control_border_width,
                         shadow_width: 0.0,
                         clip: None, // overlay not clipped by parent
                         tier,
@@ -1888,7 +1913,7 @@ impl WidgetTree {
                     height: thumb_size,
                     bg_color: *thumb_color,
                     border_color: *track_color,
-                    border_width: 1.0,
+                    border_width: self.control_border_width,
                     shadow_width: 0.0,
                     clip,
                     tier,
@@ -1911,7 +1936,7 @@ impl WidgetTree {
                     height: node.rect.height,
                     bg_color: *bg_color,
                     border_color: *color,
-                    border_width: 1.0,
+                    border_width: self.control_border_width,
                     shadow_width: 0.0,
                     clip,
                     tier,

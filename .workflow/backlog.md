@@ -211,6 +211,12 @@ Developable on test map or integrated after Phase B.
 - **UI-D18** — Standardized sort/filter list header. Reusable `FilterableList` builder pattern with integrated sort toggles and filter dropdown in the list header. CK3's `hbox_list_sort_buttons` + `window_character_filter` pattern. Needed when entity counts exceed ~200 and search alone is insufficient. Defer until scale demands it.
   - Test: build a FilterableList with 3 sort columns, click a sort header, assert sort callback dispatched with correct column index.
 
+- **UI-D19** — Dropdown/TextInput text offset uses node.padding. Same issue as the button text offset fix (now done): Dropdown trigger text and option labels use hardcoded `+8.0/+4.0`, TextInput text uses `+4.0/+4.0`. Change draw_node for both widget types to use `node.padding`, auto-set default padding in `default_padding()`. Low priority — only matters if callers override padding on these widgets or `ui_scale != 1.0`.
+  - Test: build a Dropdown with custom padding, draw, assert text x equals rect.x + padding.left.
+
+- **UI-D20** — Status-colored panel backgrounds. Apply `Theme::bg_status_good/bad/mixed` as panel background tints for at-a-glance status in dense data views. Theme colors added (UI-701), but no screens use them yet. When a screen needs colored row/cell backgrounds (e.g., character list health column, combat outcome panels), use these tints as `bg_color` on inner panel widgets. Defer until a concrete screen needs visual status scanning beyond text color.
+  - Test: build a panel with `bg_status_bad`, draw, assert panel bg_color matches theme value.
+
 ## Pending (threshold not yet met)
 
 - **GROW-002** — Phase function grouping. Trigger: >30 system calls.

@@ -954,6 +954,8 @@ impl ApplicationHandler for App {
                             self.ui_tree = ui::WidgetTree::new();
                             self.ui_tree
                                 .set_scroll_row_alt_alpha(self.ui_theme.scroll_row_alt_alpha);
+                            self.ui_tree
+                                .set_control_border_width(self.ui_theme.control_border());
                             let game_date = components::GameDate::from_tick(
                                 self.world.tick,
                                 &self.world.start_date,
@@ -1556,7 +1558,11 @@ fn main() {
         map_cell_w: 0.0,
         map_cell_h: 0.0,
         ui_state: ui::UiState::new(),
-        ui_tree: ui::WidgetTree::new(),
+        ui_tree: {
+            let mut t = ui::WidgetTree::new();
+            t.set_control_border_width(ui_theme.control_border());
+            t
+        },
         ui_theme,
         animator: ui::Animator::new(),
         last_hover_tile: None,
