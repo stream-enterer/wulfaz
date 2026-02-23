@@ -90,6 +90,8 @@ pub struct Theme {
     pub tooltip_border_width: f32,
     /// Tooltip inner shadow width (pixels).
     pub tooltip_shadow_width: f32,
+    /// Maximum tooltip width in pixels. Text wraps at this boundary.
+    pub tooltip_max_width: f32,
 
     // -- Map overlay defaults (UI-I02) --
     /// Hover tile highlight color (semi-transparent).
@@ -223,6 +225,7 @@ impl Default for Theme {
             tooltip_border_color: hex(0xC8, 0xA8, 0x50),     // gold
             tooltip_border_width: 1.0,
             tooltip_shadow_width: 4.0,
+            tooltip_max_width: 400.0,
 
             // Map overlay defaults (UI-I02)
             overlay_hover: hex_a(0xF0, 0xE6, 0xD2, 0.15), // light parchment, subtle

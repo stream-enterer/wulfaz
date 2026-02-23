@@ -1,6 +1,6 @@
 use super::theme::Theme;
-use super::widget::{TooltipContent, Widget};
-use super::{Edges, Position, Size, Sizing, WidgetId, WidgetTree, ZTier};
+use super::widget::{CrossAlign, TooltipContent, Widget};
+use super::{Constraints, Edges, Position, Size, Sizing, WidgetId, WidgetTree, ZTier};
 
 use std::time::{Duration, Instant};
 
@@ -489,33 +489,40 @@ impl UiState {
         );
         tree.set_sizing(panel, Sizing::Fit, Sizing::Fit);
         tree.set_padding(panel, Edges::all(theme.tooltip_padding));
+        tree.set_constraints(panel, Constraints::loose(theme.tooltip_max_width, f32::MAX));
+
+        // Column layout for vertical stacking of content.
+        let col = tree.insert(
+            panel,
+            Widget::Column {
+                gap: theme.label_gap,
+                align: CrossAlign::Start,
+            },
+        );
+        tree.set_sizing(col, Sizing::Fit, Sizing::Fit);
 
         // Populate children from content.
         match content {
             TooltipContent::Text(text) => {
-                tree.insert(
-                    panel,
+                let label = tree.insert(
+                    col,
                     Widget::Label {
                         text: text.clone(),
                         color: theme.text_light,
                         font_size: theme.font_body_size,
                         font_family: theme.font_body_family,
-                        wrap: false,
+                        wrap: true,
                     },
                 );
+                tree.set_sizing(label, Sizing::Fit, Sizing::Fit);
             }
             TooltipContent::Custom(items) => {
-                let mut y = 0.0;
                 for (widget, sub_tooltip) in items {
-                    let child = tree.insert(panel, widget.clone());
-                    tree.set_position(child, Position::Fixed { x: 0.0, y });
+                    let child = tree.insert(col, widget.clone());
 
                     if let Some(st) = sub_tooltip {
                         tree.set_tooltip(child, Some(st.clone()));
                     }
-
-                    let child_size = tree.measure_node(child, line_height);
-                    y += child_size.height + theme.label_gap;
                 }
             }
         }
@@ -1094,6 +1101,111 @@ mod tests {
     }
 
     #[test]
+    fn tooltip_max_width_constrains_panel() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let button = tree.insert_root(Widget::Button {
+            text: "Hover".into(),
+            color: [1.0; 4],
+            bg_color: [0.3; 4],
+            border_color: [0.8; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+        });
+        tree.set_position(button, Position::Fixed { x: 10.0, y: 10.0 });
+        // Long text that would exceed tooltip_max_width (400px) if unwrapped.
+        let long = "A".repeat(200);
+        tree.set_tooltip(button, Some(TooltipContent::Text(long)));
+        tree.layout(screen(), 14.0);
+
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let btn_rect = tree.get(button).unwrap().rect;
+
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        assert_eq!(state.tooltip_count(), 1);
+
+        tree.layout(screen(), 14.0);
+        let tooltip_root = tree.roots()[1];
+        let tooltip_rect = tree.get(tooltip_root).unwrap().rect;
+        assert!(
+            tooltip_rect.width <= theme.tooltip_max_width,
+            "tooltip width {} should be <= max_width {}",
+            tooltip_rect.width,
+            theme.tooltip_max_width,
+        );
+    }
+
+    #[test]
+    fn tooltip_custom_uses_column_layout() {
+        let theme = Theme::default();
+        let mut tree = WidgetTree::new();
+        let button = tree.insert_root(Widget::Button {
+            text: "Hover".into(),
+            color: [1.0; 4],
+            bg_color: [0.3; 4],
+            border_color: [0.8; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+        });
+        tree.set_position(button, Position::Fixed { x: 10.0, y: 10.0 });
+        let content = TooltipContent::Custom(vec![
+            (
+                Widget::Label {
+                    text: "Line 1".into(),
+                    color: [1.0; 4],
+                    font_size: 12.0,
+                    font_family: FontFamily::default(),
+                    wrap: false,
+                },
+                None,
+            ),
+            (
+                Widget::Label {
+                    text: "Line 2".into(),
+                    color: [1.0; 4],
+                    font_size: 12.0,
+                    font_family: FontFamily::default(),
+                    wrap: false,
+                },
+                None,
+            ),
+        ]);
+        tree.set_tooltip(button, Some(content));
+        tree.layout(screen(), 14.0);
+
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let btn_rect = tree.get(button).unwrap().rect;
+
+        state.handle_cursor_moved(&mut tree, btn_rect.x + 1.0, btn_rect.y + 1.0);
+        state.update_tooltips(&mut tree, &theme, screen(), t0);
+        let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree, &theme, screen(), t1);
+        assert_eq!(state.tooltip_count(), 1);
+
+        // Tooltip structure: panel → column → [label1, label2].
+        tree.layout(screen(), 14.0);
+        let tooltip_root = tree.roots()[1];
+        let panel_children = tree.get(tooltip_root).unwrap().children.clone();
+        assert_eq!(
+            panel_children.len(),
+            1,
+            "panel should have one child (Column)"
+        );
+        let col = panel_children[0];
+        assert!(
+            matches!(tree.get(col).unwrap().widget, Widget::Column { .. }),
+            "tooltip content wrapper should be a Column",
+        );
+        let col_children = tree.get(col).unwrap().children.clone();
+        assert_eq!(col_children.len(), 2, "column should have 2 label children");
+    }
+
+    #[test]
     fn nested_tooltip_chain() {
         let theme = Theme::default();
         let mut tree = WidgetTree::new();
@@ -1147,11 +1259,13 @@ mod tests {
         assert_eq!(state.tooltip_count(), 1);
 
         // Layout tooltip, find the hoverable child inside it.
+        // Tooltip structure: panel → column → [label1, label2].
         tree.layout(screen(), 14.0);
         let tooltip1_root = tree.roots()[1];
-        let tooltip1_children = tree.get(tooltip1_root).unwrap().children.clone();
-        // Second child is the one with sub-tooltip.
-        let sub_trigger = tooltip1_children[1];
+        let col = tree.get(tooltip1_root).unwrap().children[0]; // Column wrapper
+        let col_children = tree.get(col).unwrap().children.clone();
+        // Second child of the column is the one with sub-tooltip.
+        let sub_trigger = col_children[1];
         let sub_rect = tree.get(sub_trigger).unwrap().rect;
 
         // Hover the sub-trigger label inside tooltip 1.

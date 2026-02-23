@@ -163,6 +163,12 @@ Developable on test map or integrated after Phase B.
   - No audio crate dependency in this task. The sound playback system is a separate integration.
   - Test: simulate button click, assert `sound_events` contains `SoundEvent::Click`.
 
+- **UI-D07** — Tooltip shortcut display. Show keyboard shortcut text at tooltip bottom-right (CK3 pattern). Add optional `shortcut: Option<String>` to `TooltipContent`. When present, render right-aligned label below content. Wire to `KeyBindings::format_binding()` at tooltip creation sites. Needs: more keybindings to be worth discovering.
+  - Test: create tooltip with shortcut "Ctrl+C", assert tooltip tree contains a right-aligned label with that text.
+
+- **UI-D08** — Nested tooltip edge-relative positioning. Position nested tooltips relative to parent tooltip rect edge instead of cursor. Use `tooltip_stack.last()` to get parent rect, place nested tooltip at `parent_rect.right + offset_x`. Guarantees no overlap between tooltip levels regardless of cursor position within parent.
+  - Test: show nested tooltip, assert nested tooltip rect does not overlap parent tooltip rect.
+
 ## Pending (threshold not yet met)
 
 - **GROW-002** — Phase function grouping. Trigger: >30 system calls.
