@@ -483,8 +483,10 @@ impl ApplicationHandler for App {
                                     self.sim_speed = speed;
                                 }
                                 ui::Action::ToggleDemo => {
-                                    self.show_demo = !self.show_demo;
-                                    if self.show_demo {
+                                    let now = Instant::now();
+                                    if !self.show_demo {
+                                        // Open: slide in from left.
+                                        self.show_demo = true;
                                         self.animator.start(
                                             "demo_slide",
                                             -1.0,
@@ -493,10 +495,22 @@ impl ApplicationHandler for App {
                                                 self.ui_theme.anim_inspector_slide_ms,
                                             ),
                                             ui::Easing::EaseOut,
-                                            Instant::now(),
+                                            now,
                                         );
-                                    } else {
-                                        self.animator.remove("demo_slide");
+                                    } else if self.animator.target("demo_slide") != Some(-1.0) {
+                                        // Close: reverse slide to off-screen left.
+                                        let current =
+                                            self.animator.get("demo_slide", now).unwrap_or(0.0);
+                                        self.animator.start(
+                                            "demo_slide",
+                                            current,
+                                            -1.0,
+                                            std::time::Duration::from_millis(
+                                                self.ui_theme.anim_panel_hide_ms,
+                                            ),
+                                            ui::Easing::EaseIn,
+                                            now,
+                                        );
                                     }
                                 }
                                 ui::Action::CloseTopmost => {
@@ -516,9 +530,23 @@ impl ApplicationHandler for App {
                                         // Closed a panel — done.
                                     } else if self.selected_entity.is_some() {
                                         self.selected_entity = None;
-                                    } else if self.show_demo {
-                                        self.show_demo = false;
-                                        self.animator.remove("demo_slide");
+                                    } else if self.show_demo
+                                        && self.animator.target("demo_slide") != Some(-1.0)
+                                    {
+                                        // Start hide animation (don't set show_demo = false yet).
+                                        let now = Instant::now();
+                                        let current =
+                                            self.animator.get("demo_slide", now).unwrap_or(0.0);
+                                        self.animator.start(
+                                            "demo_slide",
+                                            current,
+                                            -1.0,
+                                            std::time::Duration::from_millis(
+                                                self.ui_theme.anim_panel_hide_ms,
+                                            ),
+                                            ui::Easing::EaseIn,
+                                            now,
+                                        );
                                     } else {
                                         event_loop.exit();
                                     }
@@ -1123,11 +1151,11 @@ impl ApplicationHandler for App {
                             let layout_start = Instant::now();
                             self.ui_tree.layout(screen_size, m.line_height);
 
-                            // Apply demo slide-in animation (UI-DEMO + UI-W05).
+                            // Apply demo slide animation (UI-DEMO + UI-W05).
                             if let Some(demo_id) = demo_root_id {
                                 let slide = self.animator.get("demo_slide", now).unwrap_or(0.0);
                                 if slide < 0.0 {
-                                    // Slide from off-screen left: offset = slide * panel_width.
+                                    // Slide offset: slide * panel_width.
                                     let offset = slide * 404.0; // 400 + 4 margin
                                     self.ui_tree.set_position(
                                         demo_id,
@@ -1138,6 +1166,14 @@ impl ApplicationHandler for App {
                                     );
                                     // Need re-layout after position change.
                                     self.ui_tree.layout(screen_size, m.line_height);
+                                }
+                                // Hide animation complete: panel fully off-screen.
+                                if self.animator.target("demo_slide") == Some(-1.0)
+                                    && !self.animator.is_active("demo_slide", now)
+                                {
+                                    self.show_demo = false;
+                                    self.animator.remove("demo_slide");
+                                    self.ui_tree.remove(demo_id);
                                 }
                             }
 
@@ -1181,6 +1217,7 @@ impl ApplicationHandler for App {
 
                             // Clean up completed animations (UI-W05).
                             self.animator.gc(now);
+                            self.panel_manager.flush_closed(&mut self.ui_tree, now);
 
                             let map_text = render::render_world_to_string(
                                 &self.world,

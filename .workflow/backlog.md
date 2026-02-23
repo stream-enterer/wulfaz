@@ -184,6 +184,15 @@ Developable on test map or integrated after Phase B.
 - **UI-D13** — Widget-contextual keyboard shortcuts. Allow focused widget type to intercept keys before global dispatch. When a text input is focused, ESC cancels editing instead of closing the panel. When a settings panel with unsaved changes is focused, ESC prompts "discard changes?" instead of closing. Needs: text input widgets, settings with mutable state.
   - Test: focus a text input, press ESC, assert ESC consumed by text input and not dispatched globally.
 
+- **UI-D14** — Cubic bezier easing curves. Add `Easing::CubicBezier(f32, f32, f32, f32)` that evaluates an arbitrary cubic bezier curve (same parameterization as CSS `cubic-bezier()`). CK3's default curve is `{0.25, 0.1, 0.25, 1}` (CSS `ease`); also uses custom curves like `{0, 0.9, 1, 0.4}` and overshoot curves `{0.43, 0, 0.2, 2.2}`. Our existing EaseIn/EaseOut/EaseInOut are fixed cubics that cover common cases. Add when a specific animation needs a curve that the fixed variants can't match.
+  - Test: evaluate CubicBezier(0.25, 0.1, 0.25, 1) at t=0.5, assert result matches CSS ease reference value.
+
+- **UI-D15** — Inspector panel hide animation. The inspector currently vanishes instantly on close (ESC or deselect). Add a reverse slide-out animation (EaseIn, 150ms) before removal. Requires either: (a) caching the last `InspectorInfo` so the inspector can keep rendering during the hide animation after `selected_entity` is set to None, or (b) introducing an `inspector_closing` state that preserves the entity selection until the animation completes. Approach (a) is simpler but stales data; approach (b) complicates the ESC chain priority logic. Needs: retained tree (UI-500) would make this trivial since the widget survives without rebuilding.
+  - Test: deselect entity, assert inspector slide animation starts with target 1.0 (off-screen right), assert widget removed after animation duration.
+
+- **UI-D16** — Animation state machine (multi-step chaining). CK3 uses `next = "state_name"` to create multi-step animation sequences (e.g., bounce: scale up → overshoot → settle; attention flash: bright → dim → bright → fade). Our `start_looping()` covers the main use case (two-state ping-pong for glow/pulse), but doesn't support: asymmetric timing per leg, 3+ state sequences, or one-shot chains (A→B→C→done). Add when effects like notification bounce (1.35s 3-stage size 72→88→72) or staggered multi-step fades are needed.
+  - Test: define a 3-state chain A→B→C, assert values traverse all three segments in order, assert animation completes after total duration.
+
 ## Pending (threshold not yet met)
 
 - **GROW-002** — Phase function grouping. Trigger: >30 system calls.

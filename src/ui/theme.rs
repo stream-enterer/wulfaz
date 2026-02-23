@@ -134,6 +134,8 @@ pub struct Theme {
     pub anim_hover_highlight_ms: u64,
     /// Button hover highlight alpha (0.0 = transparent, 1.0 = opaque).
     pub anim_hover_highlight_alpha: f32,
+    /// Panel hide (slide-out/fade-out) duration (milliseconds).
+    pub anim_panel_hide_ms: u64,
 
     // -- Scaling / accessibility (UI-504) --
     /// Global UI scale factor (0.5..=2.0). Default 1.0.
@@ -252,6 +254,7 @@ impl Default for Theme {
             anim_inspector_slide_ms: 200,
             anim_hover_highlight_ms: 200,
             anim_hover_highlight_alpha: 0.3,
+            anim_panel_hide_ms: 150,
 
             // Scaling / accessibility (UI-504)
             ui_scale: 1.0,

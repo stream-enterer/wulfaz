@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 pub enum Easing {
     /// Constant speed interpolation.
     Linear,
+    /// Cubic ease-in: slow start, fast end (acceleration).
+    EaseIn,
     /// Cubic ease-in-out: slow start, fast middle, slow end.
     EaseInOut,
     /// Cubic ease-out: fast start, slow end (deceleration).
@@ -20,7 +22,9 @@ struct Animation {
     to: f32,
     start: Instant,
     duration: Duration,
+    delay: Duration,
     easing: Easing,
+    looping: bool,
 }
 
 /// Time-driven f32 interpolation keyed by string (UI-W05).
@@ -57,28 +61,109 @@ impl Animator {
                 to,
                 start: now,
                 duration,
+                delay: Duration::ZERO,
                 easing,
+                looping: false,
+            },
+        );
+    }
+
+    /// Start an animation after a delay. Returns `from` value during the
+    /// delay period, then interpolates normally. Enables staggered effects.
+    #[allow(clippy::too_many_arguments)]
+    pub fn start_delayed(
+        &mut self,
+        key: &str,
+        from: f32,
+        to: f32,
+        duration: Duration,
+        delay: Duration,
+        easing: Easing,
+        now: Instant,
+    ) {
+        self.animations.insert(
+            key.to_string(),
+            Animation {
+                from,
+                to,
+                start: now,
+                duration,
+                delay,
+                easing,
+                looping: false,
+            },
+        );
+    }
+
+    /// Start a ping-pong looping animation. Oscillates between `from` and
+    /// `to` indefinitely: from→to→from→to... Each half-cycle takes `duration`.
+    pub fn start_looping(
+        &mut self,
+        key: &str,
+        from: f32,
+        to: f32,
+        duration: Duration,
+        easing: Easing,
+        now: Instant,
+    ) {
+        self.animations.insert(
+            key.to_string(),
+            Animation {
+                from,
+                to,
+                start: now,
+                duration,
+                delay: Duration::ZERO,
+                easing,
+                looping: true,
             },
         );
     }
 
     /// Get the current interpolated value. Returns `None` if no animation
-    /// exists for this key. Returns the `to` value once complete.
+    /// exists for this key. Returns the `to` value once complete (or
+    /// oscillates indefinitely for looping animations).
     pub fn get(&self, key: &str, now: Instant) -> Option<f32> {
         let anim = self.animations.get(key)?;
-        let elapsed = now.duration_since(anim.start);
-        if anim.duration.is_zero() || elapsed >= anim.duration {
+        let raw_elapsed = now.duration_since(anim.start);
+        // During delay period, return the starting value.
+        if raw_elapsed < anim.delay {
+            return Some(anim.from);
+        }
+        let elapsed = raw_elapsed - anim.delay;
+        if anim.duration.is_zero() {
             return Some(anim.to);
         }
-        let t = elapsed.as_secs_f32() / anim.duration.as_secs_f32();
-        let eased = ease(t, anim.easing);
-        Some(anim.from + (anim.to - anim.from) * eased)
+        if anim.looping {
+            // Ping-pong: each full cycle is 2× duration (forward + reverse).
+            let cycle = 2.0 * anim.duration.as_secs_f32();
+            let phase = elapsed.as_secs_f32() % cycle;
+            let t = if phase < anim.duration.as_secs_f32() {
+                phase / anim.duration.as_secs_f32()
+            } else {
+                1.0 - (phase - anim.duration.as_secs_f32()) / anim.duration.as_secs_f32()
+            };
+            let eased = ease(t, anim.easing);
+            Some(anim.from + (anim.to - anim.from) * eased)
+        } else if elapsed >= anim.duration {
+            Some(anim.to)
+        } else {
+            let t = elapsed.as_secs_f32() / anim.duration.as_secs_f32();
+            let eased = ease(t, anim.easing);
+            Some(anim.from + (anim.to - anim.from) * eased)
+        }
     }
 
     /// Returns true if the animation exists and has not yet completed.
+    /// Looping animations are always active. Delayed animations are active
+    /// during the delay period.
     pub fn is_active(&self, key: &str, now: Instant) -> bool {
         if let Some(anim) = self.animations.get(key) {
-            !anim.duration.is_zero() && now.duration_since(anim.start) < anim.duration
+            if anim.looping {
+                return true;
+            }
+            let total = anim.delay + anim.duration;
+            !anim.duration.is_zero() && now.duration_since(anim.start) < total
         } else {
             false
         }
@@ -95,10 +180,14 @@ impl Animator {
     }
 
     /// Remove completed animations to prevent unbounded growth.
-    /// Call once per frame.
+    /// Looping animations are never removed. Call once per frame.
     pub fn gc(&mut self, now: Instant) {
         self.animations.retain(|_, anim| {
-            anim.duration.is_zero() || now.duration_since(anim.start) < anim.duration
+            if anim.looping {
+                return true;
+            }
+            let total = anim.delay + anim.duration;
+            anim.duration.is_zero() || now.duration_since(anim.start) < total
         });
     }
 }
@@ -107,6 +196,10 @@ impl Animator {
 fn ease(t: f32, easing: Easing) -> f32 {
     match easing {
         Easing::Linear => t,
+        Easing::EaseIn => {
+            // Cubic ease-in: t³ (slow start, fast end — acceleration).
+            t * t * t
+        }
         Easing::EaseInOut => {
             // Cubic ease-in-out: 4t³ for t<0.5, 1-(-2t+2)³/2 for t>=0.5
             if t < 0.5 {
@@ -133,6 +226,18 @@ mod tests {
         assert!((ease(0.0, Easing::Linear)).abs() < 1e-6);
         assert!((ease(0.5, Easing::Linear) - 0.5).abs() < 1e-6);
         assert!((ease(1.0, Easing::Linear) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ease_in_endpoints() {
+        assert!((ease(0.0, Easing::EaseIn)).abs() < 1e-6);
+        assert!((ease(1.0, Easing::EaseIn) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ease_in_slow_start() {
+        // At t=0.25, value should be less than 0.25 (slow start).
+        assert!(ease(0.25, Easing::EaseIn) < 0.25);
     }
 
     #[test]
@@ -345,5 +450,146 @@ mod tests {
         anim.start("snap", 0.0, 1.0, Duration::ZERO, Easing::Linear, t0);
         let v = anim.get("snap", t0).unwrap();
         assert!((v - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn delayed_returns_from_during_delay() {
+        let mut anim = Animator::new();
+        let t0 = Instant::now();
+        anim.start_delayed(
+            "fade",
+            0.0,
+            1.0,
+            Duration::from_millis(100),
+            Duration::from_millis(200),
+            Easing::Linear,
+            t0,
+        );
+
+        // During delay: value should be 0.0 (from).
+        let v = anim.get("fade", t0 + Duration::from_millis(100)).unwrap();
+        assert!((v - 0.0).abs() < 1e-6);
+
+        // After delay, at midpoint of animation: ~0.5.
+        let v = anim.get("fade", t0 + Duration::from_millis(250)).unwrap();
+        assert!((v - 0.5).abs() < 0.01);
+
+        // After delay + duration: 1.0.
+        let v = anim.get("fade", t0 + Duration::from_millis(400)).unwrap();
+        assert!((v - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn delayed_is_active_includes_delay_period() {
+        let mut anim = Animator::new();
+        let t0 = Instant::now();
+        anim.start_delayed(
+            "fade",
+            0.0,
+            1.0,
+            Duration::from_millis(100),
+            Duration::from_millis(200),
+            Easing::Linear,
+            t0,
+        );
+        // Active during delay.
+        assert!(anim.is_active("fade", t0 + Duration::from_millis(50)));
+        // Active during animation.
+        assert!(anim.is_active("fade", t0 + Duration::from_millis(250)));
+        // Not active after delay + duration.
+        assert!(!anim.is_active("fade", t0 + Duration::from_millis(300)));
+    }
+
+    #[test]
+    fn delayed_gc_respects_delay() {
+        let mut anim = Animator::new();
+        let t0 = Instant::now();
+        anim.start_delayed(
+            "fade",
+            0.0,
+            1.0,
+            Duration::from_millis(100),
+            Duration::from_millis(200),
+            Easing::Linear,
+            t0,
+        );
+        // GC during delay period: animation should survive.
+        anim.gc(t0 + Duration::from_millis(50));
+        assert!(anim.get("fade", t0).is_some());
+
+        // GC after delay + duration: animation removed.
+        anim.gc(t0 + Duration::from_millis(400));
+        assert!(anim.get("fade", t0).is_none());
+    }
+
+    #[test]
+    fn looping_oscillates() {
+        let mut anim = Animator::new();
+        let t0 = Instant::now();
+        anim.start_looping(
+            "pulse",
+            0.0,
+            1.0,
+            Duration::from_millis(100),
+            Easing::Linear,
+            t0,
+        );
+
+        // At start: 0.0.
+        let v = anim.get("pulse", t0).unwrap();
+        assert!((v - 0.0).abs() < 1e-6);
+
+        // At 50ms (midpoint of forward): ~0.5.
+        let v = anim.get("pulse", t0 + Duration::from_millis(50)).unwrap();
+        assert!((v - 0.5).abs() < 0.01);
+
+        // At 100ms (end of forward, start of reverse): 1.0.
+        let v = anim.get("pulse", t0 + Duration::from_millis(100)).unwrap();
+        assert!((v - 1.0).abs() < 0.01);
+
+        // At 150ms (midpoint of reverse): ~0.5.
+        let v = anim.get("pulse", t0 + Duration::from_millis(150)).unwrap();
+        assert!((v - 0.5).abs() < 0.01);
+
+        // At 200ms (end of reverse = back to start): 0.0.
+        let v = anim.get("pulse", t0 + Duration::from_millis(200)).unwrap();
+        assert!((v - 0.0).abs() < 0.01);
+
+        // At 250ms (midpoint of second forward cycle): ~0.5.
+        let v = anim.get("pulse", t0 + Duration::from_millis(250)).unwrap();
+        assert!((v - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn looping_is_always_active() {
+        let mut anim = Animator::new();
+        let t0 = Instant::now();
+        anim.start_looping(
+            "pulse",
+            0.0,
+            1.0,
+            Duration::from_millis(100),
+            Easing::Linear,
+            t0,
+        );
+        // Always active, even far in the future.
+        assert!(anim.is_active("pulse", t0 + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn looping_survives_gc() {
+        let mut anim = Animator::new();
+        let t0 = Instant::now();
+        anim.start_looping(
+            "pulse",
+            0.0,
+            1.0,
+            Duration::from_millis(100),
+            Easing::Linear,
+            t0,
+        );
+        // GC should not remove looping animations.
+        anim.gc(t0 + Duration::from_secs(60));
+        assert!(anim.get("pulse", t0).is_some());
     }
 }

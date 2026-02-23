@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use super::{WidgetId, WidgetTree};
 
@@ -13,6 +14,8 @@ pub struct PanelManager {
     panels: HashMap<String, PanelEntry>,
     /// Draw order — last entry is topmost within the Panel tier.
     draw_order: Vec<String>,
+    /// Panels waiting for their hide animation to finish before removal.
+    closing: Vec<ClosingPanel>,
 }
 
 struct PanelEntry {
@@ -20,11 +23,18 @@ struct PanelEntry {
     closeable: bool,
 }
 
+struct ClosingPanel {
+    name: String,
+    root: WidgetId,
+    deadline: Instant,
+}
+
 impl PanelManager {
     pub fn new() -> Self {
         Self {
             panels: HashMap::new(),
             draw_order: Vec::new(),
+            closing: Vec::new(),
         }
     }
 
@@ -58,7 +68,7 @@ impl PanelManager {
         }
     }
 
-    /// Close the topmost closeable panel.
+    /// Close the topmost closeable panel (instant removal).
     /// Returns the name and root WidgetId if a panel was closed.
     pub fn close_topmost(&mut self, tree: &mut WidgetTree) -> Option<(String, WidgetId)> {
         // Walk draw order in reverse to find the topmost closeable panel.
@@ -72,9 +82,69 @@ impl PanelManager {
         Some((name, root))
     }
 
-    /// Whether a panel with the given name is currently open.
+    /// Close the topmost closeable panel with a hide animation.
+    /// The widget stays in the tree for `duration`, then is removed
+    /// by `flush_closed()`. The caller should start the hide animation
+    /// on the Animator separately.
+    pub fn close_topmost_animated(
+        &mut self,
+        duration: Duration,
+        now: Instant,
+    ) -> Option<(String, WidgetId)> {
+        let name = self
+            .draw_order
+            .iter()
+            .rev()
+            .find(|n| self.panels.get(n.as_str()).is_some_and(|e| e.closeable))
+            .cloned()?;
+        let root = self.close_animated(&name, duration, now)?;
+        Some((name, root))
+    }
+
+    /// Begin an animated close. Moves the panel to the closing list
+    /// instead of removing it immediately. The widget subtree stays in
+    /// the tree until `flush_closed()` removes it after `duration`.
+    /// The caller is responsible for starting the hide animation on the
+    /// Animator before calling this.
+    /// Returns the root WidgetId if the panel existed.
+    pub fn close_animated(
+        &mut self,
+        name: &str,
+        duration: Duration,
+        now: Instant,
+    ) -> Option<WidgetId> {
+        let entry = self.panels.remove(name)?;
+        self.draw_order.retain(|n| n != name);
+        self.closing.push(ClosingPanel {
+            name: name.to_string(),
+            root: entry.root,
+            deadline: now + duration,
+        });
+        Some(entry.root)
+    }
+
+    /// Remove widgets for panels whose hide animation has finished.
+    /// Call once per frame.
+    pub fn flush_closed(&mut self, tree: &mut WidgetTree, now: Instant) {
+        self.closing.retain(|c| {
+            if now >= c.deadline {
+                tree.remove(c.root);
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    /// Whether a panel with the given name is currently open
+    /// (not counting panels in the closing state).
     pub fn is_open(&self, name: &str) -> bool {
         self.panels.contains_key(name)
+    }
+
+    /// Whether a panel is currently playing its close animation.
+    pub fn is_closing(&self, name: &str) -> bool {
+        self.closing.iter().any(|c| c.name == name)
     }
 
     /// Get the root WidgetId of a panel by name.
@@ -191,5 +261,45 @@ mod tests {
         assert_eq!(pm.root_id("x"), Some(root2));
         // Draw order should have only one entry for "x".
         assert_eq!(pm.draw_order().len(), 1);
+    }
+
+    #[test]
+    fn close_animated_defers_removal() {
+        let mut tree = WidgetTree::new();
+        let mut pm = PanelManager::new();
+        let t0 = Instant::now();
+
+        let root = make_panel(&mut tree, "panel");
+        pm.open("panel", root, true);
+        pm.close_animated("panel", Duration::from_millis(200), t0);
+
+        // Panel is no longer "open" but widget still exists in tree.
+        assert!(!pm.is_open("panel"));
+        assert!(pm.is_closing("panel"));
+        assert!(
+            tree.get(root).is_some(),
+            "widget still in tree during animation"
+        );
+    }
+
+    #[test]
+    fn flush_closed_removes_after_deadline() {
+        let mut tree = WidgetTree::new();
+        let mut pm = PanelManager::new();
+        let t0 = Instant::now();
+
+        let root = make_panel(&mut tree, "panel");
+        pm.open("panel", root, true);
+        pm.close_animated("panel", Duration::from_millis(200), t0);
+
+        // Before deadline: widget survives.
+        pm.flush_closed(&mut tree, t0 + Duration::from_millis(100));
+        assert!(tree.get(root).is_some());
+        assert!(pm.is_closing("panel"));
+
+        // After deadline: widget removed.
+        pm.flush_closed(&mut tree, t0 + Duration::from_millis(200));
+        assert!(tree.get(root).is_none());
+        assert!(!pm.is_closing("panel"));
     }
 }
