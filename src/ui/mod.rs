@@ -530,6 +530,20 @@ impl WidgetTree {
         self.roots.iter().find(|(r, _)| *r == id).map(|(_, t)| *t)
     }
 
+    /// Get the Z-tier of the root that contains `id`.
+    /// Walks up the parent chain to find the root, then returns its tier.
+    pub fn z_tier_of_widget(&self, id: WidgetId) -> Option<ZTier> {
+        // Walk to the root of this widget's subtree.
+        let mut current = id;
+        loop {
+            let node = self.arena.get(current)?;
+            match node.parent {
+                Some(parent) => current = parent,
+                None => return self.z_tier(current),
+            }
+        }
+    }
+
     /// Change the Z-tier of an existing root widget (UI-307).
     pub fn set_z_tier(&mut self, id: WidgetId, tier: ZTier) {
         if let Some(entry) = self.roots.iter_mut().find(|(r, _)| *r == id) {
@@ -574,6 +588,22 @@ impl WidgetTree {
         let mut result = Vec::new();
         for root in self.roots_draw_order() {
             self.collect_focusable(root, &mut result);
+        }
+        result
+    }
+
+    /// Collect focusable widgets only from roots at or above `min_tier`.
+    /// Used for modal focus scoping — when a modal is open, Tab only cycles
+    /// through widgets in the modal layer and above.
+    pub fn focusable_widgets_in_tier(&self, min_tier: ZTier) -> Vec<WidgetId> {
+        let mut result = Vec::new();
+        // Sort roots by tier (same order as roots_draw_order).
+        let mut sorted = self.roots.clone();
+        sorted.sort_by_key(|(_, tier)| *tier);
+        for (root, tier) in sorted {
+            if tier >= min_tier {
+                self.collect_focusable(root, &mut result);
+            }
         }
         result
     }
@@ -7498,5 +7528,89 @@ mod tests {
         } else {
             panic!("expected TabContainer");
         }
+    }
+
+    #[test]
+    fn focusable_widgets_in_tier_filters_by_tier() {
+        let mut tree = WidgetTree::new();
+
+        // Panel-tier button.
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: [0.0; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+        let panel_btn = tree.insert(
+            panel,
+            Widget::Button {
+                text: "Panel".into(),
+                color: [1.0; 4],
+                bg_color: [0.3; 4],
+                border_color: [0.8; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+
+        // Modal-tier button.
+        let modal = tree.insert_root_with_tier(
+            Widget::Panel {
+                bg_color: [0.0; 4],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+            ZTier::Modal,
+        );
+        let modal_btn = tree.insert(
+            modal,
+            Widget::Button {
+                text: "Modal".into(),
+                color: [1.0; 4],
+                bg_color: [0.3; 4],
+                border_color: [0.8; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+
+        // All focusable (min_tier = Panel) should include both.
+        let all = tree.focusable_widgets_in_tier(ZTier::Panel);
+        assert!(all.contains(&panel_btn));
+        assert!(all.contains(&modal_btn));
+
+        // Modal-scoped should only include the modal button.
+        let modal_only = tree.focusable_widgets_in_tier(ZTier::Modal);
+        assert!(!modal_only.contains(&panel_btn));
+        assert!(modal_only.contains(&modal_btn));
+    }
+
+    #[test]
+    fn z_tier_of_widget_walks_to_root() {
+        let mut tree = WidgetTree::new();
+
+        let modal_root = tree.insert_root_with_tier(
+            Widget::Panel {
+                bg_color: [0.0; 4],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+            ZTier::Modal,
+        );
+        let child = tree.insert(
+            modal_root,
+            Widget::Label {
+                text: "Hello".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        assert_eq!(tree.z_tier_of_widget(modal_root), Some(ZTier::Modal));
+        assert_eq!(tree.z_tier_of_widget(child), Some(ZTier::Modal));
     }
 }

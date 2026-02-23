@@ -359,6 +359,8 @@ struct App {
     inspector_close_id: Option<ui::WidgetId>,
     // Modal stack (UI-300)
     modal_stack: ui::ModalStack,
+    // Panel manager (UI-306)
+    panel_manager: ui::PanelManager,
     // Widget showcase (UI-DEMO)
     show_demo: bool,
     // Performance metrics (UI-505) — stores previous frame's metrics.
@@ -498,7 +500,7 @@ impl ApplicationHandler for App {
                                     }
                                 }
                                 ui::Action::CloseTopmost => {
-                                    // Priority: tooltips → modals → inspector → demo → exit.
+                                    // Priority: tooltips → modals → panels → inspector → demo → exit.
                                     if self.ui_state.tooltip_count() > 0 {
                                         self.ui_state.dismiss_all_tooltips(
                                             &mut self.ui_tree,
@@ -506,6 +508,12 @@ impl ApplicationHandler for App {
                                         );
                                     } else if !self.modal_stack.is_empty() {
                                         self.modal_stack.pop(&mut self.ui_tree);
+                                    } else if self
+                                        .panel_manager
+                                        .close_topmost(&mut self.ui_tree)
+                                        .is_some()
+                                    {
+                                        // Closed a panel — done.
                                     } else if self.selected_entity.is_some() {
                                         self.selected_entity = None;
                                     } else if self.show_demo {
@@ -540,12 +548,26 @@ impl ApplicationHandler for App {
                             return;
                         }
 
-                        // 2. UI widget focus dispatch (Tab, ScrollList nav).
+                        // 2. Modal focus scoping — restrict Tab to active tier.
+                        self.ui_state.focus_min_tier = if self.modal_stack.is_empty() {
+                            ui::ZTier::Panel
+                        } else {
+                            ui::ZTier::Modal
+                        };
+                        // Clear focus if it belongs to a root below the active tier.
+                        if let Some(focused) = self.ui_state.focused
+                            && let Some(tier) = self.ui_tree.z_tier_of_widget(focused)
+                            && tier < self.ui_state.focus_min_tier
+                        {
+                            self.ui_state.focused = None;
+                        }
+
+                        // 3. UI widget focus dispatch (Tab, ScrollList nav).
                         if self.ui_state.handle_key_input(&mut self.ui_tree, kc, true) {
                             return;
                         }
 
-                        // 3. Game keys.
+                        // 4. Game keys.
                         match kc {
                             // Camera: WASD + arrows (realtime mode only) (UI-107).
                             // Pan speed scales inversely with zoom (faster when zoomed out).
@@ -1426,6 +1448,7 @@ fn main() {
         selected_entity: None,
         inspector_close_id: None,
         modal_stack: ui::ModalStack::new(),
+        panel_manager: ui::PanelManager::new(),
         show_demo: std::env::args().any(|a| a == "--ui-demo"),
         ui_perf: ui::UiPerfMetrics::default(),
     };

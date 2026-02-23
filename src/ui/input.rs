@@ -86,6 +86,10 @@ pub struct UiState {
     press_origin: Option<(f32, f32)>,
     /// Whether we've crossed the drag threshold for the current press.
     dragging: bool,
+    /// Minimum Z-tier for Tab focus cycling (modal focus scoping).
+    /// When a modal is open, set to ZTier::Modal so Tab only cycles
+    /// through widgets in the modal layer and above.
+    pub focus_min_tier: ZTier,
     /// Last known cursor position (screen coords).
     pub cursor: (f32, f32),
     /// Active scrollbar drag (if user is dragging a scrollbar thumb).
@@ -112,6 +116,7 @@ impl UiState {
             captured: None,
             press_origin: None,
             dragging: false,
+            focus_min_tier: ZTier::Panel,
             cursor: (0.0, 0.0),
             scroll_drag: None,
             tooltip_stack: Vec::new(),
@@ -289,9 +294,9 @@ impl UiState {
 
         use winit::keyboard::KeyCode;
 
-        // Tab cycles focus through focusable widgets.
+        // Tab cycles focus through focusable widgets (scoped to active tier).
         if key == KeyCode::Tab {
-            let focusable = tree.focusable_widgets();
+            let focusable = tree.focusable_widgets_in_tier(self.focus_min_tier);
             if focusable.is_empty() {
                 self.focused = None;
                 return false;
@@ -1426,5 +1431,73 @@ mod tests {
         state.handle_mouse_input(tree, MouseButton::Left, false, 10.0, 10.0);
 
         assert!(state.poll_click().is_none(), "no on_click = no event");
+    }
+
+    #[test]
+    fn tab_respects_focus_min_tier() {
+        use crate::ui::ZTier;
+        use winit::keyboard::KeyCode;
+
+        let mut tree = WidgetTree::new();
+
+        // Panel-tier button.
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: [0.0; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+        let _panel_btn = tree.insert(
+            panel,
+            Widget::Button {
+                text: "Panel".into(),
+                color: [1.0; 4],
+                bg_color: [0.3; 4],
+                border_color: [0.8; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+
+        // Modal-tier button.
+        let modal = tree.insert_root_with_tier(
+            Widget::Panel {
+                bg_color: [0.0; 4],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+            ZTier::Modal,
+        );
+        let modal_btn = tree.insert(
+            modal,
+            Widget::Button {
+                text: "Modal".into(),
+                color: [1.0; 4],
+                bg_color: [0.3; 4],
+                border_color: [0.8; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            14.0,
+        );
+
+        let mut state = UiState::new();
+        state.focus_min_tier = ZTier::Modal;
+
+        // First Tab should focus the modal button (only focusable in Modal tier).
+        state.handle_key_input(&mut tree, KeyCode::Tab, true);
+        assert_eq!(state.focused, Some(modal_btn));
+
+        // Second Tab should cycle back to the modal button (only one in tier).
+        state.handle_key_input(&mut tree, KeyCode::Tab, true);
+        assert_eq!(state.focused, Some(modal_btn));
     }
 }

@@ -169,6 +169,21 @@ Developable on test map or integrated after Phase B.
 - **UI-D08** — Nested tooltip edge-relative positioning. Position nested tooltips relative to parent tooltip rect edge instead of cursor. Use `tooltip_stack.last()` to get parent rect, place nested tooltip at `parent_rect.right + offset_x`. Guarantees no overlap between tooltip levels regardless of cursor position within parent.
   - Test: show nested tooltip, assert nested tooltip rect does not overlap parent tooltip rect.
 
+- **UI-D09** — Modal Enter/confirm shortcut. Add `Action::Confirm` → `KeyCode::Enter` to `KeyBindings::defaults()`. In CloseTopmost handler: if modal stack is non-empty, dispatch confirm to topmost modal's accept button. CK3 binds `shortcut = "confirm"` on the accept button of every dialog. Needs: confirmation dialog infrastructure (Area 9 deliverable).
+  - Test: push modal with accept callback, simulate Enter key, assert accept callback dispatched.
+
+- **UI-D10** — Per-widget focus policy. Add `focusable: bool` field to `WidgetNode` (default false). Set true for Button, ScrollList, and future EditBox. Update `collect_focusable` to check the flag instead of matching widget type. Needed when text inputs or custom focusable widgets are added.
+  - Test: insert a Label with `focusable = true`, assert it appears in `focusable_widgets()`.
+
+- **UI-D11** — Window dragging. Allow floating panels to be repositioned by dragging their header. Detect drag on panel header → update `Position::Fixed` with delta → re-layout. Drag infrastructure already exists in `UiState` (capture, drag threshold, DragStart/DragMove/DragEnd). Needs: floating dialog windows (window family builders).
+  - Test: simulate drag on a movable panel header, assert panel position updated by drag delta.
+
+- **UI-D12** — Click-outside-to-dismiss for non-blocking modals. Add optional `dismiss_on_backdrop_click: bool` flag to `ModalStack::push`. When true, clicking the dim layer pops the modal. CK3 uses an invisible button behind modal content as backdrop. Needs: non-blocking floating dialogs (info popups).
+  - Test: push modal with dismiss_on_backdrop_click, simulate click on dim layer, assert modal popped.
+
+- **UI-D13** — Widget-contextual keyboard shortcuts. Allow focused widget type to intercept keys before global dispatch. When a text input is focused, ESC cancels editing instead of closing the panel. When a settings panel with unsaved changes is focused, ESC prompts "discard changes?" instead of closing. Needs: text input widgets, settings with mutable state.
+  - Test: focus a text input, press ESC, assert ESC consumed by text input and not dispatched globally.
+
 ## Pending (threshold not yet met)
 
 - **GROW-002** — Phase function grouping. Trigger: >30 system calls.
