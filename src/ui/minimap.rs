@@ -27,6 +27,10 @@ pub struct MinimapInfo {
     pub screen_height: f32,
 }
 
+/// Compact padding for the minimap frame (px). Smaller than standard
+/// panel padding since this is a navigation widget, not a content window.
+const MINIMAP_PAD: f32 = 4.0;
+
 /// Build the minimap panel (UI-407).
 ///
 /// Returns `(panel_root, map_area)`. The minimap texture is rendered
@@ -36,32 +40,32 @@ pub fn build_minimap(
     theme: &Theme,
     info: &MinimapInfo,
 ) -> (WidgetId, WidgetId) {
+    // Root panel — Fit on both axes, sized by content.
     let panel = tree.insert_root(Widget::Panel {
         bg_color: theme.bg_parchment,
         border_color: theme.gold,
         border_width: theme.panel_border_width,
         shadow_width: 2.0,
     });
-    let panel_w = MINIMAP_DISPLAY_W + theme.panel_padding * 2.0;
-    let panel_h =
-        MINIMAP_DISPLAY_H + theme.panel_padding * 2.0 + theme.font_data_size + theme.label_gap;
-    tree.set_sizing(panel, Sizing::Fixed(panel_w), Sizing::Fixed(panel_h));
-    tree.set_padding(panel, Edges::all(theme.panel_padding));
+    tree.set_sizing(panel, Sizing::Fit, Sizing::Fit);
+    tree.set_padding(panel, Edges::all(MINIMAP_PAD));
 
-    // Position at bottom-right
-    let px = info.screen_width - panel_w - 8.0;
-    let py = info.screen_height - panel_h - 8.0;
+    // Position at bottom-right (estimate width/height for placement).
+    let est_w = MINIMAP_DISPLAY_W + MINIMAP_PAD * 2.0;
+    let est_h = MINIMAP_DISPLAY_H + MINIMAP_PAD * 2.0 + theme.font_data_size + 2.0;
+    let px = info.screen_width - est_w - 8.0;
+    let py = info.screen_height - est_h - 8.0;
     tree.set_position(panel, Position::Fixed { x: px, y: py });
 
+    // Frame column — fills parent, shrinks to content height.
     let col = tree.insert(
         panel,
         Widget::Column {
-            gap: theme.label_gap,
+            gap: 2.0,
             align: CrossAlign::Center,
         },
     );
-    tree.set_position(col, Position::Fixed { x: 0.0, y: 0.0 });
-    tree.set_sizing(col, Sizing::Fixed(MINIMAP_DISPLAY_W), Sizing::Fit);
+    tree.set_sizing(col, Sizing::Percent(1.0), Sizing::Fit);
 
     // Title label
     tree.insert(
@@ -91,12 +95,6 @@ pub fn build_minimap(
         Sizing::Fixed(MINIMAP_DISPLAY_W),
         Sizing::Fixed(MINIMAP_DISPLAY_H),
     );
-    // Viewport indicator info as tooltip
-    let vp_info = format!(
-        "Camera: ({:.0}, {:.0})\nView: {:.0}x{:.0}",
-        info.camera_x, info.camera_y, info.viewport_w, info.viewport_h
-    );
-    tree.set_tooltip(map_area, Some(super::widget::TooltipContent::Text(vp_info)));
 
     (panel, map_area)
 }
