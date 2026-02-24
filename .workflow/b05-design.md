@@ -68,6 +68,43 @@ open doors switch to `-`.
 - **B06 (interior generation):** Door tiles have `terrain == Door` and retain
   `building_id`. B06 must not place furniture on Door tiles.
 
+## Workflow Protocol
+
+### Step completion ritual
+
+After completing each step:
+1. `cargo test` — all tests pass.
+2. Commit with standardized message (template below each step).
+3. Mark the step's checkbox `- [x]`.
+
+### Commit message format
+
+```
+B05 P{phase}S{step}: {short description}
+```
+
+### Phase completion ritual
+
+After all steps in a phase pass:
+1. Verify exit criteria (run diagnostics, check counts).
+2. Update `checkpoint.md` with current B05 status and modified files.
+3. Commit checkpoint update: `B05 P{phase}: Phase {phase} complete — {summary}`
+
+### Failure protocol
+
+- If `cargo test` fails: fix before committing. Do not advance.
+- If exit criteria fail: do not advance to next phase. Fix and re-verify.
+- Pre-commit hook runs `cargo fmt`, `cargo clippy -D warnings`, `cargo test` automatically.
+
+### Final completion
+
+After Phase 4 exit criteria pass:
+1. Delete `SCALE-B05` entry from `backlog.md`.
+2. Update `checkpoint.md` with final B05 status.
+3. Final commit: `B05: Door placement complete`
+
+---
+
 ## Diagnostic baseline
 
 From `cargo run --bin building_diag`:
@@ -103,7 +140,7 @@ This is intentionally crude — maximizes connectivity, defers visual quality.
 
 ### Steps
 
-**Step 1 — Door candidate detection and placement.**
+- [x] **Step 1 — Door candidate detection and placement.**
 
 Iteration pattern (mirrors `classify_walls_floors` in `loading_gis.rs`):
 ```rust
@@ -144,7 +181,9 @@ Edge cases handled automatically:
 - Building tiles overwritten by BATI=2/3 (Courtyard/Garden/Fixture terrain):
   `get_terrain != Some(Wall)` → skipped.
 
-**Step 2 — Garden conversion.**
+Commit: `B05 P1S1: Place doors on all BATI=1 buildings`
+
+- [ ] **Step 2 — Garden conversion.**
 
 For each building where `nom_bati: Option<String>` contains "parc" or "jardin":
 ```rust
@@ -158,7 +197,9 @@ if let Some(ref name) = bdata.nom_bati {
 
 This runs AFTER door placement so doors are preserved.
 
-**Step 3 — Per-building door validation.**
+Commit: `B05 P1S2: Convert park/garden buildings to Garden terrain`
+
+- [ ] **Step 3 — Per-building door validation.**
 
 For each BATI=1 building with ≥1 Floor or Garden tile: scan its tiles for at
 least one Door. Log any doorless buildings (id, quartier, tile count).
@@ -166,7 +207,9 @@ least one Door. Log any doorless buildings (id, quartier, tile count).
 Expected: 667 doorless buildings (the all-wall buildings). 0 doorless
 buildings that have interior space.
 
-**Step 4 — Diagnostic log.**
+Commit: `B05 P1S3: Validate per-building door coverage`
+
+- [ ] **Step 4 — Diagnostic log.**
 
 ```
 Door placement: {N} doors on {M} buildings (avg {N/M:.1}/building)
@@ -175,6 +218,8 @@ Doorless buildings with interior: {D} (expected 0)
 Doorless buildings without interior: {W} (all-wall, expected 667)
 ```
 
+Commit: `B05 P1S4: Add door placement diagnostic log`
+
 ### Exit criteria
 
 - Every BATI=1 building with ≥1 Floor tile has ≥1 Door tile.
@@ -182,6 +227,9 @@ Doorless buildings without interior: {W} (all-wall, expected 667)
 - `cargo run --bin building_diag` still runs clean on the output.
 - `cargo test` passes.
 - Arcis coverage: ≥430/437 buildings with doors (98.4%).
+
+**Phase gate:** Run exit criteria checks. If all pass, update `checkpoint.md` and commit:
+`B05 P1: Phase 1 complete — MVP door placement`
 
 ### What this defers
 
@@ -204,7 +252,7 @@ Phase 1 complete. Doors placed on all non-landlocked buildings.
 
 ### Steps
 
-**Step 1 — BFS carve routing utility.**
+- [ ] **Step 1 — BFS carve routing utility.**
 
 Implement a shared BFS function:
 ```rust
@@ -230,7 +278,9 @@ TileMap accessor calls. Skip neighbors where `nx < 0 || ny < 0`.
 
 Max depth: 50 tiles (track depth per-node, or limit BFS expansions).
 
-**Step 2 — Landlocked building passage carving.**
+Commit: `B05 P2S1: Implement BFS carve routing utility`
+
+- [ ] **Step 2 — Landlocked building passage carving.**
 
 For each BATI=1 building where Phase 1 placed zero doors AND the building
 has ≥1 Floor tile (12 buildings):
@@ -251,7 +301,9 @@ Expected: 11 carved, 1 unreachable (data artifact, depth >50).
 Depth distribution from diagnostic: 2 at depth 1, 4 at depth 2, 2 at
 depth 3, 3 at depth 4–5, 1 unreachable.
 
-**Step 3 — Island courtyard piercing.**
+Commit: `B05 P2S2: Carve passages for landlocked buildings`
+
+- [ ] **Step 3 — Island courtyard piercing.**
 
 1. Build courtyard regions via 4-connected BFS over all `Terrain::Courtyard`
    tiles. Each region is a `Vec<(usize, usize)>`. Also build a
@@ -283,7 +335,9 @@ Process regions from smallest to largest. This ensures small nested
 courtyards that depend on larger outer courtyards being connected are
 handled after those outer courtyards are pierced.
 
-**Step 4 — Global connectivity validation.**
+Commit: `B05 P2S3: Pierce island courtyards to Road network`
+
+- [ ] **Step 4 — Global connectivity validation.**
 
 Find a starting Road tile by scanning the grid for the first
 `get_terrain(x, y) == Some(Terrain::Road)`. BFS through all walkable
@@ -301,12 +355,17 @@ Landlocked passages: {L}/12 carved (1 unreachable data artifact)
 
 Target: >95% courtyard regions reachable, 100% doors reachable.
 
+Commit: `B05 P2S4: Add global connectivity validation`
+
 ### Exit criteria
 
 - Global BFS reaches 100% of Door tiles.
 - Global BFS reaches >95% of courtyard regions.
 - 11/12 landlocked buildings have passages carved.
 - `cargo test` passes.
+
+**Phase gate:** Run exit criteria checks. If all pass, update `checkpoint.md` and commit:
+`B05 P2: Phase 2 complete — full connectivity`
 
 ---
 
@@ -326,7 +385,7 @@ function is rewritten to use candidate detection → run grouping → selection
 instead of converting all candidates. Garden conversion (Step 2) and
 validation (Steps 3-4) remain unchanged.
 
-**Step 1 — Facade run detection.**
+- [ ] **Step 1 — Facade run detection.**
 
 Compute door candidates using the same criteria as Phase 1 Step 1 (exterior +
 interior adjacency), but collect candidates WITHOUT converting to Door.
@@ -349,7 +408,9 @@ center regardless).
 Output: `Vec<Vec<(usize, usize)>>` per building — list of runs, each run
 an ordered list of cardinally-adjacent candidate tiles, with facing metadata.
 
-**Step 2 — Door selection heuristic.**
+Commit: `B05 P3S1: Detect facade runs with facing metadata`
+
+- [ ] **Step 2 — Door selection heuristic.**
 
 For each facade run, select tile positions:
 
@@ -372,7 +433,9 @@ entire run.
 Convert selected tiles to Door. All other candidates remain Wall. Then run
 garden conversion (same as Phase 1 Step 2).
 
-**Step 3 — Dual-door guarantee.**
+Commit: `B05 P3S2: Select doors via spacing heuristic`
+
+- [ ] **Step 3 — Dual-door guarantee.**
 
 After selection, check each building that has facade runs facing BOTH Road
 and Courtyard (use the per-run facing metadata from Step 1). Verify it has
@@ -384,12 +447,16 @@ This preserves the courtyard connectivity established in Phase 2. Without
 this fixup, the spacing heuristic could remove the only courtyard-facing
 door from a perimeter building, disconnecting the courtyard.
 
-**Step 4 — Door-floor adjacency validation.**
+Commit: `B05 P3S3: Ensure dual-door buildings keep both facings`
+
+- [ ] **Step 4 — Door-floor adjacency validation.**
 
 After all placement (including garden conversion), check every Door tile:
 does it have ≥1 cardinal neighbor that is Floor or Garden? Log violations.
 Not a hard failure — violating doors are still walkable — but indicates a
 selection bug.
+
+Commit: `B05 P3S4: Validate door-floor adjacency`
 
 ### Exit criteria
 
@@ -397,6 +464,9 @@ selection bug.
 - Phase 2's connectivity BFS still passes (re-run validation).
 - Zero door-floor adjacency violations.
 - `cargo test` passes.
+
+**Phase gate:** Run exit criteria checks. If all pass, update `checkpoint.md` and commit:
+`B05 P3: Phase 3 complete — door quality heuristic`
 
 ---
 
@@ -410,7 +480,7 @@ Phase 3 complete.
 
 ### Steps
 
-**Step 1 — Small building interior fix.**
+- [ ] **Step 1 — Small building interior fix.**
 
 Run BEFORE door candidate detection (prepend to `place_doors` pipeline).
 
@@ -438,7 +508,9 @@ For each BATI=1 building with zero Floor tiles:
 
 After this step, normal door placement handles the newly-interior buildings.
 
-**Step 2 — Strict per-building door check.**
+Commit: `B05 P4S1: Fix all-wall buildings with interior conversion`
+
+- [ ] **Step 2 — Strict per-building door check.**
 
 Every BATI=1 building with ≥1 Floor or Garden tile must have ≥1 Door tile.
 Zero tolerance. Buildings with zero Floor AND zero Garden (≤4 tile skips)
@@ -447,7 +519,9 @@ are excluded from this check.
 Log any failures with building id, quartier, superficie, tile count.
 Expected: 0 failures.
 
-**Step 3 — Full diagnostic log.**
+Commit: `B05 P4S2: Strict zero-tolerance door check`
+
+- [ ] **Step 3 — Full diagnostic log.**
 
 ```
 Small buildings: {C} converted to Floor, {S} skipped (≤4 tiles)
@@ -463,12 +537,26 @@ Validation:
   Connectivity: {DP:.1}% doors reachable, {CP:.1}% courtyards reachable
 ```
 
+Commit: `B05 P4S3: Full diagnostic log for door placement pipeline`
+
 ### Exit criteria
 
 - Zero doorless buildings with interior space.
 - Full diagnostic log emitted.
 - `cargo test` passes.
 - `cargo run --bin building_diag` output consistent with expectations.
+
+**Phase gate:** Run exit criteria checks. If all pass, update `checkpoint.md` and commit:
+`B05 P4: Phase 4 complete — edge cases handled`
+
+---
+
+## Final completion
+
+When Phase 4 exit criteria pass:
+1. Delete the `SCALE-B05` entry from `.workflow/backlog.md`.
+2. Update `.workflow/checkpoint.md` with final B05 status (all phases complete, modified files, test count).
+3. Commit: `B05: Door placement complete`
 
 ---
 

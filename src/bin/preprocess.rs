@@ -190,6 +190,10 @@ fn main() {
         println!("GeoPackage not found: {gpkg_path} (skipping)");
     }
 
+    // B05: Place doors on BATI=1 buildings
+    println!("Placing doors...");
+    loading_gis::place_doors(&mut tiles, &buildings);
+
     // Save binary tiles + bincode metadata + debug RON
     let tiles_path = format!("{output_dir}/paris.tiles");
     let meta_bin_path = format!("{output_dir}/paris.meta.bin");

@@ -2338,6 +2338,70 @@ fn component_bbox(tiles: &[(usize, usize)]) -> (usize, usize, usize, usize) {
     (min_x, max_x, min_y, max_y)
 }
 
+// --- Door placement (SCALE-B05) ---
+
+/// Place doors on all BATI=1 buildings.
+///
+/// A wall tile becomes a door if it has BOTH:
+/// 1. An exterior walkable neighbor (different building or no building).
+/// 2. An interior Floor neighbor (same building).
+// Used by preprocess binary, not main binary.
+#[allow(dead_code)]
+pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
+    // Step 1: Door candidate detection and placement.
+    let mut door_tiles: Vec<(usize, usize)> = Vec::new();
+
+    for bdata in &buildings.buildings {
+        if bdata.bati != 1 {
+            continue;
+        }
+        let bid = bdata.id;
+
+        for &(cx, cy) in &bdata.tiles {
+            let ux = cx as usize;
+            let uy = cy as usize;
+            if tiles.get_terrain(ux, uy) != Some(Terrain::Wall) {
+                continue;
+            }
+
+            let mut has_exterior = false;
+            let mut has_interior = false;
+
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = cx + dx;
+                let ny = cy + dy;
+                if nx < 0 || ny < 0 {
+                    continue;
+                }
+                let nux = nx as usize;
+                let nuy = ny as usize;
+
+                // Exterior: walkable terrain, different building
+                if tiles.get_terrain(nux, nuy).is_some_and(|t| t.is_walkable())
+                    && tiles.get_building_id(nux, nuy) != Some(bid)
+                {
+                    has_exterior = true;
+                }
+
+                // Interior: Floor terrain, same building
+                if tiles.get_terrain(nux, nuy) == Some(Terrain::Floor)
+                    && tiles.get_building_id(nux, nuy) == Some(bid)
+                {
+                    has_interior = true;
+                }
+            }
+
+            if has_exterior && has_interior {
+                door_tiles.push((ux, uy));
+            }
+        }
+    }
+
+    for (x, y) in door_tiles {
+        tiles.set_terrain(x, y, Terrain::Door);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2463,6 +2527,141 @@ mod tests {
         }
         assert_eq!(walls, 16, "5x5 building perimeter = 16 walls");
         assert_eq!(floors, 9, "5x5 building interior = 9 floors");
+    }
+
+    #[test]
+    fn test_place_doors_basic() {
+        // 7×7 building at (2..9, 2..9), surrounded by Road (the default).
+        // After classify_walls_floors: perimeter = Wall, interior = Floor.
+        // place_doors should convert perimeter walls adjacent to both Road and Floor into Door.
+        let mut tiles = TileMap::new(12, 12);
+        let mut buildings = BuildingRegistry::new();
+
+        let bid = buildings.next_id();
+        let mut tile_list = Vec::new();
+        for y in 2..9 {
+            for x in 2..9 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid);
+                tile_list.push((x as i32, y as i32));
+            }
+        }
+
+        buildings.insert(BuildingData {
+            id: bid,
+            identif: 1,
+            quartier: "Test".into(),
+            superficie: 100.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 3,
+            tiles: tile_list,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        classify_walls_floors(&mut tiles, &buildings);
+        place_doors(&mut tiles, &buildings);
+
+        // Count terrain types
+        let mut doors = 0;
+        let mut walls = 0;
+        let mut floors = 0;
+        for y in 2..9 {
+            for x in 2..9 {
+                match tiles.get_terrain(x, y) {
+                    Some(Terrain::Door) => doors += 1,
+                    Some(Terrain::Wall) => walls += 1,
+                    Some(Terrain::Floor) => floors += 1,
+                    other => panic!("unexpected terrain at ({x},{y}): {other:?}"),
+                }
+            }
+        }
+
+        // A 7x7 building: 25 interior (5x5), 24 perimeter.
+        // All perimeter walls that touch both Road outside and Floor inside become Door.
+        // Corner walls touch Road but not Floor (diagonal-only Floor contact), so they stay Wall.
+        assert!(doors > 0, "should place at least one door");
+        assert_eq!(floors, 25, "interior should remain Floor");
+        // Walls that don't have interior Floor neighbor stay Wall (corners)
+        assert!(walls > 0, "corner walls should remain Wall");
+        assert_eq!(
+            doors + walls,
+            24,
+            "perimeter should be doors + remaining walls"
+        );
+    }
+
+    #[test]
+    fn test_place_doors_water_boundary() {
+        // Building at (2..8, 2..8), Water on left side (x=0..2).
+        // Doors should NOT appear on the Water side.
+        let mut tiles = TileMap::new(12, 12);
+        let mut buildings = BuildingRegistry::new();
+
+        // Set Water on left columns
+        for y in 0..12 {
+            for x in 0..2 {
+                tiles.set_terrain(x, y, Terrain::Water);
+            }
+        }
+
+        let bid = buildings.next_id();
+        let mut tile_list = Vec::new();
+        for y in 2..8 {
+            for x in 2..8 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid);
+                tile_list.push((x as i32, y as i32));
+            }
+        }
+
+        buildings.insert(BuildingData {
+            id: bid,
+            identif: 1,
+            quartier: "Test".into(),
+            superficie: 100.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 3,
+            tiles: tile_list,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        classify_walls_floors(&mut tiles, &buildings);
+        place_doors(&mut tiles, &buildings);
+
+        // x=2 column: left neighbor is Water (not walkable) → no door on that edge.
+        for y in 2..8 {
+            let t = tiles.get_terrain(2, y).unwrap();
+            assert_ne!(
+                t,
+                Terrain::Door,
+                "tile (2,{y}) should not be Door (Water side)"
+            );
+        }
+
+        // Other sides (x=7, y=2, y=7) should have doors where they border Road and Floor.
+        let mut doors_elsewhere = 0;
+        for y in 2..8 {
+            for x in 2..8 {
+                if tiles.get_terrain(x, y) == Some(Terrain::Door) {
+                    doors_elsewhere += 1;
+                }
+            }
+        }
+        assert!(doors_elsewhere > 0, "should have doors on non-Water sides");
     }
 
     #[test]
