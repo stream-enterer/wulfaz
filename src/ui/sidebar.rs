@@ -740,9 +740,8 @@ pub fn build_tab_strip(
     screen: Size,
     active_tab: Option<usize>,
 ) -> Vec<WidgetId> {
-    let total_h = TAB_COUNT as f32 * TAB_HEIGHT + (TAB_COUNT - 1) as f32 * TAB_GAP;
     let x = screen.width - SIDEBAR_MARGIN + (SIDEBAR_MARGIN - TAB_WIDTH) / 2.0;
-    let y_start = (screen.height - total_h) / 2.0;
+    let y_start = screen.height * 0.25;
 
     let mut ids = Vec::with_capacity(TAB_COUNT);
     for i in 0..TAB_COUNT {

@@ -1050,24 +1050,6 @@ impl ApplicationHandler for App {
                                 self.camera.target_x = self.camera.x as f32;
                                 self.camera.target_y = self.camera.y as f32;
                             } else {
-                                // Edge-scroll: pan camera when cursor is within 20px of screen edge (UI-107).
-                                let edge_margin = 20.0_f32;
-                                let edge_speed = (2.0 / self.camera.zoom).max(0.5);
-                                let cx = self.cursor_pos.x as f32;
-                                let cy = self.cursor_pos.y as f32;
-                                let sw = screen_w as f32;
-                                let sh = screen_h as f32;
-                                if cx < edge_margin && cx >= 0.0 {
-                                    self.camera.target_x -= edge_speed;
-                                } else if cx > sw - edge_margin && cx <= sw {
-                                    self.camera.target_x += edge_speed;
-                                }
-                                if cy < edge_margin && cy >= 0.0 {
-                                    self.camera.target_y -= edge_speed;
-                                } else if cy > sh - edge_margin && cy <= sh {
-                                    self.camera.target_y += edge_speed;
-                                }
-
                                 // Smooth lerp: camera position interpolates toward target (UI-107).
                                 let lerp_factor = 0.15_f32;
                                 self.camera.zoom +=
