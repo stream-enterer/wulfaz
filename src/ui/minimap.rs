@@ -57,7 +57,9 @@ pub fn build_minimap(
     let py = info.screen_height - est_h - 8.0;
     tree.set_position(panel, Position::Fixed { x: px, y: py });
 
-    // Frame column — fills parent, shrinks to content height.
+    // Frame column — Fit on both axes so children's sizes propagate
+    // up to the Fit parent panel. (Percent would create a circular
+    // dependency with a Fit parent.)
     let col = tree.insert(
         panel,
         Widget::Column {
@@ -65,7 +67,6 @@ pub fn build_minimap(
             align: CrossAlign::Center,
         },
     );
-    tree.set_sizing(col, Sizing::Percent(1.0), Sizing::Fit);
 
     // Title label
     tree.insert(
