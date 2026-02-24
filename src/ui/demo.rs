@@ -19,15 +19,17 @@ pub struct DemoLiveData<'a> {
 
 /// Build the demo widget showcase into an existing tree.
 ///
-/// Returns the root panel `WidgetId` so the caller can apply slide-in
-/// animation. The demo occupies a 400px-wide panel on the right side.
+/// Returns `(root_panel, scroll_view)` so the caller can apply slide-in
+/// animation and persist scroll offset. The demo occupies a 400px-wide
+/// panel on the right side.
 pub fn build_demo(
     tree: &mut WidgetTree,
     theme: &Theme,
     keybindings: &KeyBindings,
     live: &DemoLiveData,
     screen: Size,
-) -> WidgetId {
+    scroll_offset: f32,
+) -> (WidgetId, WidgetId) {
     let panel_w = 400.0_f32;
     let panel_h = screen.height - 8.0; // 4px margin top+bottom
     let content_w = panel_w - theme.panel_padding * 2.0;
@@ -49,15 +51,33 @@ pub fn build_demo(
     tree.set_sizing(root, Sizing::Fixed(panel_w), Sizing::Fixed(panel_h));
     tree.set_padding(root, Edges::all(theme.panel_padding));
 
+    // ScrollView fills the panel content box, providing overflow scrolling.
+    // Width extends into the panel's right padding so the scrollbar sits flush
+    // against the panel's inner border edge.
+    let scroll_view_h = panel_h - theme.panel_padding * 2.0;
+    let sv_w = content_w + theme.panel_padding;
+    let sv = tree.insert(
+        root,
+        Widget::ScrollView {
+            scroll_offset,
+            scrollbar_color: theme.scrollbar_color,
+            scrollbar_width: theme.scrollbar_width,
+        },
+    );
+    tree.set_sizing(sv, Sizing::Fixed(sv_w), Sizing::Fixed(scroll_view_h));
+
+    // Inner content width: reserve space for scrollbar.
+    let inner_w = content_w - theme.scrollbar_width;
+
     // Main content column — all sections flow top-to-bottom.
     let col = tree.insert(
-        root,
+        sv,
         Widget::Column {
             gap: theme.label_gap,
             align: CrossAlign::Start,
         },
     );
-    tree.set_sizing(col, Sizing::Fixed(content_w), Sizing::Fit);
+    tree.set_sizing(col, Sizing::Fixed(inner_w), Sizing::Fit);
 
     // -------------------------------------------------------------------
     // Title
@@ -80,7 +100,7 @@ pub fn build_demo(
             font_size: theme.font_header_size,
         },
     );
-    insert_sep(tree, col, theme, content_w);
+    insert_sep(tree, col, theme, inner_w);
 
     // -------------------------------------------------------------------
     // Typography
@@ -126,7 +146,7 @@ pub fn build_demo(
             align: CrossAlign::Center,
         },
     );
-    tree.set_sizing(color_row, Sizing::Fixed(content_w), Sizing::Fit);
+    tree.set_sizing(color_row, Sizing::Fixed(inner_w), Sizing::Fit);
     for (text, color) in [
         ("Danger", theme.danger),
         ("Positive", theme.text_positive),
@@ -144,7 +164,7 @@ pub fn build_demo(
             },
         );
     }
-    insert_sep(tree, col, theme, content_w);
+    insert_sep(tree, col, theme, inner_w);
 
     // -------------------------------------------------------------------
     // Rich Text
@@ -174,7 +194,7 @@ pub fn build_demo(
             font_size: theme.font_body_size,
         },
     );
-    insert_sep(tree, col, theme, content_w);
+    insert_sep(tree, col, theme, inner_w);
 
     // -------------------------------------------------------------------
     // Progress Bars
@@ -207,9 +227,9 @@ pub fn build_demo(
                 height: theme.progress_bar_height,
             },
         );
-        tree.set_sizing(bar, Sizing::Fixed(content_w), Sizing::Fit);
+        tree.set_sizing(bar, Sizing::Fixed(inner_w), Sizing::Fit);
     }
-    insert_sep(tree, col, theme, content_w);
+    insert_sep(tree, col, theme, inner_w);
 
     // -------------------------------------------------------------------
     // Buttons + Keybindings
@@ -224,7 +244,7 @@ pub fn build_demo(
             align: CrossAlign::Center,
         },
     );
-    tree.set_sizing(btn_row, Sizing::Fixed(content_w), Sizing::Fit);
+    tree.set_sizing(btn_row, Sizing::Fixed(inner_w), Sizing::Fit);
 
     let pause_label = keybindings
         .label_for(Action::PauseSim)
@@ -274,7 +294,7 @@ pub fn build_demo(
             align: CrossAlign::Center,
         },
     );
-    tree.set_sizing(speed_row, Sizing::Fixed(content_w), Sizing::Fit);
+    tree.set_sizing(speed_row, Sizing::Fixed(inner_w), Sizing::Fit);
 
     for speed in 1..=5 {
         let speed_label = keybindings
@@ -292,7 +312,7 @@ pub fn build_demo(
             },
         );
     }
-    insert_sep(tree, col, theme, content_w);
+    insert_sep(tree, col, theme, inner_w);
 
     // -------------------------------------------------------------------
     // Controls (Checkbox, Slider, Dropdown, TextInput)
@@ -307,7 +327,7 @@ pub fn build_demo(
             align: CrossAlign::Center,
         },
     );
-    tree.set_sizing(check_row, Sizing::Fixed(content_w), Sizing::Fit);
+    tree.set_sizing(check_row, Sizing::Fixed(inner_w), Sizing::Fit);
 
     tree.insert(
         check_row,
@@ -336,7 +356,7 @@ pub fn build_demo(
             align: CrossAlign::Center,
         },
     );
-    tree.set_sizing(slider_row, Sizing::Fixed(content_w), Sizing::Fit);
+    tree.set_sizing(slider_row, Sizing::Fixed(inner_w), Sizing::Fit);
 
     tree.insert(
         slider_row,
@@ -401,8 +421,8 @@ pub fn build_demo(
             focused: false,
         },
     );
-    tree.set_sizing(text_input, Sizing::Fixed(content_w), Sizing::Fit);
-    insert_sep(tree, col, theme, content_w);
+    tree.set_sizing(text_input, Sizing::Fixed(inner_w), Sizing::Fit);
+    insert_sep(tree, col, theme, inner_w);
 
     // -------------------------------------------------------------------
     // Scroll List
@@ -429,11 +449,7 @@ pub fn build_demo(
             empty_text: None,
         },
     );
-    tree.set_sizing(
-        scroll_list,
-        Sizing::Fixed(content_w),
-        Sizing::Fixed(scroll_h),
-    );
+    tree.set_sizing(scroll_list, Sizing::Fixed(inner_w), Sizing::Fixed(scroll_h));
     tree.set_padding(scroll_list, Edges::all(4.0));
 
     for i in 0..50 {
@@ -448,7 +464,7 @@ pub fn build_demo(
             },
         );
     }
-    insert_sep(tree, col, theme, content_w);
+    insert_sep(tree, col, theme, inner_w);
 
     // -------------------------------------------------------------------
     // Collapsible: Live Data
@@ -462,7 +478,7 @@ pub fn build_demo(
             font_size: theme.font_body_size,
         },
     );
-    tree.set_sizing(live_section, Sizing::Fixed(content_w), Sizing::Fit);
+    tree.set_sizing(live_section, Sizing::Fixed(inner_w), Sizing::Fit);
 
     let live_col = tree.insert(
         live_section,
@@ -471,7 +487,7 @@ pub fn build_demo(
             align: CrossAlign::Start,
         },
     );
-    tree.set_sizing(live_col, Sizing::Fixed(content_w), Sizing::Fit);
+    tree.set_sizing(live_col, Sizing::Fixed(inner_w), Sizing::Fit);
 
     // Tick + population.
     tree.insert(
@@ -621,7 +637,7 @@ pub fn build_demo(
             font_size: theme.font_body_size,
         },
     );
-    tree.set_sizing(tooltip_section, Sizing::Fixed(content_w), Sizing::Fit);
+    tree.set_sizing(tooltip_section, Sizing::Fixed(inner_w), Sizing::Fit);
 
     let tooltip_btn = tree.insert(
         tooltip_section,
@@ -683,7 +699,7 @@ pub fn build_demo(
     ]);
     tree.set_tooltip(tooltip_btn, Some(level1));
 
-    root
+    (root, sv)
 }
 
 /// Insert a gold section header label.
@@ -751,7 +767,7 @@ mod tests {
         let live = default_live();
         let screen = default_screen();
         let mut tree = WidgetTree::new();
-        let root = build_demo(&mut tree, &theme, &kb, &live, screen);
+        let (root, _sv) = build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
         let rect = tree.node_rect(root);
         assert!(rect.is_some());
@@ -782,7 +798,7 @@ mod tests {
         };
         let screen = default_screen();
         let mut tree = WidgetTree::new();
-        let root = build_demo(&mut tree, &theme, &kb, &live, screen);
+        let (root, _sv) = build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
         let rect = tree.node_rect(root).unwrap();
         assert_eq!(rect.width, 400.0);
@@ -795,7 +811,7 @@ mod tests {
         let live = default_live();
         let screen = default_screen();
         let mut tree = WidgetTree::new();
-        build_demo(&mut tree, &theme, &kb, &live, screen);
+        build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
         let mut dl = super::super::DrawList::new();
         tree.draw(&mut dl, &mut HeuristicMeasurer);
@@ -817,6 +833,7 @@ mod tests {
                 Widget::Button { .. } => "Button",
                 Widget::RichText { .. } => "RichText",
                 Widget::ScrollList { .. } => "ScrollList",
+                Widget::ScrollView { .. } => "ScrollView",
                 Widget::ProgressBar { .. } => "ProgressBar",
                 Widget::Separator { .. } => "Separator",
                 Widget::Checkbox { .. } => "Checkbox",
@@ -856,7 +873,7 @@ mod tests {
         };
         let screen = default_screen();
         let mut tree = WidgetTree::new();
-        build_demo(&mut tree, &theme, &kb, &live, screen);
+        build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
 
         // Walk tree from roots, collect all widget types.
         let mut types = Vec::new();
@@ -872,6 +889,7 @@ mod tests {
             "Button",
             "RichText",
             "ScrollList",
+            "ScrollView",
             "ProgressBar",
             "Separator",
             "Checkbox",

@@ -94,6 +94,16 @@ pub enum Widget {
         empty_text: Option<String>,
     },
 
+    /// Scrollable viewport for arbitrary content (UI-W06).
+    /// Unlike ScrollList (homogeneous item lists with virtual scrolling),
+    /// ScrollView wraps a child subtree and offsets it by scroll_offset,
+    /// relying on GPU clipping for overflow.
+    ScrollView {
+        scroll_offset: f32,        // pixels from top (0 = top)
+        scrollbar_color: [f32; 4], // thumb sRGB RGBA
+        scrollbar_width: f32,      // track width pixels
+    },
+
     /// Horizontal or vertical bar showing a 0.0..=1.0 fraction (UI-200).
     /// Always stretch-width (fills parent). Height from field.
     ProgressBar {

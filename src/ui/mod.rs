@@ -622,6 +622,12 @@ impl WidgetTree {
         if !node.rect.contains(x, y) {
             return None;
         }
+        // Respect clip rect — widgets scrolled off-screen are invisible and not clickable.
+        if let Some(clip) = &node.clip_rect
+            && !clip.contains(x, y)
+        {
+            return None;
+        }
         // Children drawn on top — check last child first.
         for &child in node.children.iter().rev() {
             if let Some(hit) = self.hit_test_node(child, x, y) {
@@ -661,7 +667,7 @@ impl WidgetTree {
         if let Some(node) = self.arena.get(id) {
             if matches!(
                 node.widget,
-                Widget::Button { .. } | Widget::ScrollList { .. }
+                Widget::Button { .. } | Widget::ScrollList { .. } | Widget::ScrollView { .. }
             ) {
                 out.push(id);
             }
@@ -973,6 +979,26 @@ impl WidgetTree {
 
                 cursor_y += child_total_h + gap;
             }
+
+            // Update Fit-sized Column height to actual laid-out extent.
+            // measure_node reports intrinsic sizes (e.g. ScrollList returns
+            // total content height of all items), but layout resolves
+            // Fixed/Percent sizing on children, so the actual content extent
+            // may be smaller than measured.
+            let is_fit = self
+                .arena
+                .get(id)
+                .is_some_and(|n| matches!(n.height, Sizing::Fit));
+            if is_fit {
+                let actual_content_h = if n > 0 {
+                    (cursor_y - content.y - gap).max(0.0)
+                } else {
+                    0.0
+                };
+                if let Some(node) = self.arena.get_mut(id) {
+                    node.rect.height = actual_content_h + node.padding.vertical();
+                }
+            }
             return;
         }
 
@@ -1036,6 +1062,69 @@ impl WidgetTree {
                     item_h,
                     tm,
                 );
+            }
+            return;
+        }
+
+        // ScrollView: offset children by scroll_offset, clip to viewport (UI-W06).
+        if let Widget::ScrollView {
+            scroll_offset,
+            scrollbar_width,
+            ..
+        } = &node.widget
+        {
+            let so = *scroll_offset;
+            let sbw = *scrollbar_width;
+            let children: Vec<WidgetId> = node.children.clone();
+            let parent_clip = node.clip_rect;
+            let viewport_h = content.height;
+            let content_w = (content.width - sbw).max(0.0);
+
+            // Viewport clip rect — children outside this are GPU-clipped.
+            let viewport_clip = Some(Rect {
+                x: content.x,
+                y: content.y,
+                width: content.width,
+                height: viewport_h,
+            });
+
+            let mut cursor_y = content.y - so;
+            for &child_id in &children {
+                let child_measured = self.measure_node(child_id, tm);
+                let Some(child) = self.arena.get(child_id) else {
+                    continue;
+                };
+                let cp = child.padding;
+                let cm = child.margin;
+                let child_h = match child.height {
+                    Sizing::Fixed(px) => px,
+                    Sizing::Percent(frac) => viewport_h * frac,
+                    Sizing::Fit => child_measured.height + cp.vertical(),
+                };
+                let child_w = match child.width {
+                    Sizing::Fixed(px) => px,
+                    Sizing::Percent(frac) => content_w * frac,
+                    Sizing::Fit => child_measured.width + cp.horizontal(),
+                };
+
+                if let Some(child_node) = self.arena.get_mut(child_id) {
+                    child_node.measured = child_measured;
+                    child_node.rect = Rect {
+                        x: content.x + cm.left,
+                        y: cursor_y + cm.top,
+                        width: child_w,
+                        height: child_h,
+                    };
+                    child_node.clip_rect = Self::merge_clips(
+                        Self::merge_clips(parent_clip, viewport_clip),
+                        child_node.clip_rect,
+                    );
+                    child_node.dirty = false;
+                }
+
+                self.layout_node_children(child_id, tm);
+
+                cursor_y += child_h + cm.vertical();
             }
             return;
         }
@@ -1332,6 +1421,30 @@ impl WidgetTree {
                 }
                 let n = node.children.len();
                 let total_h = Self::scroll_total_height(item_heights, *item_height, n);
+                Size {
+                    width: max_w + scrollbar_width,
+                    height: total_h,
+                }
+            }
+            Widget::ScrollView {
+                scrollbar_width, ..
+            } => {
+                // Width = max child width + scrollbar, height = sum of child heights.
+                let mut max_w: f32 = 0.0;
+                let mut total_h: f32 = 0.0;
+                for &child_id in &node.children {
+                    if let Some(child) = self.arena.get(child_id) {
+                        let child_measured = self.measure_node(child_id, tm);
+                        let child_w = child_measured.width
+                            + child.padding.horizontal()
+                            + child.margin.horizontal();
+                        let child_h = child_measured.height
+                            + child.padding.vertical()
+                            + child.margin.vertical();
+                        max_w = max_w.max(child_w);
+                        total_h += child_h;
+                    }
+                }
                 Size {
                     width: max_w + scrollbar_width,
                     height: total_h,
@@ -2165,9 +2278,68 @@ impl WidgetTree {
 
                 return; // ScrollList handles its own children.
             }
+            Widget::ScrollView {
+                scroll_offset,
+                scrollbar_color,
+                scrollbar_width,
+            } => {
+                // No background panel (transparent viewport).
+                let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
+                let content_y = node.rect.y + node.padding.top;
+                let rect = node.rect;
+                let padding = node.padding;
+                let sb_w = *scrollbar_width;
+                let sb_color = *scrollbar_color;
+                let so = *scroll_offset;
+                let children: Vec<WidgetId> = node.children.clone();
+
+                // Compute total content height from laid-out rects.
+                let mut total_h: f32 = 0.0;
+                for &child in &children {
+                    if let Some(cn) = self.arena.get(child) {
+                        total_h += cn.rect.height + cn.margin.vertical();
+                    }
+                }
+
+                // Draw all children (GPU clipping hides overflow).
+                for &child in &children {
+                    self.draw_node(child, draw_list, tm, tier);
+                }
+
+                // Scrollbar thumb (auto-hides when content fits).
+                if total_h > viewport_h && viewport_h > 0.0 {
+                    let thumb_ratio = viewport_h / total_h;
+                    let thumb_h = (viewport_h * thumb_ratio).max(Self::MIN_THUMB_HEIGHT);
+                    let track_range = viewport_h - thumb_h;
+                    let max_scroll = total_h - viewport_h;
+                    let thumb_y = if max_scroll > 0.0 {
+                        content_y + (so / max_scroll) * track_range
+                    } else {
+                        content_y
+                    };
+                    let sb_x = rect.x + rect.width - sb_w - padding.right;
+
+                    // Scrollbar uses the ScrollView's own clip_rect, not the
+                    // viewport clip, so it remains visible at all times.
+                    draw_list.panels.push(PanelCommand {
+                        x: sb_x,
+                        y: thumb_y,
+                        width: sb_w,
+                        height: thumb_h,
+                        bg_color: sb_color,
+                        border_color: [0.0; 4],
+                        border_width: 0.0,
+                        shadow_width: 0.0,
+                        clip,
+                        tier,
+                    });
+                }
+
+                return; // ScrollView handles its own children.
+            }
         }
 
-        // Draw children on top (non-ScrollList widgets).
+        // Draw children on top (non-ScrollList/ScrollView widgets).
         for &child in &node.children {
             self.draw_node(child, draw_list, tm, tier);
         }
@@ -2242,62 +2414,75 @@ impl WidgetTree {
         count
     }
 
-    /// Compute maximum scroll offset for a ScrollList.
+    /// Compute maximum scroll offset for a ScrollList or ScrollView.
     /// Returns 0.0 if content fits in viewport.
     pub fn max_scroll(&self, id: WidgetId) -> f32 {
         let Some(node) = self.arena.get(id) else {
             return 0.0;
         };
-        let Widget::ScrollList {
-            item_height,
-            item_heights,
-            ..
-        } = &node.widget
-        else {
-            return 0.0;
-        };
         let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
-        let n = node.children.len();
-        let total_h = Self::scroll_total_height(item_heights, *item_height, n);
-        (total_h - viewport_h).max(0.0)
+        match &node.widget {
+            Widget::ScrollList {
+                item_height,
+                item_heights,
+                ..
+            } => {
+                let n = node.children.len();
+                let total_h = Self::scroll_total_height(item_heights, *item_height, n);
+                (total_h - viewport_h).max(0.0)
+            }
+            Widget::ScrollView { .. } => {
+                // Use laid-out rect heights (not measured intrinsic heights) so
+                // fixed-size children like ScrollList contribute their actual
+                // display height, not their full content height.
+                let mut total_h: f32 = 0.0;
+                for &child_id in &node.children {
+                    if let Some(child) = self.arena.get(child_id) {
+                        total_h += child.rect.height + child.margin.vertical();
+                    }
+                }
+                (total_h - viewport_h).max(0.0)
+            }
+            _ => 0.0,
+        }
     }
 
-    /// Set scroll offset for a ScrollList, clamped to valid range.
+    /// Set scroll offset for a ScrollList or ScrollView, clamped to valid range.
     pub fn set_scroll_offset(&mut self, id: WidgetId, offset: f32) {
         let max = self.max_scroll(id);
-        if let Some(node) = self.arena.get_mut(id)
-            && let Widget::ScrollList { scroll_offset, .. } = &mut node.widget
-        {
-            *scroll_offset = offset.clamp(0.0, max);
+        if let Some(node) = self.arena.get_mut(id) {
+            match &mut node.widget {
+                Widget::ScrollList { scroll_offset, .. }
+                | Widget::ScrollView { scroll_offset, .. } => {
+                    *scroll_offset = offset.clamp(0.0, max);
+                }
+                _ => {}
+            }
         }
         self.mark_dirty(id);
     }
 
-    /// Read current scroll offset for a ScrollList (0.0 if not a ScrollList).
+    /// Read current scroll offset for a ScrollList or ScrollView.
     pub fn scroll_offset(&self, id: WidgetId) -> f32 {
         self.arena
             .get(id)
-            .and_then(|n| {
-                if let Widget::ScrollList { scroll_offset, .. } = &n.widget {
-                    Some(*scroll_offset)
-                } else {
-                    None
-                }
+            .and_then(|n| match &n.widget {
+                Widget::ScrollList { scroll_offset, .. }
+                | Widget::ScrollView { scroll_offset, .. } => Some(*scroll_offset),
+                _ => None,
             })
             .unwrap_or(0.0)
     }
 
-    /// Scroll a ScrollList by a delta (positive = down).
+    /// Scroll a ScrollList or ScrollView by a delta (positive = down).
     pub fn scroll_by(&mut self, id: WidgetId, delta: f32) {
         let current = self
             .arena
             .get(id)
-            .and_then(|n| {
-                if let Widget::ScrollList { scroll_offset, .. } = &n.widget {
-                    Some(*scroll_offset)
-                } else {
-                    None
-                }
+            .and_then(|n| match &n.widget {
+                Widget::ScrollList { scroll_offset, .. }
+                | Widget::ScrollView { scroll_offset, .. } => Some(*scroll_offset),
+                _ => None,
             })
             .unwrap_or(0.0);
         self.set_scroll_offset(id, current + delta);
@@ -2448,6 +2633,11 @@ impl WidgetTree {
             } => {
                 tab_color[3] *= opacity;
                 active_color[3] *= opacity;
+            }
+            Widget::ScrollView {
+                scrollbar_color, ..
+            } => {
+                scrollbar_color[3] *= opacity;
             }
         }
     }
@@ -3662,7 +3852,7 @@ mod tests {
             height: 600.0,
         };
         let mut tree = WidgetTree::new();
-        demo::build_demo(&mut tree, &theme, &kb, &live, screen);
+        demo::build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
 
         let mut dl = DrawList::new();
@@ -3890,7 +4080,7 @@ mod tests {
             height: 600.0,
         };
         let mut tree = WidgetTree::new();
-        demo::build_demo(&mut tree, &theme, &kb, &live, screen);
+        demo::build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
 
         let mut dl = DrawList::new();
@@ -4206,7 +4396,7 @@ mod tests {
             height: 600.0,
         };
         let mut tree = WidgetTree::new();
-        demo::build_demo(&mut tree, &theme, &kb, &live, screen);
+        demo::build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
         assert!(tree.widget_count() > 0, "demo tree should have widgets");
     }
 
@@ -4448,7 +4638,7 @@ mod tests {
             height: 600.0,
         };
         let mut tree = WidgetTree::new();
-        demo::build_demo(&mut tree, &theme, &kb, &live, screen);
+        demo::build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
 
         // Demo is a single root panel.

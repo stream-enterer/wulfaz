@@ -234,7 +234,9 @@ impl UiState {
                     && let Some(node) = tree.get(widget_id)
                     && matches!(
                         node.widget,
-                        Widget::Button { .. } | Widget::ScrollList { .. }
+                        Widget::Button { .. }
+                            | Widget::ScrollList { .. }
+                            | Widget::ScrollView { .. }
                     )
                 {
                     self.focused = Some(widget_id);
@@ -365,20 +367,57 @@ impl UiState {
             }
         }
 
+        // ScrollView keyboard navigation.
+        if let Some(focused_id) = self.focused
+            && let Some(node) = tree.get(focused_id)
+            && matches!(node.widget, Widget::ScrollView { .. })
+        {
+            let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
+            match key {
+                KeyCode::ArrowUp => {
+                    tree.scroll_by(focused_id, -SCROLL_SPEED);
+                    return true;
+                }
+                KeyCode::ArrowDown => {
+                    tree.scroll_by(focused_id, SCROLL_SPEED);
+                    return true;
+                }
+                KeyCode::PageUp => {
+                    tree.scroll_by(focused_id, -viewport_h);
+                    return true;
+                }
+                KeyCode::PageDown => {
+                    tree.scroll_by(focused_id, viewport_h);
+                    return true;
+                }
+                KeyCode::Home => {
+                    tree.set_scroll_offset(focused_id, 0.0);
+                    return true;
+                }
+                KeyCode::End => {
+                    let max = tree.max_scroll(focused_id);
+                    tree.set_scroll_offset(focused_id, max);
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
         // Other keys go to focused widget (if any).
         self.focused.is_some()
     }
 
     /// Handle scroll wheel. Returns true if consumed by a widget under cursor.
-    pub fn handle_scroll(&mut self, tree: &mut WidgetTree, delta: f32) -> bool {
+    /// `wheel_delta` is the raw wheel value: positive = wheel-up, negative = wheel-down.
+    pub fn handle_scroll(&mut self, tree: &mut WidgetTree, wheel_delta: f32) -> bool {
         let hit = tree.hit_test(self.cursor.0, self.cursor.1);
         if let Some(widget_id) = hit {
-            // Walk up to find nearest ScrollList ancestor (or self).
-            if let Some(scroll_id) = Self::find_scroll_list_ancestor(tree, widget_id) {
-                tree.scroll_by(scroll_id, delta * SCROLL_SPEED);
+            if let Some(scroll_id) = Self::find_scrollable_ancestor(tree, widget_id) {
+                // Negate: wheel-up (positive) → decrease offset (scroll content up).
+                let scroll_delta = -wheel_delta * SCROLL_SPEED;
+                tree.scroll_by(scroll_id, scroll_delta);
                 return true;
             }
-            let _ = UiEvent::Scroll(delta);
             return true;
         }
         false
@@ -612,20 +651,30 @@ impl UiState {
         None
     }
 
-    /// Walk from `start` up the parent chain to find a ScrollList widget.
-    fn find_scroll_list_ancestor(tree: &WidgetTree, start: WidgetId) -> Option<WidgetId> {
+    /// Walk from `start` up the parent chain to find a scrollable widget.
+    /// ScrollView takes priority over a nested ScrollList so that wheel
+    /// events always go to the outer viewport when both are present.
+    fn find_scrollable_ancestor(tree: &WidgetTree, start: WidgetId) -> Option<WidgetId> {
         let mut current = Some(start);
+        let mut found_scroll_list: Option<WidgetId> = None;
         while let Some(id) = current {
             let node = tree.get(id)?;
-            if matches!(node.widget, Widget::ScrollList { .. }) {
-                return Some(id);
+            match node.widget {
+                Widget::ScrollView { .. } => return Some(id),
+                Widget::ScrollList { .. } => {
+                    if found_scroll_list.is_none() {
+                        found_scroll_list = Some(id);
+                    }
+                }
+                _ => {}
             }
             current = node.parent;
         }
-        None
+        found_scroll_list
     }
 
-    /// Check if a mouse press at (x, y) is on a ScrollList's scrollbar area.
+    /// Check if a mouse press at (x, y) is on a scrollable widget's scrollbar area.
+    /// Works for both ScrollList and ScrollView.
     /// If so, return a ScrollDrag to begin scrollbar dragging.
     fn try_start_scrollbar_drag(
         tree: &WidgetTree,
@@ -634,20 +683,38 @@ impl UiState {
         y: f32,
     ) -> Option<ScrollDrag> {
         let node = tree.get(widget_id)?;
-        let Widget::ScrollList {
-            item_height,
-            scroll_offset,
-            scrollbar_width,
-            item_heights,
-            ..
-        } = &node.widget
-        else {
-            return None;
-        };
 
-        let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
-        let n = node.children.len();
-        let total_h = WidgetTree::scroll_total_height(item_heights, *item_height, n);
+        // Extract scroll params from either ScrollList or ScrollView.
+        let (scroll_offset_val, scrollbar_width_val, viewport_h, total_h) = match &node.widget {
+            Widget::ScrollList {
+                item_height,
+                scroll_offset,
+                scrollbar_width,
+                item_heights,
+                ..
+            } => {
+                let vh = (node.rect.height - node.padding.vertical()).max(0.0);
+                let n = node.children.len();
+                let th = WidgetTree::scroll_total_height(item_heights, *item_height, n);
+                (*scroll_offset, *scrollbar_width, vh, th)
+            }
+            Widget::ScrollView {
+                scroll_offset,
+                scrollbar_width,
+                ..
+            } => {
+                let vh = (node.rect.height - node.padding.vertical()).max(0.0);
+                // Sum children's laid-out rect heights (not measured intrinsic heights).
+                let th: f32 = node
+                    .children
+                    .iter()
+                    .filter_map(|&cid| tree.get(cid))
+                    .map(|c| c.rect.height + c.margin.vertical())
+                    .sum();
+                (*scroll_offset, *scrollbar_width, vh, th)
+            }
+            _ => return None,
+        };
 
         // No scrollbar if content fits.
         if total_h <= viewport_h {
@@ -655,12 +722,12 @@ impl UiState {
         }
 
         // Check if click is in the scrollbar area (rightmost scrollbar_width pixels).
-        let sb_x = node.rect.x + node.rect.width - scrollbar_width - node.padding.right;
+        let sb_x = node.rect.x + node.rect.width - scrollbar_width_val - node.padding.right;
         if x >= sb_x {
             return Some(ScrollDrag {
                 widget: widget_id,
                 start_mouse_y: y,
-                start_scroll_offset: *scroll_offset,
+                start_scroll_offset: scroll_offset_val,
                 content_height: total_h,
                 viewport_height: viewport_h,
             });
@@ -1330,7 +1397,7 @@ mod tests {
             height: 600.0,
         };
         let mut tree = crate::ui::WidgetTree::new();
-        let root = crate::ui::demo::build_demo(&mut tree, &theme, &kb, &live, screen);
+        let (root, _sv) = crate::ui::demo::build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
 
         // Demo has a single root panel.
         assert_eq!(tree.roots().len(), 1);

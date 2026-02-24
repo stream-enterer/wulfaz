@@ -15,6 +15,8 @@ pub struct TextVertex {
     pub position: [f32; 2],
     pub uv: [f32; 2],
     pub color: [f32; 4],
+    pub clip_min: [f32; 2],
+    pub clip_max: [f32; 2],
 }
 
 #[repr(C)]
@@ -364,6 +366,18 @@ impl FontRenderer {
                             shader_location: 2,
                             format: wgpu::VertexFormat::Float32x4,
                         },
+                        // clip_min
+                        wgpu::VertexAttribute {
+                            offset: 32,
+                            shader_location: 3,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        // clip_max
+                        wgpu::VertexAttribute {
+                            offset: 40,
+                            shader_location: 4,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
                     ],
                 }],
                 compilation_options: Default::default(),
@@ -455,29 +469,32 @@ impl FontRenderer {
     }
 
     /// Append text vertices with a specific font family and size.
-    /// Used by UI widget text commands.
+    /// Used by UI widget text commands. `clip` is `[min, max]` in pixels.
     pub fn prepare_text_with_font(
         &mut self,
         text: &str,
-        x: f32,
-        y: f32,
+        pos: [f32; 2],
         color: [f32; 4],
         family_name: &str,
         font_size_px: f32,
+        clip: [[f32; 2]; 2],
     ) {
-        self.prepare_text_shaped(text, x, y, color, family_name, font_size_px);
+        self.prepare_text_shaped(text, pos, color, family_name, font_size_px, clip);
     }
 
     /// Append text vertices for a rich text block with per-span styles (UI-R01).
     /// Uses cosmic-text `set_rich_text()` for mixed families/colors in one buffer.
     /// Per-glyph color is read from `glyph.color_opt` in the layout output.
+    /// `clip` is `[min, max]` in pixels.
     pub fn prepare_rich_text(
         &mut self,
         spans: &[(String, [f32; 4], &str)], // (text, color_srgb, family_name)
-        x: f32,
-        y: f32,
+        pos: [f32; 2],
         font_size_px: f32,
+        clip: [[f32; 2]; 2],
     ) {
+        let [x, y] = pos;
+        let [clip_min, clip_max] = clip;
         if spans.is_empty() {
             return;
         }
@@ -584,32 +601,44 @@ impl FontRenderer {
                 position: [x0, y0],
                 uv: [info.u0, info.v0],
                 color,
+                clip_min,
+                clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x1, y0],
                 uv: [info.u1, info.v0],
                 color,
+                clip_min,
+                clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x0, y1],
                 uv: [info.u0, info.v1],
                 color,
+                clip_min,
+                clip_max,
             });
 
             self.frame_vertices.push(TextVertex {
                 position: [x1, y0],
                 uv: [info.u1, info.v0],
                 color,
+                clip_min,
+                clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x1, y1],
                 uv: [info.u1, info.v1],
                 color,
+                clip_min,
+                clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x0, y1],
                 uv: [info.u0, info.v1],
                 color,
+                clip_min,
+                clip_max,
             });
         }
     }
@@ -817,12 +846,14 @@ impl FontRenderer {
     fn prepare_text_shaped(
         &mut self,
         text: &str,
-        x: f32,
-        y: f32,
+        pos: [f32; 2],
         color: [f32; 4],
         family_name: &str,
         font_size_px: f32,
+        clip: [[f32; 2]; 2],
     ) {
+        let [x, y] = pos;
+        let [clip_min, clip_max] = clip;
         // Estimate line_height proportional to font size
         let line_height = (font_size_px * self.metrics.line_height / self.font_size_px).ceil();
         let cosmic_metrics = CosmicMetrics::new(font_size_px, line_height);
@@ -892,32 +923,44 @@ impl FontRenderer {
                 position: [x0, y0],
                 uv: [info.u0, info.v0],
                 color,
+                clip_min,
+                clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x1, y0],
                 uv: [info.u1, info.v0],
                 color,
+                clip_min,
+                clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x0, y1],
                 uv: [info.u0, info.v1],
                 color,
+                clip_min,
+                clip_max,
             });
 
             self.frame_vertices.push(TextVertex {
                 position: [x1, y0],
                 uv: [info.u1, info.v0],
                 color,
+                clip_min,
+                clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x1, y1],
                 uv: [info.u1, info.v1],
                 color,
+                clip_min,
+                clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x0, y1],
                 uv: [info.u0, info.v1],
                 color,
+                clip_min,
+                clip_max,
             });
         }
     }
@@ -956,36 +999,52 @@ impl FontRenderer {
             let x1 = x0 + glyph.width as f32;
             let y1 = y0 + glyph.height as f32;
 
+            // Map text is never clipped — use sentinel bounds.
+            let no_clip_min = [0.0_f32, 0.0];
+            let no_clip_max = [100000.0_f32, 100000.0];
+
             self.frame_vertices.push(TextVertex {
                 position: [x0, y0],
                 uv: [glyph.u0, glyph.v0],
                 color,
+                clip_min: no_clip_min,
+                clip_max: no_clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x1, y0],
                 uv: [glyph.u1, glyph.v0],
                 color,
+                clip_min: no_clip_min,
+                clip_max: no_clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x0, y1],
                 uv: [glyph.u0, glyph.v1],
                 color,
+                clip_min: no_clip_min,
+                clip_max: no_clip_max,
             });
 
             self.frame_vertices.push(TextVertex {
                 position: [x1, y0],
                 uv: [glyph.u1, glyph.v0],
                 color,
+                clip_min: no_clip_min,
+                clip_max: no_clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x1, y1],
                 uv: [glyph.u1, glyph.v1],
                 color,
+                clip_min: no_clip_min,
+                clip_max: no_clip_max,
             });
             self.frame_vertices.push(TextVertex {
                 position: [x0, y1],
                 uv: [glyph.u0, glyph.v1],
                 color,
+                clip_min: no_clip_min,
+                clip_max: no_clip_max,
             });
 
             pen_x += grid.h_advance;

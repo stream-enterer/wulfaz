@@ -8,6 +8,8 @@ pub struct PanelVertex {
     pub border_color: [f32; 4],
     pub border_width: f32,
     pub shadow_width: f32,
+    pub clip_min: [f32; 2],
+    pub clip_max: [f32; 2],
 }
 
 #[repr(C)]
@@ -128,6 +130,18 @@ impl PanelRenderer {
                             shader_location: 6,
                             format: wgpu::VertexFormat::Float32,
                         },
+                        // clip_min
+                        wgpu::VertexAttribute {
+                            offset: 64,
+                            shader_location: 7,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        // clip_max
+                        wgpu::VertexAttribute {
+                            offset: 72,
+                            shader_location: 8,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
                     ],
                 }],
                 compilation_options: Default::default(),
@@ -193,6 +207,8 @@ impl PanelRenderer {
         border_color: [f32; 4],
         border_width: f32,
         shadow_width: f32,
+        clip_min: [f32; 2],
+        clip_max: [f32; 2],
     ) {
         let x0 = x;
         let y0 = y;
@@ -208,6 +224,8 @@ impl PanelRenderer {
             border_color,
             border_width,
             shadow_width,
+            clip_min,
+            clip_max,
         };
 
         self.frame_vertices.push(make(x0, y0, 0.0, 0.0));

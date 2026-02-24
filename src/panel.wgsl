@@ -12,6 +12,8 @@ struct VertexInput {
     @location(4) border_color: vec4<f32>,
     @location(5) border_width: f32,
     @location(6) shadow_width: f32,
+    @location(7) clip_min: vec2<f32>,
+    @location(8) clip_max: vec2<f32>,
 }
 
 struct VertexOutput {
@@ -22,6 +24,9 @@ struct VertexOutput {
     @location(3) border_color: vec4<f32>,
     @location(4) border_width: f32,
     @location(5) shadow_width: f32,
+    @location(6) v_clip_min: vec2<f32>,
+    @location(7) v_clip_max: vec2<f32>,
+    @location(8) pixel_pos: vec2<f32>,
 }
 
 @vertex
@@ -34,6 +39,9 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.border_color = in.border_color;
     out.border_width = in.border_width;
     out.shadow_width = in.shadow_width;
+    out.v_clip_min = in.clip_min;
+    out.v_clip_max = in.clip_max;
+    out.pixel_pos = in.position;
     return out;
 }
 
@@ -55,6 +63,12 @@ fn srgb_to_linear3(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Clip rect enforcement — discard fragments outside clip bounds.
+    if in.pixel_pos.x < in.v_clip_min.x || in.pixel_pos.x > in.v_clip_max.x ||
+       in.pixel_pos.y < in.v_clip_min.y || in.pixel_pos.y > in.v_clip_max.y {
+        discard;
+    }
+
     // Distance to nearest edge in pixels
     let dx = min(in.uv.x * in.size_px.x, (1.0 - in.uv.x) * in.size_px.x);
     let dy = min(in.uv.y * in.size_px.y, (1.0 - in.uv.y) * in.size_px.y);

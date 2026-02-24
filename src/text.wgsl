@@ -15,12 +15,17 @@ struct VertexInput {
     @location(0) position: vec2<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) clip_min: vec2<f32>,
+    @location(4) clip_max: vec2<f32>,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) v_clip_min: vec2<f32>,
+    @location(3) v_clip_max: vec2<f32>,
+    @location(4) pixel_pos: vec2<f32>,
 }
 
 @vertex
@@ -29,6 +34,9 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.clip_position = uniforms.projection * vec4<f32>(in.position, 0.0, 1.0);
     out.uv = in.uv;
     out.color = in.color;
+    out.v_clip_min = in.clip_min;
+    out.v_clip_max = in.clip_max;
+    out.pixel_pos = in.position;
     return out;
 }
 
@@ -55,6 +63,12 @@ fn luminance(c: vec3<f32>) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Clip rect enforcement — discard fragments outside clip bounds.
+    if in.pixel_pos.x < in.v_clip_min.x || in.pixel_pos.x > in.v_clip_max.x ||
+       in.pixel_pos.y < in.v_clip_min.y || in.pixel_pos.y > in.v_clip_max.y {
+        discard;
+    }
+
     // Sample glyph alpha from R8Unorm atlas
     let a = textureSample(atlas_tex, atlas_sampler, in.uv).r;
 

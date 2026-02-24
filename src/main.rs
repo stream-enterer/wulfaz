@@ -359,6 +359,8 @@ struct App {
     panel_manager: ui::PanelManager,
     // Widget showcase (UI-DEMO)
     show_demo: bool,
+    demo_scroll_offset: f32,
+    demo_scroll_view_id: Option<ui::WidgetId>,
     // Performance metrics (UI-505) — stores previous frame's metrics.
     ui_perf: ui::UiPerfMetrics,
 }
@@ -947,6 +949,11 @@ impl ApplicationHandler for App {
                                 .player
                                 .and_then(|p| self.world.body.names.get(&p))
                                 .map(|n| n.value.as_str());
+                            // Persist demo scroll offset before destroying the tree,
+                            // since handle_scroll may have modified it during this frame.
+                            if let Some(sv_id) = self.demo_scroll_view_id {
+                                self.demo_scroll_offset = self.ui_tree.scroll_offset(sv_id);
+                            }
                             self.ui_tree = ui::WidgetTree::new();
                             self.ui_tree
                                 .set_scroll_row_alt_alpha(self.ui_theme.scroll_row_alt_alpha);
@@ -1203,14 +1210,16 @@ impl ApplicationHandler for App {
                                     tick: self.world.tick.0,
                                     population: self.world.alive.len(),
                                 };
-                                let demo_id = ui::demo::build_demo(
+                                let (demo_id, demo_sv) = ui::demo::build_demo(
                                     &mut self.ui_tree,
                                     &self.ui_theme,
                                     &self.keybindings,
                                     &live,
                                     screen_size,
+                                    self.demo_scroll_offset,
                                 );
                                 demo_root_id = Some(demo_id);
+                                self.demo_scroll_view_id = Some(demo_sv);
                             }
 
                             // Pause overlay (UI-105): dim layer when paused.
@@ -1320,6 +1329,10 @@ impl ApplicationHandler for App {
                             let render_start = Instant::now();
                             panel.begin_frame(&gpu.queue, screen_w, screen_h);
                             let no_border = [0.0_f32; 4];
+                            let sw = screen_w as f32;
+                            let sh = screen_h as f32;
+                            let no_clip_min = [0.0_f32, 0.0];
+                            let no_clip_max = [sw, sh];
 
                             // Map overlay: hover tile highlight (UI-I02).
                             {
@@ -1343,6 +1356,8 @@ impl ApplicationHandler for App {
                                         no_border,
                                         0.0,
                                         0.0,
+                                        no_clip_min,
+                                        no_clip_max,
                                     );
                                 }
                             }
@@ -1369,6 +1384,8 @@ impl ApplicationHandler for App {
                                         no_border,
                                         0.0,
                                         0.0,
+                                        no_clip_min,
+                                        no_clip_max,
                                     );
                                 }
 
@@ -1392,6 +1409,8 @@ impl ApplicationHandler for App {
                                             no_border,
                                             0.0,
                                             0.0,
+                                            no_clip_min,
+                                            no_clip_max,
                                         );
                                     }
                                 }
@@ -1414,6 +1433,10 @@ impl ApplicationHandler for App {
                                 // Panels for this root
                                 let ps = panel.pending_vertex_count();
                                 for cmd in &draw_list.panels[slice.panels.clone()] {
+                                    let (cmin, cmax) = match &cmd.clip {
+                                        Some(r) => ([r.x, r.y], [r.x + r.width, r.y + r.height]),
+                                        None => (no_clip_min, no_clip_max),
+                                    };
                                     panel.add_panel(
                                         cmd.x,
                                         cmd.y,
@@ -1423,6 +1446,8 @@ impl ApplicationHandler for App {
                                         cmd.border_color,
                                         cmd.border_width,
                                         cmd.shadow_width,
+                                        cmin,
+                                        cmax,
                                     );
                                 }
                                 let pe = panel.pending_vertex_count();
@@ -1430,16 +1455,24 @@ impl ApplicationHandler for App {
                                 // Text for this root
                                 let ts = font.pending_vertex_count();
                                 for cmd in &draw_list.texts[slice.texts.clone()] {
+                                    let (cmin, cmax) = match &cmd.clip {
+                                        Some(r) => ([r.x, r.y], [r.x + r.width, r.y + r.height]),
+                                        None => (no_clip_min, no_clip_max),
+                                    };
                                     font.prepare_text_with_font(
                                         &cmd.text,
-                                        cmd.x,
-                                        cmd.y,
+                                        [cmd.x, cmd.y],
                                         cmd.color,
                                         cmd.font_family.family_name(),
                                         cmd.font_size,
+                                        [cmin, cmax],
                                     );
                                 }
                                 for cmd in &draw_list.rich_texts[slice.rich_texts.clone()] {
+                                    let (cmin, cmax) = match &cmd.clip {
+                                        Some(r) => ([r.x, r.y], [r.x + r.width, r.y + r.height]),
+                                        None => (no_clip_min, no_clip_max),
+                                    };
                                     let spans: Vec<(String, [f32; 4], &str)> = cmd
                                         .spans
                                         .iter()
@@ -1447,7 +1480,12 @@ impl ApplicationHandler for App {
                                             (s.text.clone(), s.color, s.font_family.family_name())
                                         })
                                         .collect();
-                                    font.prepare_rich_text(&spans, cmd.x, cmd.y, cmd.font_size);
+                                    font.prepare_rich_text(
+                                        &spans,
+                                        [cmd.x, cmd.y],
+                                        cmd.font_size,
+                                        [cmin, cmax],
+                                    );
                                 }
                                 let te = font.pending_vertex_count();
 
@@ -1569,6 +1607,8 @@ fn main() {
         modal_stack: ui::ModalStack::new(),
         panel_manager: ui::PanelManager::new(),
         show_demo: std::env::args().any(|a| a == "--ui-demo"),
+        demo_scroll_offset: 0.0,
+        demo_scroll_view_id: None,
         ui_perf: ui::UiPerfMetrics::default(),
     };
     event_loop.run_app(&mut app).expect("run event loop");
