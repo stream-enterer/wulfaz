@@ -1076,63 +1076,8 @@ impl ApplicationHandler for App {
                             self.camera.x = self.camera.x.clamp(0, max_cam_x);
                             self.camera.y = self.camera.y.clamp(0, max_cam_y);
 
-                            // Build hover tooltip if cursor is over a map tile (UI-I01b).
                             let now = Instant::now();
                             let mut hover_tooltip_id = None;
-                            {
-                                let px = self.cursor_pos.x as f32;
-                                let py = self.cursor_pos.y as f32;
-                                let vx = (px - self.map_origin.0) / self.map_cell_w;
-                                let vy = (py - self.map_origin.1) / self.map_cell_h;
-                                if vx >= 0.0
-                                    && vy >= 0.0
-                                    && (vx as usize) < viewport_cols
-                                    && (vy as usize) < viewport_rows
-                                {
-                                    let tile_x = self.camera.x + vx as i32;
-                                    let tile_y = self.camera.y + vy as i32;
-                                    if let Some(info) =
-                                        collect_hover_info(&self.world, tile_x, tile_y)
-                                    {
-                                        let tooltip_id = ui::build_hover_tooltip(
-                                            &mut self.ui_tree,
-                                            &self.ui_theme,
-                                            &info,
-                                            (px, py),
-                                            screen_size,
-                                            font,
-                                        );
-                                        hover_tooltip_id = Some(tooltip_id);
-
-                                        // Start fade-in only on first appearance (no previous
-                                        // tile), not when sliding between adjacent tiles.
-                                        let current_tile = (tile_x, tile_y);
-                                        let first_hover = self.last_hover_tile.is_none();
-                                        if self.last_hover_tile != Some(current_tile) {
-                                            self.last_hover_tile = Some(current_tile);
-                                            if first_hover {
-                                                self.animator.start(
-                                                    "hover_tooltip",
-                                                    ui::Anim {
-                                                        from: 0.0,
-                                                        to: 1.0,
-                                                        duration: std::time::Duration::from_millis(
-                                                            self.ui_theme.anim_tooltip_fade_ms,
-                                                        ),
-                                                        easing: ui::Easing::EaseOut,
-                                                        ..ui::Anim::DEFAULT
-                                                    },
-                                                    now,
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                if hover_tooltip_id.is_none() {
-                                    self.last_hover_tile = None;
-                                    self.animator.remove("hover_tooltip");
-                                }
-                            }
 
                             // Build entity inspector if selected (UI-I01d).
                             self.inspector_close_id = None;
@@ -1284,7 +1229,69 @@ impl ApplicationHandler for App {
                                 }
                             }
 
-                            // Apply hover tooltip fade-in (UI-W05).
+                            // Build hover tooltip after all UI is laid out, gated
+                            // on cursor not being over any UI widget (UI-I01b).
+                            let cursor_over_ui = self
+                                .ui_tree
+                                .hit_test(self.cursor_pos.x as f32, self.cursor_pos.y as f32)
+                                .is_some();
+                            if !cursor_over_ui {
+                                let px = self.cursor_pos.x as f32;
+                                let py = self.cursor_pos.y as f32;
+                                let vx = (px - self.map_origin.0) / self.map_cell_w;
+                                let vy = (py - self.map_origin.1) / self.map_cell_h;
+                                if vx >= 0.0
+                                    && vy >= 0.0
+                                    && (vx as usize) < viewport_cols
+                                    && (vy as usize) < viewport_rows
+                                {
+                                    let tile_x = self.camera.x + vx as i32;
+                                    let tile_y = self.camera.y + vy as i32;
+                                    if let Some(info) =
+                                        collect_hover_info(&self.world, tile_x, tile_y)
+                                    {
+                                        let tooltip_id = ui::build_hover_tooltip(
+                                            &mut self.ui_tree,
+                                            &self.ui_theme,
+                                            &info,
+                                            (px, py),
+                                            screen_size,
+                                            font,
+                                        );
+                                        hover_tooltip_id = Some(tooltip_id);
+
+                                        // Start fade-in only on first appearance (no previous
+                                        // tile), not when sliding between adjacent tiles.
+                                        let current_tile = (tile_x, tile_y);
+                                        let first_hover = self.last_hover_tile.is_none();
+                                        if self.last_hover_tile != Some(current_tile) {
+                                            self.last_hover_tile = Some(current_tile);
+                                            if first_hover {
+                                                self.animator.start(
+                                                    "hover_tooltip",
+                                                    ui::Anim {
+                                                        from: 0.0,
+                                                        to: 1.0,
+                                                        duration: std::time::Duration::from_millis(
+                                                            self.ui_theme.anim_tooltip_fade_ms,
+                                                        ),
+                                                        easing: ui::Easing::EaseOut,
+                                                        ..ui::Anim::DEFAULT
+                                                    },
+                                                    now,
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if hover_tooltip_id.is_none() {
+                                self.last_hover_tile = None;
+                                self.animator.remove("hover_tooltip");
+                            }
+                            if hover_tooltip_id.is_some() {
+                                self.ui_tree.layout(screen_size, font);
+                            }
                             if let Some(tooltip_id) = hover_tooltip_id {
                                 let opacity =
                                     self.animator.get("hover_tooltip", now).unwrap_or(1.0);
@@ -1355,7 +1362,8 @@ impl ApplicationHandler for App {
                             let no_clip_max = [sw, sh];
 
                             // Map overlay: hover tile highlight (UI-I02).
-                            {
+                            // Suppressed when cursor is over a UI widget.
+                            if !cursor_over_ui {
                                 let px = self.cursor_pos.x as f32;
                                 let py = self.cursor_pos.y as f32;
                                 let vx = (px - self.map_origin.0) / mcw;
