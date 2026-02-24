@@ -49,13 +49,20 @@ pub fn build_demo(
         },
     );
     tree.set_sizing(root, Sizing::Fixed(panel_w), Sizing::Fixed(panel_h));
-    tree.set_padding(root, Edges::all(theme.panel_padding));
+    // Panel keeps only left padding — the ScrollView handles the rest so
+    // its scrollbar track sits flush against the panel border on three edges.
+    tree.set_padding(
+        root,
+        Edges {
+            left: theme.panel_padding,
+            ..Edges::ZERO
+        },
+    );
 
-    // ScrollView fills the panel content box, providing overflow scrolling.
-    // Width extends into the panel's right padding so the scrollbar sits flush
-    // against the panel's inner border edge.
-    let scroll_view_h = panel_h - theme.panel_padding * 2.0;
-    let sv_w = content_w + theme.panel_padding;
+    // ScrollView fills the panel vertically and extends to the right border.
+    // Its own top/bottom padding keeps content inset from the border.
+    let sv_w = panel_w - theme.panel_padding; // left padding to right edge
+    let sv_h = panel_h;
     let sv = tree.insert(
         root,
         Widget::ScrollView {
@@ -64,7 +71,15 @@ pub fn build_demo(
             scrollbar_width: theme.scrollbar_width,
         },
     );
-    tree.set_sizing(sv, Sizing::Fixed(sv_w), Sizing::Fixed(scroll_view_h));
+    tree.set_sizing(sv, Sizing::Fixed(sv_w), Sizing::Fixed(sv_h));
+    tree.set_padding(
+        sv,
+        Edges {
+            top: theme.panel_padding,
+            bottom: theme.panel_padding,
+            ..Edges::ZERO
+        },
+    );
 
     // Inner content width: reserve space for scrollbar.
     let inner_w = content_w - theme.scrollbar_width;

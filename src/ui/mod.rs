@@ -2285,7 +2285,6 @@ impl WidgetTree {
             } => {
                 // No background panel (transparent viewport).
                 let viewport_h = (node.rect.height - node.padding.vertical()).max(0.0);
-                let content_y = node.rect.y + node.padding.top;
                 let rect = node.rect;
                 let padding = node.padding;
                 let sb_w = *scrollbar_width;
@@ -2307,15 +2306,18 @@ impl WidgetTree {
                 }
 
                 // Scrollbar thumb (auto-hides when content fits).
+                // Track spans the full rect height (ignoring padding) so
+                // the scrollbar can sit flush against the parent border.
                 if total_h > viewport_h && viewport_h > 0.0 {
+                    let track_h = rect.height;
                     let thumb_ratio = viewport_h / total_h;
-                    let thumb_h = (viewport_h * thumb_ratio).max(Self::MIN_THUMB_HEIGHT);
-                    let track_range = viewport_h - thumb_h;
+                    let thumb_h = (track_h * thumb_ratio).max(Self::MIN_THUMB_HEIGHT);
+                    let track_range = track_h - thumb_h;
                     let max_scroll = total_h - viewport_h;
                     let thumb_y = if max_scroll > 0.0 {
-                        content_y + (so / max_scroll) * track_range
+                        rect.y + (so / max_scroll) * track_range
                     } else {
-                        content_y
+                        rect.y
                     };
                     let sb_x = rect.x + rect.width - sb_w - padding.right;
 

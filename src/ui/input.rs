@@ -51,6 +51,9 @@ struct ScrollDrag {
     start_scroll_offset: f32,
     content_height: f32,
     viewport_height: f32,
+    /// Visual scrollbar track height (may exceed viewport_height when the
+    /// scrollbar extends into parent padding, e.g. ScrollView).
+    track_height: f32,
 }
 
 /// Entry in the active tooltip stack (UI-W04).
@@ -157,9 +160,9 @@ impl UiState {
         // Active scrollbar drag — update scroll offset from mouse position.
         if let Some(ref drag) = self.scroll_drag {
             let delta_y = y - drag.start_mouse_y;
-            let thumb_h = (drag.viewport_height * drag.viewport_height / drag.content_height)
+            let thumb_h = (drag.track_height * drag.viewport_height / drag.content_height)
                 .max(WidgetTree::MIN_THUMB_HEIGHT);
-            let available_track = drag.viewport_height - thumb_h;
+            let available_track = drag.track_height - thumb_h;
             if available_track > 0.0 {
                 let max_scroll = drag.content_height - drag.viewport_height;
                 let new_offset = drag.start_scroll_offset + delta_y * max_scroll / available_track;
@@ -685,36 +688,39 @@ impl UiState {
         let node = tree.get(widget_id)?;
 
         // Extract scroll params from either ScrollList or ScrollView.
-        let (scroll_offset_val, scrollbar_width_val, viewport_h, total_h) = match &node.widget {
-            Widget::ScrollList {
-                item_height,
-                scroll_offset,
-                scrollbar_width,
-                item_heights,
-                ..
-            } => {
-                let vh = (node.rect.height - node.padding.vertical()).max(0.0);
-                let n = node.children.len();
-                let th = WidgetTree::scroll_total_height(item_heights, *item_height, n);
-                (*scroll_offset, *scrollbar_width, vh, th)
-            }
-            Widget::ScrollView {
-                scroll_offset,
-                scrollbar_width,
-                ..
-            } => {
-                let vh = (node.rect.height - node.padding.vertical()).max(0.0);
-                // Sum children's laid-out rect heights (not measured intrinsic heights).
-                let th: f32 = node
-                    .children
-                    .iter()
-                    .filter_map(|&cid| tree.get(cid))
-                    .map(|c| c.rect.height + c.margin.vertical())
-                    .sum();
-                (*scroll_offset, *scrollbar_width, vh, th)
-            }
-            _ => return None,
-        };
+        let (scroll_offset_val, scrollbar_width_val, viewport_h, total_h, track_h) =
+            match &node.widget {
+                Widget::ScrollList {
+                    item_height,
+                    scroll_offset,
+                    scrollbar_width,
+                    item_heights,
+                    ..
+                } => {
+                    let vh = (node.rect.height - node.padding.vertical()).max(0.0);
+                    let n = node.children.len();
+                    let th = WidgetTree::scroll_total_height(item_heights, *item_height, n);
+                    (*scroll_offset, *scrollbar_width, vh, th, vh)
+                }
+                Widget::ScrollView {
+                    scroll_offset,
+                    scrollbar_width,
+                    ..
+                } => {
+                    let vh = (node.rect.height - node.padding.vertical()).max(0.0);
+                    // Track spans full rect height (scrollbar extends into padding).
+                    let trk = node.rect.height;
+                    // Sum children's laid-out rect heights (not measured intrinsic heights).
+                    let th: f32 = node
+                        .children
+                        .iter()
+                        .filter_map(|&cid| tree.get(cid))
+                        .map(|c| c.rect.height + c.margin.vertical())
+                        .sum();
+                    (*scroll_offset, *scrollbar_width, vh, th, trk)
+                }
+                _ => return None,
+            };
 
         // No scrollbar if content fits.
         if total_h <= viewport_h {
@@ -730,6 +736,7 @@ impl UiState {
                 start_scroll_offset: scroll_offset_val,
                 content_height: total_h,
                 viewport_height: viewport_h,
+                track_height: track_h,
             });
         }
 
