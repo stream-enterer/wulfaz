@@ -40,7 +40,8 @@ pub fn build_minimap(
     theme: &Theme,
     info: &MinimapInfo,
 ) -> (WidgetId, WidgetId) {
-    // Root panel — Fit on both axes, sized by content.
+    // Root panel — Fit on both axes. measure_node now propagates Fixed-sized
+    // children through Columns, so the panel shrink-wraps correctly.
     let panel = tree.insert_root(Widget::Panel {
         bg_color: theme.bg_parchment,
         border_color: theme.gold,
@@ -50,16 +51,15 @@ pub fn build_minimap(
     tree.set_sizing(panel, Sizing::Fit, Sizing::Fit);
     tree.set_padding(panel, Edges::all(MINIMAP_PAD));
 
-    // Position at bottom-right (estimate width/height for placement).
+    // Position at bottom-right (estimate dimensions for placement).
+    // Label height uses font_data_size + 4px headroom for ascent+descent.
     let est_w = MINIMAP_DISPLAY_W + MINIMAP_PAD * 2.0;
-    let est_h = MINIMAP_DISPLAY_H + MINIMAP_PAD * 2.0 + theme.font_data_size + 2.0;
+    let est_h = MINIMAP_DISPLAY_H + MINIMAP_PAD * 2.0 + (theme.font_data_size + 4.0) + 2.0;
     let px = info.screen_width - est_w - 8.0;
     let py = info.screen_height - est_h - 8.0;
     tree.set_position(panel, Position::Fixed { x: px, y: py });
 
-    // Frame column — Fit on both axes so children's sizes propagate
-    // up to the Fit parent panel. (Percent would create a circular
-    // dependency with a Fit parent.)
+    // Frame column.
     let col = tree.insert(
         panel,
         Widget::Column {

@@ -1279,6 +1279,23 @@ impl WidgetTree {
         self.layout_node_children(id, tm);
     }
 
+    /// Resolve a child's outer extent for parent measurement.
+    ///
+    /// `Sizing::Fixed(px)` already includes padding (layout resolves it to
+    /// exactly `px`), so only margin is added.  For `Fit`/`Percent` the
+    /// intrinsic measured size plus padding and margin is used.
+    fn child_extent(child_measured: &Size, child: &WidgetNode) -> (f32, f32) {
+        let w = match child.width {
+            Sizing::Fixed(px) => px + child.margin.horizontal(),
+            _ => child_measured.width + child.padding.horizontal() + child.margin.horizontal(),
+        };
+        let h = match child.height {
+            Sizing::Fixed(px) => px + child.margin.vertical(),
+            _ => child_measured.height + child.padding.vertical() + child.margin.vertical(),
+        };
+        (w, h)
+    }
+
     /// Measure intrinsic size of a widget (content only, no padding).
     pub fn measure_node(&self, id: WidgetId, tm: &mut dyn TextMeasurer) -> Size {
         let Some(node) = self.arena.get(id) else {
@@ -1334,12 +1351,7 @@ impl WidgetTree {
                 for &child_id in &node.children {
                     if let Some(child) = self.arena.get(child_id) {
                         let child_measured = self.measure_node(child_id, tm);
-                        let child_w = child_measured.width
-                            + child.padding.horizontal()
-                            + child.margin.horizontal();
-                        let child_h = child_measured.height
-                            + child.padding.vertical()
-                            + child.margin.vertical();
+                        let (child_w, child_h) = Self::child_extent(&child_measured, child);
                         total_w += child_w;
                         max_h = max_h.max(child_h);
                     }
@@ -1360,12 +1372,7 @@ impl WidgetTree {
                 for &child_id in &node.children {
                     if let Some(child) = self.arena.get(child_id) {
                         let child_measured = self.measure_node(child_id, tm);
-                        let child_w = child_measured.width
-                            + child.padding.horizontal()
-                            + child.margin.horizontal();
-                        let child_h = child_measured.height
-                            + child.padding.vertical()
-                            + child.margin.vertical();
+                        let (child_w, child_h) = Self::child_extent(&child_measured, child);
                         max_w = max_w.max(child_w);
                         total_h += child_h;
                     }
@@ -1389,16 +1396,9 @@ impl WidgetTree {
                             Position::Fixed { x, y } => (x, y),
                             Position::Percent { .. } | Position::Center => (0.0, 0.0),
                         };
-                        max_w = max_w.max(
-                            cx + child_measured.width
-                                + child.padding.horizontal()
-                                + child.margin.horizontal(),
-                        );
-                        max_h = max_h.max(
-                            cy + child_measured.height
-                                + child.padding.vertical()
-                                + child.margin.vertical(),
-                        );
+                        let (child_w, child_h) = Self::child_extent(&child_measured, child);
+                        max_w = max_w.max(cx + child_w);
+                        max_h = max_h.max(cy + child_h);
                     }
                 }
                 Size {
@@ -3796,6 +3796,77 @@ mod tests {
         let rect = tree.get(panel).expect("panel").rect;
         assert!((rect.width - 400.0).abs() < 0.01);
         assert!((rect.height - 150.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn fit_parent_propagates_fixed_child_through_column() {
+        // Regression: measure_node for Column must include Fixed-sized
+        // children so that a Fit-sized parent Panel gets the correct size.
+        let mut tree = WidgetTree::new();
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: [0.0; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+        tree.set_sizing(panel, Sizing::Fit, Sizing::Fit);
+        tree.set_padding(panel, Edges::all(4.0));
+
+        let col = tree.insert(
+            panel,
+            Widget::Column {
+                gap: 2.0,
+                align: widget::CrossAlign::Center,
+            },
+        );
+
+        tree.insert(
+            col,
+            Widget::Label {
+                text: "Title".into(),
+                color: [1.0; 4],
+                font_size: 12.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        let inner = tree.insert(
+            col,
+            Widget::Panel {
+                bg_color: [0.0; 4],
+                border_color: [0.0; 4],
+                border_width: 0.0,
+                shadow_width: 0.0,
+            },
+        );
+        tree.set_sizing(inner, Sizing::Fixed(128.0), Sizing::Fixed(96.0));
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            &mut HeuristicMeasurer,
+        );
+
+        let panel_rect = tree.get(panel).expect("panel").rect;
+        let inner_rect = tree.get(inner).expect("inner").rect;
+
+        // Inner panel must fit within the outer panel.
+        assert!(
+            inner_rect.y + inner_rect.height <= panel_rect.y + panel_rect.height,
+            "Fixed child overflows Fit parent: inner bottom {} > panel bottom {}",
+            inner_rect.y + inner_rect.height,
+            panel_rect.y + panel_rect.height,
+        );
+
+        // Panel width must accommodate the 128px child + 8px padding.
+        assert!(
+            panel_rect.width >= 128.0 + 8.0,
+            "Panel width {} too narrow for 128px child",
+            panel_rect.width,
+        );
     }
 
     #[test]
