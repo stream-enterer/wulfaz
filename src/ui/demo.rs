@@ -84,7 +84,7 @@ pub fn build_demo(
     tree.insert(
         col,
         Widget::Label {
-            text: "Serif Header 16pt".into(),
+            text: "Serif Header 21px".into(),
             color: theme.text_light,
             font_size: theme.font_header_size,
             font_family: theme.font_header_family,
@@ -94,7 +94,7 @@ pub fn build_demo(
     tree.insert(
         col,
         Widget::Label {
-            text: "Serif Body 12pt".into(),
+            text: "Serif Body 16px".into(),
             color: theme.text_light,
             font_size: theme.font_body_size,
             font_family: theme.font_body_family,
@@ -104,7 +104,7 @@ pub fn build_demo(
     tree.insert(
         col,
         Widget::Label {
-            text: "Mono Data 9pt".into(),
+            text: "Mono Data 12px".into(),
             color: theme.text_light,
             font_size: theme.font_data_size,
             font_family: theme.font_data_family,

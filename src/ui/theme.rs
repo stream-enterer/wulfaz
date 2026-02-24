@@ -51,15 +51,15 @@ pub struct Theme {
     // -- Font defaults --
     /// Header font family.
     pub font_header_family: FontFamily,
-    /// Header font size in pixels (16pt).
+    /// Header font size in pixels (≈16pt at 96 DPI).
     pub font_header_size: f32,
     /// Body font family.
     pub font_body_family: FontFamily,
-    /// Body font size in pixels (12pt).
+    /// Body font size in pixels (≈12pt at 96 DPI).
     pub font_body_size: f32,
     /// Data/terminal font family.
     pub font_data_family: FontFamily,
-    /// Data/terminal font size in pixels (9pt).
+    /// Data/terminal font size in pixels (≈9pt at 96 DPI).
     pub font_data_size: f32,
 
     // -- Spacing defaults --
@@ -233,11 +233,11 @@ impl Default for Theme {
 
             // Font defaults (DD-2)
             font_header_family: FontFamily::Serif,
-            font_header_size: 16.0,
+            font_header_size: 21.0, // 16pt × 96/72
             font_body_family: FontFamily::Serif,
-            font_body_size: 12.0,
+            font_body_size: 16.0, // 12pt × 96/72
             font_data_family: FontFamily::Mono,
-            font_data_size: 9.0,
+            font_data_size: 12.0, // 9pt × 96/72
 
             // Spacing
             panel_padding: 12.0,
@@ -337,10 +337,10 @@ mod tests {
         assert_eq!(t.font_body_family, FontFamily::Serif);
         assert_eq!(t.font_data_family, FontFamily::Mono);
 
-        // Font sizes
-        assert!((t.font_header_size - 16.0).abs() < 0.01);
-        assert!((t.font_body_size - 12.0).abs() < 0.01);
-        assert!((t.font_data_size - 9.0).abs() < 0.01);
+        // Font sizes (px = pt × 96/72)
+        assert!((t.font_header_size - 21.0).abs() < 0.01);
+        assert!((t.font_body_size - 16.0).abs() < 0.01);
+        assert!((t.font_data_size - 12.0).abs() < 0.01);
     }
 
     #[test]
