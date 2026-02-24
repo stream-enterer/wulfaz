@@ -357,8 +357,8 @@ struct App {
     modal_stack: ui::ModalStack,
     // Panel manager (UI-306)
     panel_manager: ui::PanelManager,
-    // Widget showcase (UI-DEMO)
-    show_demo: bool,
+    // Sidebar tab system (UI-DEMO). None = closed, Some(idx) = active tab.
+    active_tab: Option<usize>,
     demo_scroll_offset: f32,
     demo_scroll_view_id: Option<ui::WidgetId>,
     // Performance metrics (UI-505) — stores previous frame's metrics.
@@ -366,6 +366,50 @@ struct App {
 }
 
 impl App {
+    /// Handle a sidebar tab click. Manages open/close/switch transitions.
+    fn handle_tab_click(&mut self, tab_idx: usize) {
+        let now = Instant::now();
+        let is_closing = self.animator.target("sidebar_slide") == Some(1.0);
+        let current_slide = self
+            .animator
+            .get("sidebar_slide", now)
+            .unwrap_or(if self.active_tab.is_some() { 0.0 } else { 1.0 });
+
+        if self.active_tab == Some(tab_idx) && !is_closing {
+            // Clicking active tab: start close animation.
+            self.animator.start(
+                "sidebar_slide",
+                ui::Anim {
+                    from: current_slide,
+                    to: 1.0,
+                    duration: std::time::Duration::from_millis(self.ui_theme.anim_panel_hide_ms),
+                    easing: ui::Easing::EaseIn,
+                    ..ui::Anim::DEFAULT
+                },
+                now,
+            );
+        } else {
+            // Opening new tab or switching while open.
+            let need_slide = self.active_tab.is_none() || is_closing;
+            self.active_tab = Some(tab_idx);
+            if need_slide {
+                self.animator.start(
+                    "sidebar_slide",
+                    ui::Anim {
+                        from: current_slide,
+                        to: 0.0,
+                        duration: std::time::Duration::from_millis(
+                            self.ui_theme.anim_inspector_slide_ms,
+                        ),
+                        easing: ui::Easing::EaseOut,
+                        ..ui::Anim::DEFAULT
+                    },
+                    now,
+                );
+            }
+        }
+    }
+
     /// Clean up focus state after popping a modal.
     fn cleanup_after_modal_pop(&mut self) {
         // Clear focus if the focused widget was removed with the modal.
@@ -412,6 +456,11 @@ impl App {
             }
             ui::window::DIALOG_ACCEPT => {
                 self.pop_modal_with(true);
+            }
+            action if action.starts_with("tab::") => {
+                if let Ok(idx) = action[5..].parse::<usize>() {
+                    self.handle_tab_click(idx);
+                }
             }
             _ => {
                 // Event choice callbacks (event_choice:*) and other game callbacks
@@ -537,41 +586,9 @@ impl ApplicationHandler for App {
                                     self.sim_speed = speed;
                                 }
                                 ui::Action::ToggleDemo => {
-                                    let now = Instant::now();
-                                    if !self.show_demo {
-                                        // Open: slide in from right.
-                                        self.show_demo = true;
-                                        self.animator.start(
-                                            "demo_slide",
-                                            ui::Anim {
-                                                from: 1.0,
-                                                to: 0.0,
-                                                duration: std::time::Duration::from_millis(
-                                                    self.ui_theme.anim_inspector_slide_ms,
-                                                ),
-                                                easing: ui::Easing::EaseOut,
-                                                ..ui::Anim::DEFAULT
-                                            },
-                                            now,
-                                        );
-                                    } else if self.animator.target("demo_slide") != Some(1.0) {
-                                        // Close: slide off-screen right.
-                                        let current =
-                                            self.animator.get("demo_slide", now).unwrap_or(0.0);
-                                        self.animator.start(
-                                            "demo_slide",
-                                            ui::Anim {
-                                                from: current,
-                                                to: 1.0,
-                                                duration: std::time::Duration::from_millis(
-                                                    self.ui_theme.anim_panel_hide_ms,
-                                                ),
-                                                easing: ui::Easing::EaseIn,
-                                                ..ui::Anim::DEFAULT
-                                            },
-                                            now,
-                                        );
-                                    }
+                                    // Toggle sidebar: if open, close; if closed, open tab 0.
+                                    let tab = self.active_tab.unwrap_or(0);
+                                    self.handle_tab_click(tab);
                                 }
                                 ui::Action::ConfirmModal => {
                                     // Enter confirms the topmost modal dialog.
@@ -602,26 +619,12 @@ impl ApplicationHandler for App {
                                         // Closed a panel — done.
                                     } else if self.selected_entity.is_some() {
                                         self.selected_entity = None;
-                                    } else if self.show_demo
-                                        && self.animator.target("demo_slide") != Some(1.0)
+                                    } else if self.active_tab.is_some()
+                                        && self.animator.target("sidebar_slide") != Some(1.0)
                                     {
-                                        // Start hide animation (don't set show_demo = false yet).
-                                        let now = Instant::now();
-                                        let current =
-                                            self.animator.get("demo_slide", now).unwrap_or(0.0);
-                                        self.animator.start(
-                                            "demo_slide",
-                                            ui::Anim {
-                                                from: current,
-                                                to: 1.0,
-                                                duration: std::time::Duration::from_millis(
-                                                    self.ui_theme.anim_panel_hide_ms,
-                                                ),
-                                                easing: ui::Easing::EaseIn,
-                                                ..ui::Anim::DEFAULT
-                                            },
-                                            now,
-                                        );
+                                        // Close active sidebar tab.
+                                        let tab = self.active_tab.unwrap_or(0);
+                                        self.handle_tab_click(tab);
                                     } else {
                                         event_loop.exit();
                                     }
@@ -1201,29 +1204,53 @@ impl ApplicationHandler for App {
                                 self.animator.remove("inspector_slide");
                             }
 
-                            // Build widget showcase (UI-DEMO) when active.
-                            let mut demo_root_id = None;
-                            if self.show_demo {
-                                // Pick first alive entity for live data section.
-                                let first_entity =
-                                    self.world.alive.iter().copied().min_by_key(|e| e.0);
-                                let entity_info = first_entity
-                                    .and_then(|e| ui::collect_inspector_info(e, &self.world));
-                                let live = ui::demo::DemoLiveData {
-                                    entity_info: entity_info.as_ref(),
-                                    tick: self.world.tick.0,
-                                    population: self.world.alive.len(),
-                                };
-                                let (demo_id, demo_sv) = ui::demo::build_demo(
-                                    &mut self.ui_tree,
-                                    &self.ui_theme,
-                                    &self.keybindings,
-                                    &live,
-                                    screen_size,
-                                    self.demo_scroll_offset,
-                                );
-                                demo_root_id = Some(demo_id);
-                                self.demo_scroll_view_id = Some(demo_sv);
+                            // Build sidebar tab bar (always visible).
+                            let _tab_ids = ui::demo::build_sidebar_tabs(
+                                &mut self.ui_tree,
+                                &self.ui_theme,
+                                screen_size,
+                                self.active_tab,
+                            );
+
+                            // Build active sidebar panel content.
+                            let mut sidebar_panel_id = None;
+                            if let Some(tab_idx) = self.active_tab {
+                                match tab_idx {
+                                    0 => {
+                                        // Demo widget showcase.
+                                        let first_entity =
+                                            self.world.alive.iter().copied().min_by_key(|e| e.0);
+                                        let entity_info = first_entity.and_then(|e| {
+                                            ui::collect_inspector_info(e, &self.world)
+                                        });
+                                        let live = ui::demo::DemoLiveData {
+                                            entity_info: entity_info.as_ref(),
+                                            tick: self.world.tick.0,
+                                            population: self.world.alive.len(),
+                                        };
+                                        let (demo_id, demo_sv) = ui::demo::build_demo(
+                                            &mut self.ui_tree,
+                                            &self.ui_theme,
+                                            &self.keybindings,
+                                            &live,
+                                            screen_size,
+                                            self.demo_scroll_offset,
+                                        );
+                                        sidebar_panel_id = Some(demo_id);
+                                        self.demo_scroll_view_id = Some(demo_sv);
+                                    }
+                                    n => {
+                                        // Placeholder panels for tabs 1+.
+                                        let pid = ui::demo::build_placeholder_panel(
+                                            &mut self.ui_tree,
+                                            &self.ui_theme,
+                                            screen_size,
+                                            n,
+                                        );
+                                        sidebar_panel_id = Some(pid);
+                                        self.demo_scroll_view_id = None;
+                                    }
+                                }
                             }
 
                             // Pause overlay (UI-105): dim layer when paused.
@@ -1241,9 +1268,9 @@ impl ApplicationHandler for App {
                             let layout_start = Instant::now();
                             self.ui_tree.layout(screen_size, font);
 
-                            // Apply demo slide animation (UI-DEMO + UI-W05).
-                            if let Some(demo_id) = demo_root_id {
-                                let slide = self.animator.get("demo_slide", now).unwrap_or(0.0);
+                            // Apply sidebar slide animation (UI-DEMO + UI-W05).
+                            if let Some(panel_id) = sidebar_panel_id {
+                                let slide = self.animator.get("sidebar_slide", now).unwrap_or(0.0);
                                 let base_x = screen_w as f32
                                     - ui::demo::PANEL_WIDTH
                                     - ui::demo::MARGIN_RIGHT;
@@ -1253,7 +1280,7 @@ impl ApplicationHandler for App {
                                     let offset =
                                         slide * (ui::demo::PANEL_WIDTH + ui::demo::MARGIN_RIGHT);
                                     self.ui_tree.set_position(
-                                        demo_id,
+                                        panel_id,
                                         ui::Position::Fixed {
                                             x: base_x + offset,
                                             y: 4.0,
@@ -1263,12 +1290,12 @@ impl ApplicationHandler for App {
                                     self.ui_tree.layout(screen_size, font);
                                 }
                                 // Hide animation complete: panel fully off-screen.
-                                if self.animator.target("demo_slide") == Some(1.0)
-                                    && !self.animator.is_active("demo_slide", now)
+                                if self.animator.target("sidebar_slide") == Some(1.0)
+                                    && !self.animator.is_active("sidebar_slide", now)
                                 {
-                                    self.show_demo = false;
-                                    self.animator.remove("demo_slide");
-                                    self.ui_tree.remove(demo_id);
+                                    self.active_tab = None;
+                                    self.animator.remove("sidebar_slide");
+                                    self.ui_tree.remove(panel_id);
                                 }
                             }
 
@@ -1614,7 +1641,11 @@ fn main() {
         inspector_close_id: None,
         modal_stack: ui::ModalStack::new(),
         panel_manager: ui::PanelManager::new(),
-        show_demo: std::env::args().any(|a| a == "--ui-demo"),
+        active_tab: if std::env::args().any(|a| a == "--ui-demo") {
+            Some(0)
+        } else {
+            None
+        },
         demo_scroll_offset: 0.0,
         demo_scroll_view_id: None,
         ui_perf: ui::UiPerfMetrics::default(),

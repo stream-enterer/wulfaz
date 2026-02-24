@@ -14,6 +14,14 @@ use super::{Edges, EntityInspectorInfo, Position, Size, Sizing, WidgetId, Widget
 pub const PANEL_WIDTH: f32 = 400.0;
 /// Horizontal margin between the demo panel and the right screen edge.
 pub const MARGIN_RIGHT: f32 = 30.0;
+/// Width of each sidebar tab quad in pixels.
+const TAB_WIDTH: f32 = 24.0;
+/// Height of each sidebar tab quad in pixels.
+const TAB_HEIGHT: f32 = 24.0;
+/// Vertical gap between sidebar tab quads in pixels.
+const TAB_GAP: f32 = 4.0;
+/// Number of sidebar tabs.
+pub const TAB_COUNT: usize = 3;
 
 /// Live simulation data for the demo's live-data section.
 pub struct DemoLiveData<'a> {
@@ -720,6 +728,109 @@ pub fn build_demo(
     tree.set_tooltip(tooltip_btn, Some(level1));
 
     (root, sv)
+}
+
+/// Build 3 vertical sidebar tabs in the right margin.
+///
+/// Tabs are always visible regardless of panel state. Returns the root IDs
+/// so the caller can manage their lifetime (they are root widgets).
+pub fn build_sidebar_tabs(
+    tree: &mut WidgetTree,
+    theme: &Theme,
+    screen: Size,
+    active_tab: Option<usize>,
+) -> Vec<WidgetId> {
+    let total_h = TAB_COUNT as f32 * TAB_HEIGHT + (TAB_COUNT - 1) as f32 * TAB_GAP;
+    let x = screen.width - MARGIN_RIGHT + (MARGIN_RIGHT - TAB_WIDTH) / 2.0;
+    let y_start = (screen.height - total_h) / 2.0;
+
+    let mut ids = Vec::with_capacity(TAB_COUNT);
+    for i in 0..TAB_COUNT {
+        let is_active = active_tab == Some(i);
+        let bg_color = if is_active {
+            theme.tab_active_color
+        } else {
+            theme.tab_inactive_color
+        };
+        let tab = tree.insert_root(Widget::Panel {
+            bg_color,
+            border_color: theme.panel_border_color,
+            border_width: theme.panel_border_width,
+            shadow_width: 0.0,
+        });
+        let y = y_start + i as f32 * (TAB_HEIGHT + TAB_GAP);
+        tree.set_position(tab, Position::Fixed { x, y });
+        tree.set_sizing(tab, Sizing::Fixed(TAB_WIDTH), Sizing::Fixed(TAB_HEIGHT));
+        tree.set_on_click(tab, format!("tab::{}", i));
+        ids.push(tab);
+    }
+    ids
+}
+
+/// Build a placeholder panel for non-demo sidebar tabs.
+///
+/// Same size and position as the demo panel. Shows centered "Placeholder N" text.
+pub fn build_placeholder_panel(
+    tree: &mut WidgetTree,
+    theme: &Theme,
+    screen: Size,
+    tab_index: usize,
+) -> WidgetId {
+    let panel_w = PANEL_WIDTH;
+    let panel_h = screen.height - 8.0;
+
+    let root = tree.insert_root(Widget::Panel {
+        bg_color: theme.bg_parchment,
+        border_color: theme.panel_border_color,
+        border_width: theme.panel_border_width,
+        shadow_width: theme.panel_shadow_width,
+    });
+    tree.set_position(
+        root,
+        Position::Fixed {
+            x: screen.width - panel_w - MARGIN_RIGHT,
+            y: 4.0,
+        },
+    );
+    tree.set_sizing(root, Sizing::Fixed(panel_w), Sizing::Fixed(panel_h));
+    tree.set_padding(root, Edges::all(theme.panel_padding));
+
+    let col = tree.insert(
+        root,
+        Widget::Column {
+            gap: theme.label_gap,
+            align: CrossAlign::Start,
+        },
+    );
+    tree.set_sizing(
+        col,
+        Sizing::Fixed(panel_w - theme.panel_padding * 2.0),
+        Sizing::Fit,
+    );
+
+    tree.insert(
+        col,
+        Widget::Label {
+            text: format!("Placeholder {}", tab_index + 1),
+            color: theme.gold,
+            font_size: theme.font_header_size,
+            font_family: FontFamily::Serif,
+            wrap: false,
+        },
+    );
+    insert_sep(tree, col, theme, panel_w - theme.panel_padding * 2.0);
+    tree.insert(
+        col,
+        Widget::Label {
+            text: "This panel is intentionally empty.".into(),
+            color: theme.text_low,
+            font_size: theme.font_body_size,
+            font_family: FontFamily::Serif,
+            wrap: false,
+        },
+    );
+
+    root
 }
 
 /// Insert a gold section header label.
