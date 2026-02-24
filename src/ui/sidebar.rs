@@ -24,7 +24,7 @@ const TAB_GAP: f32 = 4.0;
 /// Number of sidebar tabs.
 pub const TAB_COUNT: usize = 3;
 
-/// Live simulation data passed into sidebar views.
+/// Data passed into sidebar views for rendering.
 pub struct SidebarInfo<'a> {
     pub entity_info: Option<&'a EntityInspectorInfo>,
     pub tick: u64,
@@ -892,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn demo_builds_without_entity() {
+    fn showcase_builds_without_entity() {
         let theme = Theme::default();
         let kb = KeyBindings::defaults();
         let live = default_live();
@@ -908,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn demo_builds_with_entity() {
+    fn showcase_builds_with_entity() {
         let theme = Theme::default();
         let kb = KeyBindings::defaults();
         let info = EntityInspectorInfo {
@@ -936,7 +936,7 @@ mod tests {
     }
 
     #[test]
-    fn demo_draw_list_not_empty() {
+    fn showcase_draw_list_not_empty() {
         let theme = Theme::default();
         let kb = KeyBindings::defaults();
         let live = default_live();
@@ -983,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn demo_has_all_widget_types() {
+    fn showcase_has_all_widget_types() {
         let theme = Theme::default();
         let kb = KeyBindings::defaults();
         let info = EntityInspectorInfo {

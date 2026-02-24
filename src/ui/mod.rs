@@ -3841,7 +3841,7 @@ mod tests {
     }
 
     #[test]
-    fn demo_tree_uses_theme() {
+    fn showcase_tree_uses_theme() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
         let live = sidebar::SidebarInfo {
@@ -3866,7 +3866,7 @@ mod tests {
         assert_eq!(dl.panels[0].border_color, theme.panel_border_color);
         assert!((dl.panels[0].border_width - theme.panel_border_width).abs() < 0.01);
 
-        // Demo uses all theme font families and sizes.
+        // Showcase uses all theme font families and sizes.
         assert!(
             dl.texts
                 .iter()
@@ -4069,7 +4069,7 @@ mod tests {
     }
 
     #[test]
-    fn demo_tree_includes_rich_text() {
+    fn showcase_tree_includes_rich_text() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
         let live = sidebar::SidebarInfo {
@@ -4088,7 +4088,7 @@ mod tests {
         let mut dl = DrawList::new();
         tree.draw(&mut dl, &mut HeuristicMeasurer);
 
-        // Demo has rich text blocks (title, population, live data, etc.).
+        // Showcase has rich text blocks (title, population, live data, etc.).
         assert!(!dl.rich_texts.is_empty());
 
         // Find the "Population:" rich text.
@@ -4385,7 +4385,7 @@ mod tests {
     // ------------------------------------------------------------------
 
     #[test]
-    fn widget_count_on_demo() {
+    fn widget_count_on_showcase() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
         let live = sidebar::SidebarInfo {
@@ -4627,7 +4627,7 @@ mod tests {
     }
 
     #[test]
-    fn demo_tree_includes_scroll_list() {
+    fn showcase_tree_includes_scroll_list() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
         let live = sidebar::SidebarInfo {
@@ -4643,7 +4643,7 @@ mod tests {
         sidebar::build_showcase_view(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
 
-        // Demo is a single root panel.
+        // Showcase view is a single root panel.
         assert_eq!(tree.roots().len(), 1);
 
         let mut dl = DrawList::new();
