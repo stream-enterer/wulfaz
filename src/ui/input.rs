@@ -1,7 +1,7 @@
 use super::draw::TextMeasurer;
 use super::theme::Theme;
-use super::widget::{CrossAlign, TooltipContent, Widget};
-use super::{Constraints, Edges, Position, Size, Sizing, WidgetId, WidgetTree, ZTier};
+use super::widget::{TooltipContent, Widget};
+use super::{Size, WidgetId, WidgetTree, ZTier};
 
 use std::time::{Duration, Instant};
 
@@ -526,34 +526,12 @@ impl UiState {
     ) {
         let nesting = self.tooltip_stack.len();
 
-        // Build tooltip panel at Tooltip Z-tier (UI-307) — always on top.
-        let panel = tree.insert_root_with_tier(
-            Widget::Panel {
-                bg_color: theme.tooltip_bg_color,
-                border_color: theme.tooltip_border_color,
-                border_width: theme.tooltip_border_width,
-                shadow_width: theme.tooltip_shadow_width,
-            },
-            ZTier::Tooltip,
-        );
-        tree.set_sizing(panel, Sizing::Fit, Sizing::Fit);
-        tree.set_padding(panel, Edges::all(theme.tooltip_padding));
-        tree.set_constraints(panel, Constraints::loose(theme.tooltip_max_width, f32::MAX));
-
-        // Column layout for vertical stacking of content.
-        let col = tree.insert(
-            panel,
-            Widget::Column {
-                gap: theme.label_gap,
-                align: CrossAlign::Start,
-            },
-        );
-        tree.set_sizing(col, Sizing::Fit, Sizing::Fit);
+        let (panel, col) = tree.insert_tooltip_chrome(theme);
 
         // Populate children from content.
         match content {
             TooltipContent::Text(text) => {
-                let label = tree.insert(
+                tree.insert(
                     col,
                     Widget::Label {
                         text: text.clone(),
@@ -563,7 +541,6 @@ impl UiState {
                         wrap: true,
                     },
                 );
-                tree.set_sizing(label, Sizing::Fit, Sizing::Fit);
             }
             TooltipContent::Custom(items) => {
                 for (widget, sub_tooltip) in items {
@@ -576,61 +553,12 @@ impl UiState {
             }
         }
 
-        // Measure panel to compute approximate size for positioning.
-        let measured = tree.measure_node(panel, tm);
-        let tooltip_w = measured.width + theme.tooltip_padding * 2.0;
-        let tooltip_h = measured.height + theme.tooltip_padding * 2.0;
-
-        // Position: prefer below-right of cursor, flip if clipping screen.
-        let (tx, ty) = Self::compute_tooltip_position(
-            self.cursor,
-            Size {
-                width: tooltip_w,
-                height: tooltip_h,
-            },
-            screen,
-            nesting,
-            theme,
-        );
-        tree.set_position(panel, Position::Fixed { x: tx, y: ty });
+        tree.position_tooltip(panel, self.cursor, screen, nesting, theme, tm);
 
         self.tooltip_stack.push(TooltipEntry {
             source,
             root: panel,
         });
-    }
-
-    /// Compute tooltip position with edge-flipping.
-    pub(crate) fn compute_tooltip_position(
-        cursor: (f32, f32),
-        tooltip_size: Size,
-        screen: Size,
-        nesting_level: usize,
-        theme: &Theme,
-    ) -> (f32, f32) {
-        let nest = nesting_level as f32;
-        let off_x = theme.tooltip_offset_x + nest * theme.tooltip_nesting_offset;
-        let off_y = theme.tooltip_offset_y + nest * theme.tooltip_nesting_offset;
-
-        let mut x = cursor.0 + off_x;
-        let mut y = cursor.1 + off_y;
-
-        // Flip horizontally if clipping right edge.
-        if x + tooltip_size.width > screen.width {
-            x = cursor.0 - tooltip_size.width - off_x;
-        }
-        // Flip vertically if clipping bottom edge.
-        if y + tooltip_size.height > screen.height {
-            y = cursor.1 - tooltip_size.height - off_y;
-        }
-
-        // Clamp to screen bounds.
-        x = x.clamp(0.0, (screen.width - tooltip_size.width).max(0.0));
-        y = y.clamp(0.0, (screen.height - tooltip_size.height).max(0.0));
-
-        // Snap to whole pixels so glyph positions stay stable as the tooltip
-        // follows the cursor (avoids subpixel shimmer in the text).
-        (x.round(), y.round())
     }
 
     /// Effective delay, accounting for fast-show window.
@@ -1159,7 +1087,8 @@ mod tests {
         };
 
         // Cursor near right edge — tooltip should flip left.
-        let (x, _) = UiState::compute_tooltip_position((180.0, 50.0), tooltip_size, scr, 0, &theme);
+        let (x, _) =
+            WidgetTree::compute_tooltip_position((180.0, 50.0), tooltip_size, scr, 0, &theme);
         // Should flip: 180 - 100 - 8 = 72
         assert!(x < 180.0);
         assert!(x + tooltip_size.width <= scr.width);
@@ -1178,7 +1107,8 @@ mod tests {
         };
 
         // Cursor near bottom edge — tooltip should flip up.
-        let (_, y) = UiState::compute_tooltip_position((50.0, 180.0), tooltip_size, scr, 0, &theme);
+        let (_, y) =
+            WidgetTree::compute_tooltip_position((50.0, 180.0), tooltip_size, scr, 0, &theme);
         assert!(y < 180.0);
         assert!(y + tooltip_size.height <= scr.height);
     }

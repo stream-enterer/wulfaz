@@ -601,6 +601,97 @@ impl WidgetTree {
     }
 
     // ------------------------------------------------------------------
+    // Tooltip helpers
+    // ------------------------------------------------------------------
+
+    /// Compute tooltip position with edge-flipping.
+    ///
+    /// Pure geometry — no `&self` needed.
+    pub(crate) fn compute_tooltip_position(
+        cursor: (f32, f32),
+        tooltip_size: Size,
+        screen: Size,
+        nesting_level: usize,
+        theme: &Theme,
+    ) -> (f32, f32) {
+        let nest = nesting_level as f32;
+        let off_x = theme.tooltip_offset_x + nest * theme.tooltip_nesting_offset;
+        let off_y = theme.tooltip_offset_y + nest * theme.tooltip_nesting_offset;
+
+        let mut x = cursor.0 + off_x;
+        let mut y = cursor.1 + off_y;
+
+        // Flip horizontally if clipping right edge.
+        if x + tooltip_size.width > screen.width {
+            x = cursor.0 - tooltip_size.width - off_x;
+        }
+        // Flip vertically if clipping bottom edge.
+        if y + tooltip_size.height > screen.height {
+            y = cursor.1 - tooltip_size.height - off_y;
+        }
+
+        // Clamp to screen bounds.
+        x = x.clamp(0.0, (screen.width - tooltip_size.width).max(0.0));
+        y = y.clamp(0.0, (screen.height - tooltip_size.height).max(0.0));
+
+        // Snap to whole pixels so glyph positions stay stable as the tooltip
+        // follows the cursor (avoids subpixel shimmer in the text).
+        (x.round(), y.round())
+    }
+
+    /// Create tooltip chrome: Panel(ZTier::Tooltip) + Column.
+    /// Returns (panel_id, column_id). Caller inserts content into column_id.
+    pub fn insert_tooltip_chrome(&mut self, theme: &Theme) -> (WidgetId, WidgetId) {
+        let panel = self.insert_root_with_tier(
+            Widget::Panel {
+                bg_color: theme.tooltip_bg_color,
+                border_color: theme.tooltip_border_color,
+                border_width: theme.tooltip_border_width,
+                shadow_width: theme.tooltip_shadow_width,
+            },
+            ZTier::Tooltip,
+        );
+        self.set_padding(panel, Edges::all(theme.tooltip_padding));
+        self.set_constraints(panel, Constraints::loose(theme.tooltip_max_width, f32::MAX));
+
+        let col = self.insert(
+            panel,
+            Widget::Column {
+                gap: theme.label_gap,
+                align: widget::CrossAlign::Start,
+            },
+        );
+
+        (panel, col)
+    }
+
+    /// Measure tooltip panel and position it near the cursor with edge-flipping.
+    pub fn position_tooltip(
+        &mut self,
+        panel: WidgetId,
+        cursor: (f32, f32),
+        screen: Size,
+        nesting_level: usize,
+        theme: &Theme,
+        tm: &mut dyn TextMeasurer,
+    ) {
+        let measured = self.measure_node(panel, tm);
+        let tooltip_w = measured.width + theme.tooltip_padding * 2.0;
+        let tooltip_h = measured.height + theme.tooltip_padding * 2.0;
+        let (tx, ty) = Self::compute_tooltip_position(
+            cursor,
+            Size {
+                width: tooltip_w,
+                height: tooltip_h,
+            },
+            screen,
+            nesting_level,
+            theme,
+        );
+        self.set_position(panel, Position::Fixed { x: tx, y: ty });
+    }
+
+    // ------------------------------------------------------------------
     // Hit testing
     // ------------------------------------------------------------------
 
@@ -708,10 +799,12 @@ impl WidgetTree {
         node.measured = measured;
 
         // Resolve width/height from Sizing.
+        // Fit caps at parent_content width: available width flows down the tree,
+        // matching the standard "width-in, height-out" layout model (UI-102).
         let resolved_w = match node.width {
             Sizing::Fixed(px) => px,
             Sizing::Percent(frac) => parent_content.width * frac,
-            Sizing::Fit => measured.width + node.padding.horizontal(),
+            Sizing::Fit => (measured.width + node.padding.horizontal()).min(parent_content.width),
         };
         let resolved_h = match node.height {
             Sizing::Fixed(px) => px,
@@ -895,6 +988,8 @@ impl WidgetTree {
             let parent_clip = node.clip_rect;
 
             // First pass: measure all children, identify Percent-height children.
+            // For Fit-width children, cap at content.width so wrapped labels
+            // compute correct multi-line heights (UI-102).
             let mut child_infos: Vec<(WidgetId, Size, Sizing, Edges, Edges)> = Vec::new();
             let mut fixed_total_h: f32 = 0.0;
             let mut percent_total: f32 = 0.0;
@@ -913,7 +1008,19 @@ impl WidgetTree {
                 let cm = child.margin;
                 let child_h = match ch {
                     Sizing::Fixed(px) => px + cm.vertical(),
-                    Sizing::Fit => child_measured.height + cp.vertical() + cm.vertical(),
+                    Sizing::Fit => {
+                        // Cap child width at available space (cross-axis).
+                        let effective_w =
+                            (child_measured.width + cp.horizontal()).min(content.width);
+                        let h = wrapped_content_height(
+                            &child.widget,
+                            &child_measured,
+                            effective_w,
+                            &cp,
+                            tm,
+                        );
+                        h + cp.vertical() + cm.vertical()
+                    }
                     Sizing::Percent(frac) => {
                         percent_total += frac;
                         0.0
@@ -929,9 +1036,27 @@ impl WidgetTree {
             // Second pass: position children.
             let mut cursor_y = content.y;
             for (child_id, child_measured, ch, cp, cm) in &child_infos {
+                // Resolve child width — cap Fit at content.width (cross-axis).
+                let child_w = match self.arena.get(*child_id).map(|n| n.width) {
+                    Some(Sizing::Fixed(px)) => px,
+                    Some(Sizing::Percent(frac)) => content.width * frac,
+                    Some(Sizing::Fit) | None => {
+                        (child_measured.width + cp.horizontal()).min(content.width)
+                    }
+                };
+
                 let child_h = match ch {
                     Sizing::Fixed(px) => *px,
-                    Sizing::Fit => child_measured.height + cp.vertical(),
+                    Sizing::Fit => {
+                        // Recompute height for wrapped labels at capped width.
+                        if let Some(n) = self.arena.get(*child_id) {
+                            let h =
+                                wrapped_content_height(&n.widget, child_measured, child_w, cp, tm);
+                            h + cp.vertical()
+                        } else {
+                            child_measured.height + cp.vertical()
+                        }
+                    }
                     Sizing::Percent(frac) => {
                         if percent_total > 0.0 {
                             remaining * frac / percent_total
@@ -941,13 +1066,6 @@ impl WidgetTree {
                     }
                 };
                 let child_total_h = child_h + cm.vertical();
-
-                // Resolve child width.
-                let child_w = match self.arena.get(*child_id).map(|n| n.width) {
-                    Some(Sizing::Fixed(px)) => px,
-                    Some(Sizing::Percent(frac)) => content.width * frac,
-                    Some(Sizing::Fit) | None => child_measured.width + cp.horizontal(),
-                };
 
                 // Cross-axis alignment: horizontal position within column.
                 let child_x = match align {
@@ -1297,9 +1415,42 @@ impl WidgetTree {
     }
 
     /// Measure intrinsic size of a widget (content only, no padding).
+    ///
+    /// For nodes with constraints, respects max_width and propagates it to
+    /// children so that wrapped labels compute correct multi-line heights.
     pub fn measure_node(&self, id: WidgetId, tm: &mut dyn TextMeasurer) -> Size {
+        self.measure_node_constrained(id, tm, None)
+    }
+
+    /// Measure content size with an optional max-content-width constraint.
+    ///
+    /// `max_content_w`: if Some, the maximum content width this node should
+    /// report. The node's own constraints (if any) further narrow this bound.
+    /// Containers propagate the effective bound to children so that wrapped
+    /// labels compute correct multi-line heights.
+    fn measure_node_constrained(
+        &self,
+        id: WidgetId,
+        tm: &mut dyn TextMeasurer,
+        max_content_w: Option<f32>,
+    ) -> Size {
         let Some(node) = self.arena.get(id) else {
             return Size::default();
+        };
+
+        // Merge passed-in max with this node's own constraint (which is total
+        // width, so subtract padding to get content max).
+        let own_content_max = node
+            .constraints
+            .as_ref()
+            .filter(|c| c.max_width < f32::MAX)
+            .map(|c| (c.max_width - node.padding.horizontal()).max(0.0));
+
+        let effective_max_w = match (max_content_w, own_content_max) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a @ Some(_), None) => a,
+            (None, b @ Some(_)) => b,
+            (None, None) => None,
         };
 
         match &node.widget {
@@ -1307,13 +1458,29 @@ impl WidgetTree {
                 text,
                 font_size,
                 font_family,
+                wrap,
                 ..
             } => {
                 let ts = tm.measure_text(text, *font_family, *font_size);
-                let h = tm.measure_text("M", *font_family, *font_size).height;
+                let line_h = tm.measure_text("M", *font_family, *font_size).height;
+
+                // When wrapping and constrained, compute multi-line dimensions.
+                if *wrap
+                    && let Some(max_w) = effective_max_w
+                    && ts.width > max_w
+                    && max_w > 0.0
+                {
+                    let char_w = tm.measure_text("M", *font_family, *font_size).width;
+                    let n_lines = wrapped_line_count(text, max_w, char_w);
+                    return Size {
+                        width: max_w,
+                        height: n_lines as f32 * line_h,
+                    };
+                }
+
                 Size {
                     width: ts.width,
-                    height: h,
+                    height: line_h,
                 }
             }
             Widget::Button {
@@ -1345,12 +1512,13 @@ impl WidgetTree {
             }
             Widget::Row { gap, .. } => {
                 // Row: width = sum of child widths + gaps, height = max child height.
+                // Row is main-axis: can't divide max_w among children, pass None.
                 let n = node.children.len();
                 let mut total_w: f32 = 0.0;
                 let mut max_h: f32 = 0.0;
                 for &child_id in &node.children {
                     if let Some(child) = self.arena.get(child_id) {
-                        let child_measured = self.measure_node(child_id, tm);
+                        let child_measured = self.measure_node_constrained(child_id, tm, None);
                         let (child_w, child_h) = Self::child_extent(&child_measured, child);
                         total_w += child_w;
                         max_h = max_h.max(child_h);
@@ -1366,12 +1534,16 @@ impl WidgetTree {
             }
             Widget::Column { gap, .. } => {
                 // Column: width = max child width, height = sum of child heights + gaps.
+                // Cross-axis is width: propagate effective_max_w to children.
                 let n = node.children.len();
                 let mut max_w: f32 = 0.0;
                 let mut total_h: f32 = 0.0;
                 for &child_id in &node.children {
                     if let Some(child) = self.arena.get(child_id) {
-                        let child_measured = self.measure_node(child_id, tm);
+                        let child_max = effective_max_w.map(|w| {
+                            (w - child.padding.horizontal() - child.margin.horizontal()).max(0.0)
+                        });
+                        let child_measured = self.measure_node_constrained(child_id, tm, child_max);
                         let (child_w, child_h) = Self::child_extent(&child_measured, child);
                         max_w = max_w.max(child_w);
                         total_h += child_h;
@@ -1387,11 +1559,15 @@ impl WidgetTree {
             }
             Widget::Panel { .. } => {
                 // Panel measures from children bounding box.
+                // Propagate effective_max_w to children.
                 let mut max_w: f32 = 0.0;
                 let mut max_h: f32 = 0.0;
                 for &child_id in &node.children {
                     if let Some(child) = self.arena.get(child_id) {
-                        let child_measured = self.measure_node(child_id, tm);
+                        let child_max = effective_max_w.map(|w| {
+                            (w - child.padding.horizontal() - child.margin.horizontal()).max(0.0)
+                        });
+                        let child_measured = self.measure_node_constrained(child_id, tm, child_max);
                         let (cx, cy) = match child.position {
                             Position::Fixed { x, y } => (x, y),
                             Position::Percent { .. } | Position::Center => (0.0, 0.0),
@@ -1412,11 +1588,10 @@ impl WidgetTree {
                 item_heights,
                 ..
             } => {
-                // Total content height (variable or fixed).
-                // Width = widest child + scrollbar.
+                // Scrollable: don't propagate width constraint to children.
                 let mut max_w: f32 = 0.0;
                 for &child_id in &node.children {
-                    let child_measured = self.measure_node(child_id, tm);
+                    let child_measured = self.measure_node_constrained(child_id, tm, None);
                     max_w = max_w.max(child_measured.width);
                 }
                 let n = node.children.len();
@@ -1429,12 +1604,12 @@ impl WidgetTree {
             Widget::ScrollView {
                 scrollbar_width, ..
             } => {
-                // Width = max child width + scrollbar, height = sum of child heights.
+                // Scrollable: don't propagate width constraint to children.
                 let mut max_w: f32 = 0.0;
                 let mut total_h: f32 = 0.0;
                 for &child_id in &node.children {
                     if let Some(child) = self.arena.get(child_id) {
-                        let child_measured = self.measure_node(child_id, tm);
+                        let child_measured = self.measure_node_constrained(child_id, tm, None);
                         let child_w = child_measured.width
                             + child.padding.horizontal()
                             + child.margin.horizontal();
@@ -1556,7 +1731,12 @@ impl WidgetTree {
                     let mut total_h = header_h;
                     for &child_id in &node.children {
                         if let Some(child) = self.arena.get(child_id) {
-                            let child_measured = self.measure_node(child_id, tm);
+                            let child_max = effective_max_w.map(|w| {
+                                (w - child.padding.horizontal() - child.margin.horizontal())
+                                    .max(0.0)
+                            });
+                            let child_measured =
+                                self.measure_node_constrained(child_id, tm, child_max);
                             let child_w = child_measured.width
                                 + child.padding.horizontal()
                                 + child.margin.horizontal();
@@ -1591,11 +1771,18 @@ impl WidgetTree {
                         tm.measure_text(t, FontFamily::default(), *font_size).width + tab_pad * 2.0
                     })
                     .sum();
-                // Content children measured Column-style.
+                // Content children measured Column-style; propagate constraint.
                 let mut content_w = 0.0_f32;
                 let mut content_h = 0.0_f32;
                 for &child_id in &node.children {
-                    let child_measured = self.measure_node(child_id, tm);
+                    let child_max = if let Some(child) = self.arena.get(child_id) {
+                        effective_max_w.map(|w| {
+                            (w - child.padding.horizontal() - child.margin.horizontal()).max(0.0)
+                        })
+                    } else {
+                        None
+                    };
+                    let child_measured = self.measure_node_constrained(child_id, tm, child_max);
                     if let Some(child) = self.arena.get(child_id) {
                         content_w = content_w.max(
                             child_measured.width
@@ -2700,6 +2887,36 @@ fn wrapped_line_count(text: &str, width: f32, char_w: f32) -> usize {
     wrap_text(text, max_chars).len()
 }
 
+/// For a wrapping Label, compute content height given an effective widget width.
+/// For non-wrapping or non-Label widgets, returns `measured.height` unchanged.
+///
+/// Used by Column layout to produce correct multi-line heights when a Fit-width
+/// label is capped at the available cross-axis width (UI-102).
+fn wrapped_content_height(
+    widget: &widget::Widget,
+    measured: &Size,
+    effective_w: f32,
+    padding: &Edges,
+    tm: &mut dyn TextMeasurer,
+) -> f32 {
+    if let widget::Widget::Label {
+        text,
+        font_size,
+        font_family,
+        wrap: true,
+        ..
+    } = widget
+    {
+        let content_w = (effective_w - padding.horizontal()).max(0.0);
+        if measured.width > content_w && content_w > 0.0 {
+            let ts = tm.measure_text("M", *font_family, *font_size);
+            let n_lines = wrapped_line_count(text, content_w, ts.width);
+            return n_lines as f32 * ts.height;
+        }
+    }
+    measured.height
+}
+
 /// Build the status bar panel at the top of the screen (UI-I01a).
 ///
 /// Chrome panel: permanent, rebuilt every frame with live simulation data.
@@ -2890,23 +3107,11 @@ pub fn build_hover_tooltip(
     screen: Size,
     tm: &mut dyn TextMeasurer,
 ) -> WidgetId {
-    let panel = tree.insert_root(Widget::Panel {
-        bg_color: theme.tooltip_bg_color,
-        border_color: theme.tooltip_border_color,
-        border_width: theme.tooltip_border_width,
-        shadow_width: theme.tooltip_shadow_width,
-    });
-    tree.set_sizing(panel, Sizing::Fit, Sizing::Fit);
-    tree.set_padding(panel, Edges::all(theme.tooltip_padding));
+    let (panel, col) = tree.insert_tooltip_chrome(theme);
 
-    let mut y = 0.0_f32;
-    let data_h = theme.font_data_size;
-    let body_h = theme.font_body_size;
-    let gap = theme.label_gap;
-
-    // Line 1: coordinates + terrain type
-    let coord_line = tree.insert(
-        panel,
+    // Line 1: coordinates + terrain type (always short)
+    tree.insert(
+        col,
         Widget::RichText {
             spans: vec![
                 TextSpan {
@@ -2923,13 +3128,11 @@ pub fn build_hover_tooltip(
             font_size: theme.font_data_size,
         },
     );
-    tree.set_position(coord_line, Position::Fixed { x: 0.0, y });
-    y += data_h + gap;
 
     // Line 2: quartier name (optional)
     if let Some(ref quartier) = info.quartier {
-        let q = tree.insert(
-            panel,
+        tree.insert(
+            col,
             Widget::Label {
                 text: quartier.clone(),
                 color: theme.disabled,
@@ -2938,68 +3141,54 @@ pub fn build_hover_tooltip(
                 wrap: false,
             },
         );
-        tree.set_position(q, Position::Fixed { x: 0.0, y });
-        y += data_h + gap;
     }
 
-    // Line 3: address + building name (optional)
+    // Line 3: address + building name (optional, can be long — wraps)
     if let Some(ref address) = info.address {
-        let mut spans = vec![TextSpan {
-            text: address.clone(),
-            color: theme.text_light,
-            font_family: FontFamily::Serif,
-        }];
-        if let Some(ref name) = info.building_name {
-            spans.push(TextSpan {
-                text: " \u{2014} ".to_string(),
-                color: theme.disabled,
-                font_family: FontFamily::Serif,
-            });
-            spans.push(TextSpan {
-                text: name.clone(),
-                color: theme.gold,
-                font_family: FontFamily::Serif,
-            });
-        }
-        let addr_line = tree.insert(
-            panel,
-            Widget::RichText {
-                spans,
+        // Address on its own line.
+        tree.insert(
+            col,
+            Widget::Label {
+                text: address.clone(),
+                color: theme.text_light,
                 font_size: theme.font_body_size,
+                font_family: theme.font_body_family,
+                wrap: true,
             },
         );
-        tree.set_position(addr_line, Position::Fixed { x: 0.0, y });
-        y += body_h + gap;
+        // Building name on a separate wrapping line.
+        if let Some(ref name) = info.building_name {
+            tree.insert(
+                col,
+                Widget::Label {
+                    text: name.clone(),
+                    color: theme.gold,
+                    font_size: theme.font_body_size,
+                    font_family: theme.font_body_family,
+                    wrap: true,
+                },
+            );
+        }
     }
 
-    // Occupants section
+    // Occupants section (names can be very long — wraps)
     if !info.occupants.is_empty() {
         let show_count = info.occupants.len().min(HOVER_MAX_OCCUPANTS);
         for (name, activity) in &info.occupants[..show_count] {
-            let occ = tree.insert(
-                panel,
-                Widget::RichText {
-                    spans: vec![
-                        TextSpan {
-                            text: name.clone(),
-                            color: theme.text_light,
-                            font_family: FontFamily::Mono,
-                        },
-                        TextSpan {
-                            text: format!(" ({})", activity),
-                            color: theme.disabled,
-                            font_family: FontFamily::Mono,
-                        },
-                    ],
+            tree.insert(
+                col,
+                Widget::Label {
+                    text: format!("{} ({})", name, activity),
+                    color: theme.text_light,
                     font_size: theme.font_data_size,
+                    font_family: theme.font_data_family,
+                    wrap: true,
                 },
             );
-            tree.set_position(occ, Position::Fixed { x: 0.0, y });
-            y += data_h + gap;
         }
         if info.occupants.len() > HOVER_MAX_OCCUPANTS {
-            let more = tree.insert(
-                panel,
+            tree.insert(
+                col,
                 Widget::Label {
                     text: format!("+{} more", info.occupants.len() - HOVER_MAX_OCCUPANTS),
                     color: theme.disabled,
@@ -3008,12 +3197,10 @@ pub fn build_hover_tooltip(
                     wrap: false,
                 },
             );
-            tree.set_position(more, Position::Fixed { x: 0.0, y });
-            y += data_h + gap;
         }
         if let Some(ref suffix) = info.occupant_year_suffix {
-            let yr = tree.insert(
-                panel,
+            tree.insert(
+                col,
                 Widget::Label {
                     text: suffix.clone(),
                     color: theme.disabled,
@@ -3022,53 +3209,25 @@ pub fn build_hover_tooltip(
                     wrap: false,
                 },
             );
-            tree.set_position(yr, Position::Fixed { x: 0.0, y });
-            // y += data_h + gap; // last line, no trailing gap needed
         }
     }
 
-    // Entities section
-    if !info.entities.is_empty() {
-        for (icon, name) in &info.entities {
-            let ent = tree.insert(
-                panel,
-                Widget::RichText {
-                    spans: vec![
-                        TextSpan {
-                            text: format!("{} ", icon),
-                            color: theme.gold,
-                            font_family: FontFamily::Mono,
-                        },
-                        TextSpan {
-                            text: name.clone(),
-                            color: theme.text_light,
-                            font_family: FontFamily::Mono,
-                        },
-                    ],
-                    font_size: theme.font_data_size,
-                },
-            );
-            tree.set_position(ent, Position::Fixed { x: 0.0, y });
-            y += data_h + gap;
-        }
+    // Entities section (usually short)
+    for (icon, name) in &info.entities {
+        tree.insert(
+            col,
+            Widget::Label {
+                text: format!("{} {}", icon, name),
+                color: theme.text_light,
+                font_size: theme.font_data_size,
+                font_family: theme.font_data_family,
+                wrap: true,
+            },
+        );
     }
 
     // Position: below-right of cursor, edge-flip if clipping screen.
-    let measured = tree.measure_node(panel, tm);
-    let tooltip_w = measured.width + theme.tooltip_padding * 2.0;
-    let tooltip_h = measured.height + theme.tooltip_padding * 2.0;
-
-    let (tx, ty) = UiState::compute_tooltip_position(
-        cursor,
-        Size {
-            width: tooltip_w,
-            height: tooltip_h,
-        },
-        screen,
-        0,
-        theme,
-    );
-    tree.set_position(panel, Position::Fixed { x: tx, y: ty });
+    tree.position_tooltip(panel, cursor, screen, 0, theme, tm);
 
     panel
 }
@@ -5013,7 +5172,7 @@ mod tests {
         assert_eq!(tree.roots().len(), 1);
         assert_eq!(tree.roots()[0], tip);
 
-        // Panel has one child: the coordinates + terrain RichText.
+        // Panel has one child: the Column wrapper.
         let node = tree.get(tip).expect("tooltip panel");
         assert_eq!(node.children.len(), 1);
         if let Widget::Panel { bg_color, .. } = &node.widget {
@@ -5022,8 +5181,11 @@ mod tests {
             panic!("tooltip root should be a Panel");
         }
 
-        // Child is RichText with coords and terrain.
-        let child = tree.get(node.children[0]).expect("child");
+        // Column has one child: the coordinates + terrain RichText.
+        let col = tree.get(node.children[0]).expect("column");
+        assert!(matches!(col.widget, Widget::Column { .. }));
+        assert_eq!(col.children.len(), 1);
+        let child = tree.get(col.children[0]).expect("child");
         if let Widget::RichText { spans, font_size } = &child.widget {
             assert!((font_size - theme.font_data_size).abs() < 0.01);
             assert_eq!(spans.len(), 2);
@@ -5064,8 +5226,12 @@ mod tests {
         );
 
         let node = tree.get(tip).expect("panel");
-        // Children: coords(1) + quartier(1) + address(1) + 2 occupants(2) + 1 entity(1) = 6
-        assert_eq!(node.children.len(), 6);
+        // Panel has 1 child (Column).
+        assert_eq!(node.children.len(), 1);
+        let col = tree.get(node.children[0]).expect("column");
+        // Column children: coords(1) + quartier(1) + address(1) + building_name(1)
+        //                 + 2 occupants(2) + 1 entity(1) = 7
+        assert_eq!(col.children.len(), 7);
     }
 
     #[test]
@@ -5095,8 +5261,11 @@ mod tests {
         );
 
         let node = tree.get(tip).expect("panel");
-        // Children: coords(1) + address(1) + 5 occupants(5) + "+3 more"(1) + year(1) = 9
-        assert_eq!(node.children.len(), 9);
+        // Panel has 1 child (Column).
+        assert_eq!(node.children.len(), 1);
+        let col = tree.get(node.children[0]).expect("column");
+        // Column children: coords(1) + address(1) + 5 occupants(5) + "+3 more"(1) + year(1) = 9
+        assert_eq!(col.children.len(), 9);
 
         // Verify "+3 more" label exists.
         let mut dl = DrawList::new();
@@ -5131,21 +5300,19 @@ mod tests {
         );
 
         let node = tree.get(tip).expect("panel");
-        // coords(1) + 2 entities(2) = 3
-        assert_eq!(node.children.len(), 3);
+        // Panel has 1 child (Column).
+        assert_eq!(node.children.len(), 1);
+        let col = tree.get(node.children[0]).expect("column");
+        // Column children: coords(1) + 2 entity labels(2) = 3
+        assert_eq!(col.children.len(), 3);
 
         tree.layout(screen(), &mut HeuristicMeasurer);
         let mut dl = DrawList::new();
         tree.draw(&mut dl, &mut HeuristicMeasurer);
 
-        // Entity entries are RichText with icon + name spans.
-        let entity_rts: Vec<_> = dl
-            .rich_texts
-            .iter()
-            .filter(|rt| rt.spans.len() == 2 && rt.spans[0].text.starts_with('g'))
-            .collect();
-        assert_eq!(entity_rts.len(), 1);
-        assert_eq!(entity_rts[0].spans[1].text, "Goblin");
+        // Entity entries are now Labels (previously RichText).
+        let goblin_label = dl.texts.iter().any(|t| t.text.contains("Goblin"));
+        assert!(goblin_label, "should have a label containing 'Goblin'");
     }
 
     #[test]
@@ -5206,6 +5373,160 @@ mod tests {
             rect.y + rect.height <= 600.0,
             "bottom edge {} should be <= 600",
             rect.y + rect.height
+        );
+    }
+
+    /// Verify that both tooltip systems (W04 `show_tooltip` and I01b
+    /// `build_hover_tooltip`) use the same standardized wrapping pipeline:
+    ///   Panel(constraints=tooltip_max_width) > Column > Label(wrap=true)
+    ///
+    /// Run with: `cargo test tooltip_wrapping_consistent`
+    #[test]
+    fn tooltip_wrapping_consistent() {
+        use super::input::UiState;
+        use std::time::{Duration, Instant};
+
+        let theme = Theme::default();
+        let max_w = theme.tooltip_max_width;
+        let pad = theme.tooltip_padding;
+
+        // --- Helper: assert tooltip panel structure ---
+        // Both tooltip types must produce:
+        //   Panel (Fit, Fit, constraints.max_width == tooltip_max_width)
+        //     └─ Column (Fit, Fit, CrossAlign::Start)
+        //         └─ ... children (Labels with wrap=true for long text)
+        fn assert_tooltip_structure(
+            tree: &WidgetTree,
+            panel_id: WidgetId,
+            max_w: f32,
+            pad: f32,
+            label: &str,
+        ) {
+            let panel = tree.get(panel_id).expect("panel exists");
+            assert!(
+                matches!(panel.widget, Widget::Panel { .. }),
+                "{label}: root must be Panel"
+            );
+            // Z-tier must be Tooltip so tooltips render above modals/overlays.
+            let tier = tree.z_tier(panel_id);
+            assert_eq!(
+                tier,
+                Some(ZTier::Tooltip),
+                "{label}: must be ZTier::Tooltip"
+            );
+            // Constraint caps width.
+            let c = panel
+                .constraints
+                .as_ref()
+                .expect(&format!("{label}: needs constraints"));
+            assert!(
+                (c.max_width - max_w).abs() < 0.01,
+                "{label}: constraint max_width={}, expected {}",
+                c.max_width,
+                max_w,
+            );
+            assert!(
+                (panel.padding.left - pad).abs() < 0.01,
+                "{label}: padding should match tooltip_padding"
+            );
+            // First child is a Column.
+            assert_eq!(
+                panel.children.len(),
+                1,
+                "{label}: Panel should have 1 child (Column)"
+            );
+            let col = tree.get(panel.children[0]).expect("column");
+            assert!(
+                matches!(col.widget, Widget::Column { .. }),
+                "{label}: Panel child must be Column"
+            );
+        }
+
+        // === 1. W04 tooltip (show_tooltip via TooltipContent::Text) ===
+        let mut tree1 = WidgetTree::new();
+        let btn = tree1.insert_root(Widget::Button {
+            text: "X".into(),
+            color: [1.0; 4],
+            bg_color: [0.3; 4],
+            border_color: [0.5; 4],
+            font_size: 14.0,
+            font_family: FontFamily::default(),
+        });
+        tree1.set_position(btn, Position::Fixed { x: 10.0, y: 10.0 });
+        let long = "word ".repeat(80); // long text that must wrap
+        tree1.set_tooltip(btn, Some(TooltipContent::Text(long)));
+        tree1.layout(screen(), &mut HeuristicMeasurer);
+
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        let br = tree1.get(btn).unwrap().rect;
+        state.handle_cursor_moved(&mut tree1, br.x + 1.0, br.y + 1.0);
+        state.update_tooltips(&mut tree1, &theme, screen(), t0, &mut HeuristicMeasurer);
+        let t1 = t0 + Duration::from_millis(theme.tooltip_delay_ms + 1);
+        state.update_tooltips(&mut tree1, &theme, screen(), t1, &mut HeuristicMeasurer);
+        assert_eq!(state.tooltip_count(), 1);
+
+        let w04_panel = tree1.roots()[1]; // second root = tooltip
+        assert_tooltip_structure(&tree1, w04_panel, max_w, pad, "W04");
+
+        // After layout, width must be <= max and height > single line.
+        tree1.layout(screen(), &mut HeuristicMeasurer);
+        let w04_rect = tree1.get(w04_panel).unwrap().rect;
+        assert!(
+            w04_rect.width <= max_w + 0.01,
+            "W04 width {} should be <= {}",
+            w04_rect.width,
+            max_w,
+        );
+        let one_line_h = HeuristicMeasurer
+            .measure_text("M", theme.font_body_family, theme.font_body_size)
+            .height;
+        assert!(
+            w04_rect.height > one_line_h + pad * 2.0,
+            "W04 height {} should indicate multi-line wrapping (single-line ~{})",
+            w04_rect.height,
+            one_line_h + pad * 2.0,
+        );
+
+        // === 2. I01b hover tooltip (build_hover_tooltip) ===
+        let mut tree2 = WidgetTree::new();
+        let info = HoverInfo {
+            tile_x: 0,
+            tile_y: 0,
+            terrain: "Floor".into(),
+            quartier: None,
+            address: Some("Rue de Rivoli, 261".into()),
+            building_name: Some("Vandermersch (J.-A.) et Cie (blanchisseurs de calicots et percales, toiles et tissus de coton)".into()),
+            occupants: vec![("An extremely long occupant name that should definitely exceed the tooltip max width when combined with their lengthy activity description".into(), "some very long activity description here".into())],
+            occupant_year_suffix: None,
+            entities: Vec::new(),
+        };
+        let i01b_panel = build_hover_tooltip(
+            &mut tree2,
+            &theme,
+            &info,
+            (100.0, 100.0),
+            screen(),
+            &mut HeuristicMeasurer,
+        );
+        assert_tooltip_structure(&tree2, i01b_panel, max_w, pad, "I01b");
+
+        // After layout, width must be <= max and height must be multi-line.
+        tree2.layout(screen(), &mut HeuristicMeasurer);
+        let i01b_rect = tree2.get(i01b_panel).unwrap().rect;
+        assert!(
+            i01b_rect.width <= max_w + 0.01,
+            "I01b width {} should be <= {}",
+            i01b_rect.width,
+            max_w,
+        );
+        // With long building name + long occupant, must exceed a few lines.
+        let min_expected_h = one_line_h * 3.0 + pad * 2.0;
+        assert!(
+            i01b_rect.height > min_expected_h,
+            "I01b height {} should indicate multi-line wrapping (min expected ~{})",
+            i01b_rect.height,
+            min_expected_h,
         );
     }
 
