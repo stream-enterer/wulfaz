@@ -1244,10 +1244,14 @@ impl ApplicationHandler for App {
                             // Apply demo slide animation (UI-DEMO + UI-W05).
                             if let Some(demo_id) = demo_root_id {
                                 let slide = self.animator.get("demo_slide", now).unwrap_or(0.0);
-                                let base_x = screen_w as f32 - 400.0 - 4.0;
+                                let base_x = screen_w as f32
+                                    - ui::demo::PANEL_WIDTH
+                                    - ui::demo::MARGIN_RIGHT;
                                 if slide > 0.0 {
-                                    // Slide offset: slide * panel_width (positive = off-screen right).
-                                    let offset = slide * 404.0; // 400 + 4 margin
+                                    // Slide offset: panel must travel full width + margin
+                                    // to clear the screen edge.
+                                    let offset =
+                                        slide * (ui::demo::PANEL_WIDTH + ui::demo::MARGIN_RIGHT);
                                     self.ui_tree.set_position(
                                         demo_id,
                                         ui::Position::Fixed {

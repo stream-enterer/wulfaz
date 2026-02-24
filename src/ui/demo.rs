@@ -10,6 +10,11 @@ use super::theme::Theme;
 use super::widget::{CrossAlign, TooltipContent, Widget};
 use super::{Edges, EntityInspectorInfo, Position, Size, Sizing, WidgetId, WidgetTree};
 
+/// Demo panel width in pixels.
+pub const PANEL_WIDTH: f32 = 400.0;
+/// Horizontal margin between the demo panel and the right screen edge.
+pub const MARGIN_RIGHT: f32 = 30.0;
+
 /// Live simulation data for the demo's live-data section.
 pub struct DemoLiveData<'a> {
     pub entity_info: Option<&'a EntityInspectorInfo>,
@@ -30,7 +35,7 @@ pub fn build_demo(
     screen: Size,
     scroll_offset: f32,
 ) -> (WidgetId, WidgetId) {
-    let panel_w = 400.0_f32;
+    let panel_w = PANEL_WIDTH;
     let panel_h = screen.height - 8.0; // 4px margin top+bottom
     let content_w = panel_w - theme.panel_padding * 2.0;
 
@@ -44,7 +49,7 @@ pub fn build_demo(
     tree.set_position(
         root,
         Position::Fixed {
-            x: screen.width - panel_w - 4.0,
+            x: screen.width - panel_w - MARGIN_RIGHT,
             y: 4.0,
         },
     );
