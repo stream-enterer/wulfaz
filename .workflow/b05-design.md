@@ -1,436 +1,12 @@
 # B05 — Door Placement & Passage Carving
 
-Design produced via concentric planning (enumerate → shape → specify → refine).
-Tiered from MVP to full polish.
+Preprocessor extension. Runs after `classify_walls_floors()`, before
+`save_paris_binary()`. Modifies `TileMap` terrain in-place. Does not modify
+`BuildingRegistry`, `building_id`, `block_id`, or `quartier_id` arrays.
 
-## Diagnostic Baseline
+## Constraints
 
-From `building_diag` run on the current Paris dataset:
-
-| Metric | Value |
-|--------|-------|
-| BATI=1 buildings | 21,035 |
-| With interior (Floor > 0) | 20,368 (96.8%) |
-| All-wall (no Floor) | 667 (3.2%) |
-| Road-adjacent walls | 15,418 (75.7%) |
-| Courtyard-only access | 4,938 (24.2%) |
-| Landlocked (neither) | 12 (0.06%) |
-| Dual-door candidates (Road + Courtyard) | 14,504 (71.2%) |
-| Island courtyard regions | 10,128 (875K tiles) |
-| Arcis BATI=1 with Floor | 437 |
-| Arcis landlocked | 1 |
-| Arcis with occupants | 273 (1,814 records) |
-
-Key insight: landlocked buildings are negligible (12). The dominant topology
-problem is **island courtyards** (10K regions) and the 4,938 buildings whose
-only external access faces those courtyards.
-
-However, 14,504 buildings have **both** Road and Courtyard access. When these
-get doors on both sides, their interior provides a walkable path from Road
-through the building into the courtyard. This means most island courtyards
-become reachable automatically once dual-door buildings are handled.
-
----
-
-## Complete Feature Inventory
-
-### Core Placement
-
-**F01 — External door candidate detection.**
-For each BATI=1 building, identify wall tiles that have a cardinal neighbor
-which is (a) walkable and (b) outside this building (different building_id
-or no building_id). These are door candidates.
-- Inputs: TileMap (terrain, building_id), BuildingRegistry (BATI=1, tile lists).
-- Outputs: `Vec<(i32, i32)>` of candidate tiles per building.
-- Edge: Wall tile adjacent to Water — Water is not walkable, no candidate. Correct by default.
-- Edge: Wall tile at map boundary — `get_terrain` returns None. Skip. Correct.
-- Edge: Building tile overwritten by BATI=2/3 (now Courtyard/Garden/Fixture terrain) — no
-  longer Wall, so not considered. Building_id is a remnant. Correct.
-- Edge: Building with zero tiles — skip.
-
-**F02 — Facade run detection.**
-Group a building's door candidates into contiguous runs via 4-connected
-adjacency. Two candidate tiles are in the same run if they share a cardinal
-edge. This naturally splits at corners and gaps.
-- Inputs: Candidate tiles from F01.
-- Outputs: `Vec<Vec<(i32, i32)>>` — list of runs per building.
-- Edge: Single isolated candidate (no adjacent candidates) — run of length 1.
-- Edge: L-shaped facade wrapping a corner — stays as one run if tiles are
-  cardinally connected. This is correct: an L still has physical continuity.
-- Edge: Building with candidates on all 4 sides — splits into 4+ runs
-  (breaks wherever tiles are not cardinally adjacent).
-
-**F03 — Door selection heuristic.**
-Within each facade run, select which tiles become Doors. Controls density:
-not every candidate needs to become a door.
-- Inputs: Facade runs from F02.
-- Outputs: Final set of `(i32, i32)` tiles to convert to Door.
-- Selection rules:
-  - Run length 1–2: 1 door (first tile).
-  - Run length 3–10: 1 door at midpoint.
-  - Run length 11–20: 2 doors at ⅓ and ⅔ positions.
-  - Run length 21+: 1 door per 10 tiles, evenly spaced.
-- All selected tiles must pass the **door-floor adjacency check**: at least
-  one cardinal neighbor is Floor or Garden (building interior). If midpoint
-  fails, slide to nearest candidate that passes.
-- Edge: All candidates in a run fail the adjacency check (entire facade is a
-  1-tile-wide wing with no interior behind it) — no door for this run. Building
-  may still get doors from other runs.
-
-**F04 — Dual-door guarantee.**
-After F03, verify that buildings with both Road-adjacent and Courtyard-adjacent
-facade runs have at least one door on each side. If F03 selected only road-facing
-doors, force the best courtyard-facing candidate (midpoint of longest courtyard
-run that passes the adjacency check), and vice versa.
-- Inputs: Selected doors from F03, facade runs from F02, terrain type of each
-  run's external neighbors.
-- Outputs: Additional Door tiles where the guarantee was missing.
-- Edge: Building has courtyard-adjacent candidates but all fail the adjacency
-  check — cannot place a courtyard door. This building's courtyard side remains
-  sealed. Acceptable; the courtyard must then be reached through another building.
-
-### Connectivity
-
-**F05 — Island courtyard piercing.**
-For each island courtyard region (4-connected Courtyard component with no
-Road neighbor), find a perimeter building that already has road access and
-add a courtyard-facing door to it.
-- Inputs: Courtyard regions (computed via 4-connected BFS), TileMap,
-  building doors already placed by F03/F04.
-- Outputs: Additional Door tiles on TileMap.
-- Algorithm:
-  1. Build courtyard regions (BFS over Courtyard terrain).
-  2. Identify island regions (no tile has a Road cardinal neighbor).
-  3. For each island region, scan boundary tiles and collect building_ids of
-     adjacent Wall tiles. These are the perimeter buildings.
-  4. Among perimeter buildings, find one that already has a road-reachable Door
-     (query TileMap: does this building have a Door tile with a Road cardinal
-     neighbor, or a Door reachable from Road via walkable BFS?). Simplified
-     check: does the building have any Door tile adjacent to Road?
-  5. On that building, find a Wall tile that is adjacent to both the courtyard
-     region and an interior Floor tile. Convert to Door. (If the tile is already
-     Door from an earlier placement pass, the courtyard is already connected —
-     skip.)
-  6. If no perimeter building has road access: chain — find a perimeter building
-     adjacent to a *connected* courtyard region, and pierce through that instead.
-     This handles nested courtyards.
-- Edge: Very large island courtyard with many perimeter buildings — pick the
-  building with the shortest interior path between its road-door and the
-  courtyard-facing wall (approximation: fewest tiles, or just pick first found).
-- Edge: Island courtyard enclosed entirely by all-wall buildings (no Floor) —
-  cannot pierce. Log warning, leave as island.
-- Edge: Nested courtyards (courtyard inside a courtyard) — the chaining step
-  handles this by connecting to an already-connected courtyard region.
-- Error: If no path can be found, log warning. Don't panic.
-
-**F06 — Landlocked building passage carving.**
-For the 12 landlocked buildings (no wall tile adjacent to any walkable external
-terrain), carve a passage through intervening buildings.
-- Inputs: Landlocked buildings (F01 produces zero candidates), TileMap.
-- Outputs: Carved passage tiles on TileMap.
-- Algorithm: Use F07 (BFS routing) to find shortest path from building's wall
-  tiles through Wall/Floor tiles of other buildings to nearest Road or Courtyard.
-  Apply F08 terrain semantics.
-- Diagnostic baseline: 2 at depth 1, 4 at depth 2, 2 at depth 3, 3 at depth 4–5,
-  1 unreachable (>50 tiles). The unreachable building is likely a data artifact.
-- Edge: Carve path traverses a building with occupants — historically correct
-  (allée through the ground floor). Carved tiles retain the traversed building's
-  building_id.
-- Edge: Carve path goes through only Wall tiles (thin building, no Floor to
-  traverse) — that's fine; Wall → Floor for interior, Wall → Door for endpoints.
-
-**F07 — Carve path routing.**
-BFS from a set of seed tiles outward through Wall and Floor tiles (treating
-them as traversable) until a Road or Courtyard tile is reached. Returns the
-ordered path.
-- Inputs: Seed tiles (wall tiles of the landlocked building, or courtyard
-  boundary tiles), TileMap.
-- Outputs: `Vec<(i32, i32)>` — ordered path from seed to destination (exclusive
-  of the destination Road/Courtyard tile itself).
-- Cardinal movement only (4-dir). Uniform cost (BFS, not A*).
-- Max search depth: 50 tiles. Beyond that, abandon and report.
-- Shared by F05 (fallback for unreachable courtyards) and F06 (landlocked
-  buildings).
-
-**F08 — Passage terrain semantics.**
-Define what terrain carved tiles become.
-- Path endpoints (first and last tile, which are wall tiles of the source and
-  destination buildings): **Door**.
-- Interior path tiles (Wall/Floor tiles of traversed buildings): **Floor**.
-  This preserves 18°C thermal behavior and avoids a cold corridor of 17°C Door
-  tiles through the building. The Door-Floor-Door sandwich is historically
-  correct: you enter the allée through a door, walk through the ground floor,
-  exit through another door.
-- Building_id is NOT changed — carved tiles retain ownership of whatever
-  building they were part of.
-
-### Edge Cases
-
-**F09 — Small building policy.**
-667 all-wall buildings (no Floor tiles). They cannot receive doors under the
-standard rule (Door requires a Floor neighbor).
-- Classification:
-  - ≤4 tiles (318 buildings): **Skip.** These are genuinely tiny structures —
-    boundary walls, sheds, ruins. Too small for occupants. No door, no spawning.
-  - 5–20 tiles (334 buildings): **Convert one tile to Floor.** Pick the tile
-    with the most same-building cardinal neighbors (most interior). This gives
-    the building at least one Floor tile, enabling normal door placement.
-  - 21+ tiles (15 buildings): **Convert all non-edge tiles to Floor.** These
-    are significant structures that should have been classified with interior
-    tiles. Likely caused by thin or irregular polygon rasterization. Apply the
-    same wall/floor classification logic but using 8-connected neighbors instead
-    of 4-connected (more permissive — a tile is Floor if all 8 neighbors belong
-    to the same building).
-- Inputs: BuildingRegistry, TileMap.
-- Outputs: Modified terrain (some Wall → Floor), then normal door placement.
-- Must run BEFORE F01 (door candidate detection).
-
-**F10 — Garden conversion.**
-24 buildings with "parc ou jardin" in `nom_bati`: convert interior Floor tiles
-to Garden.
-- Door tiles are NOT converted — they remain Door.
-- Must run AFTER door placement (F03), so doors are already placed and
-  won't be affected by the Floor → Garden change.
-- Edge: Small garden building where all Floor tiles become Garden and Door
-  now neighbors only Garden — this is fine. Door-Garden adjacency is valid
-  (Garden is walkable interior space, just outdoors).
-- Edge: Garden building that is also landlocked — door placed by F06 first,
-  then garden conversion applies. No conflict.
-
-### Validation
-
-**F11 — Door-floor adjacency check.**
-Every Door tile must have ≥1 cardinal neighbor that is Floor or Garden.
-Violations mean a door was placed on a wall tile with no interior behind it.
-- Run after all placement is complete (including garden conversion).
-- Output: count of violations. Log each violating tile coordinate.
-- Not a hard failure — violating doors are still walkable and functional for
-  pathfinding. But they indicate a logic error in placement.
-
-**F12 — Per-building door check.**
-Every BATI=1 building with ≥1 Floor or Garden tile must have ≥1 Door tile.
-- Run after all placement is complete.
-- Output: list of doorless buildings (BuildingId, quartier, superficie, tile count).
-- Expected: 0 after all tiers are implemented. In Tier 1, some all-wall
-  buildings will appear here (acceptable).
-- Buildings with zero Floor AND zero Garden are excluded (they were skipped
-  by F09 policy for ≤4 tiles).
-
-**F13 — Global connectivity validation.**
-BFS from a single Road tile, following all walkable terrain. After BFS, check
-that every Door tile and every Courtyard tile was visited.
-- Output: visited counts by terrain type, unreachable Door count, unreachable
-  Courtyard tile count.
-- Performance: ~30M tiles, BFS is O(n). Under 2 seconds. Fine for preprocessing.
-- Not a hard failure — some deep island courtyards may remain unreachable.
-  Report the count and locations.
-
-**F14 — Courtyard reachability check.**
-After F13's BFS, count how many courtyard regions have ≥1 visited tile vs.
-how many are entirely unvisited (still island).
-- Output: `X/Y courtyard regions reachable (Z%)`.
-- This is the primary success metric for F05 (island courtyard piercing).
-
-### Integration
-
-**F15 — Pipeline integration.**
-New public function in `loading_gis.rs`:
-```rust
-pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry)
-```
-Called in `preprocess.rs` between `rasterize_paris()` (line 163, which includes
-`classify_walls_floors`) and `save_paris_binary()` (line 198). The function
-modifies `tiles` in-place. No changes to BuildingRegistry needed (building_id
-on tiles is preserved; Door tiles retain their original building_id).
-
-Call site in `preprocess.rs`:
-```rust
-// After rasterize + water + addresses + occupants, before save:
-println!("Placing doors...");
-loading_gis::place_doors(&mut tiles, &buildings);
-```
-
-**F16 — Operation ordering.**
-Within `place_doors` (full pipeline — each tier implements its subset):
-1. F09 — Small building fix (Wall → Floor for eligible all-wall buildings)
-2. F01 — Door candidate detection
-3. F02 — Facade run detection
-4. F03 — Door selection (Tier 1: all candidates; Tier 3: heuristic)
-5. F04 — Dual-door guarantee fixup
-6. F05 — Island courtyard piercing
-7. F06 — Landlocked passage carving (using F07 routing + F08 semantics)
-8. F10 — Garden conversion
-9. F11–F14 — Validation suite
-10. Diagnostic log output
-
-Tier 1 runs steps 2, 4 (simplified), 8, 9 (partial), 10.
-Tier 2 adds steps 6, 7, and full 9.
-Tier 3 replaces step 4 and adds steps 3, 5.
-Tier 4 adds step 1 and completes all remaining.
-
-**F17 — Diagnostic reporting.**
-Log the following during preprocessing:
-```
-  Small buildings: 334 converted to Floor, 318 skipped (≤4 tiles)
-  Door placement: 127,432 doors on 20,368 buildings (avg 6.3/building)
-    Road-facing: 89,201  Courtyard-facing: 38,231
-  Dual-door fixup: 412 additional doors on 389 buildings
-  Island courtyards: 9,847/10,128 connected (97.2%)
-  Landlocked passages: 11/12 carved (1 unreachable)
-  Gardens: 24 buildings, 1,847 tiles converted
-  Validation:
-    Door-floor adjacency violations: 0
-    Doorless buildings: 0
-    Connectivity: 100.0% doors reachable, 97.2% courtyards reachable
-```
-(Numbers are estimates. Actual values from implementation.)
-
-**F18 — Downstream contracts.**
-- **B03 (entity spawning):** Every building with occupant data in the registry
-  has ≥1 Door tile reachable from the Road network. B03 can pathfind from any
-  Road tile to a building's Door. The Door tile's `building_id` identifies which
-  building it belongs to.
-- **B06 (interior generation):** Door tiles have `terrain == Door` and retain
-  their `building_id`. B06 must not place furniture on Door tiles. B06 can query
-  `get_terrain(x, y) == Door` to identify no-furniture zones within a building.
-
----
-
-## Tiered Implementation Plan
-
-### Tier 1 — MVP (unblock B03)
-
-**Goal:** Every building with interior space gets at least one door. Entities
-can pathfind from Road to building interior. Crude but functional.
-
-**Features:**
-- **F01** — Door candidate detection.
-- **F15** — Pipeline integration (`place_doors` function + call site).
-- **Simplified F03** — ALL candidates become Doors. No facade runs, no spacing
-  heuristic. Every valid wall tile (walkable exterior neighbor + Floor interior
-  neighbor) is set to Door.
-- **F10** — Garden conversion (24 buildings, trivial, independent).
-- **F12** — Per-building door check (basic validation).
-- **F17** (partial) — Log door count and doorless building count.
-
-**What this achieves:**
-- 75.7% of buildings get road-facing doors (all valid wall tiles → Door).
-- 14,504 dual-access buildings get doors on BOTH sides automatically (because
-  all candidates are converted). This connects most island courtyards via
-  Road → Door → Floor → Door → Courtyard.
-- 24.2% courtyard-only buildings get courtyard doors. Many of their courtyards
-  become reachable through dual-access neighbors.
-- 0.06% landlocked buildings remain without doors (12 total, 1 in Arcis).
-- 3.2% all-wall buildings remain without doors (667 total, 6 in Arcis).
-- Garden buildings converted.
-
-**What's deferred:** Door density is maximal (every candidate wall tile is a
-door). Buildings have 20+ doors where they should have 2–3. Visually crude.
-12 landlocked buildings unreachable. Some island courtyards remain isolated.
-
-**Unknown until measured:** How many island courtyards become connected after
-Tier 1? The 14,504 dual-access buildings get doors on both sides, which should
-connect most courtyards. But the exact number depends on whether every island
-courtyard has at least one dual-access perimeter building. Run F13 (global
-connectivity BFS) as a diagnostic after Tier 1 to measure actual reachability
-before committing to Tier 2's scope.
-
-**Estimated scope:** ~100 lines of Rust. One function. One afternoon.
-
-**Arcis coverage:** 430/437 buildings accessible (98.4%). Sufficient for B03.
-
----
-
-### Tier 2 — Connectivity Hardening
-
-**Goal:** Close the remaining connectivity gaps. Every courtyard region and
-every landlocked building is reachable from the Road network.
-
-**Features:**
-- **F05** — Island courtyard piercing. For each island courtyard region, find
-  a perimeter building with road access, place a courtyard-facing door.
-- **F06** — Landlocked building passage carving (12 buildings).
-- **F07** — Carve path routing (BFS utility, shared by F05 and F06).
-- **F08** — Passage terrain semantics (Door-Floor-Door sandwich).
-- **F13** — Global connectivity validation (BFS from Road, check all Doors
-  and Courtyards visited).
-- **F14** — Courtyard reachability check.
-
-**What this achieves:**
-- Island courtyards connected: target >95% of 10,128 regions.
-- 11 of 12 landlocked buildings connected (1 unreachable data artifact).
-- Global connectivity validated with quantified metrics.
-
-**Depends on:** Tier 1 complete (doors already placed on non-landlocked buildings).
-
-**Estimated scope:** ~250 lines. Courtyard region BFS + perimeter building
-detection + piercing logic + passage carving + validation. The BFS routing
-is the most complex single piece.
-
----
-
-### Tier 3 — Door Quality
-
-**Goal:** Replace "all valid tiles → Door" with a controlled heuristic. Buildings
-get a realistic number of doors, properly spaced. Visual quality improves
-significantly.
-
-**Features:**
-- **F02** — Facade run detection (4-connected candidate grouping).
-- **F03** (full) — Door selection heuristic (midpoint, spacing rules by run length).
-- **F04** — Dual-door guarantee (after selection, verify both-side coverage).
-- **F11** — Door-floor adjacency check (validate selection quality).
-
-**What this achieves:**
-- Door count drops from ~6 per building average (all candidates) to ~2–3
-  (heuristic selection). Buildings look like buildings, not colanders.
-- Dual-door guarantee preserves courtyard connectivity from Tier 2.
-- Adjacency validation catches placement bugs.
-
-**Risk:** Reducing door count could break connectivity if the heuristic removes
-a door that was the only courtyard link. F04 mitigates this — dual-door
-guarantee runs as a fixup pass and forces courtyard doors where needed.
-
-**Depends on:** Tier 2 complete (connectivity guarantees must be maintained
-through the transition from all-doors to selected-doors).
-
-**Estimated scope:** ~150 lines. Facade detection is a standard connected-
-component algorithm. Selection is a simple spacing function. Dual-door
-fixup is a scan + force.
-
----
-
-### Tier 4 — Edge Cases & Completeness
-
-**Goal:** Handle the long tail. Every building in the dataset is correctly
-processed, including pathological cases.
-
-**Features:**
-- **F09** — Small building policy (667 all-wall buildings: ≤4 tiles skipped,
-  5–20 tiles get synthetic Floor, 21+ tiles get reclassified).
-- **F12** (strict) — Per-building door check with zero tolerance (every building
-  with Floor or Garden must have a door).
-- **F17** (full) — Comprehensive diagnostic logging with all metrics.
-- **F18** — Downstream contracts documented and validated.
-
-**What this achieves:**
-- 349 more buildings gain interiors and doors (5+ tile all-wall buildings).
-- 318 tiny buildings (≤4 tiles) formally excluded from door/spawn logic.
-- Zero doorless buildings in the validation output (excluding the ≤4 tile
-  exclusions and the 1 unreachable data artifact).
-- Full diagnostic suite for ongoing regression detection.
-
-**Depends on:** Tier 3 complete (door selection heuristic must be in place
-before adding more buildings to the pool).
-
-**Estimated scope:** ~100 lines. Small building fix is simple iteration.
-Validation is straightforward. Diagnostics are print statements.
-
----
-
-## Cross-Cutting Concerns
-
-### Pipeline Position
+### Pipeline position
 
 ```
 preprocess.rs main():
@@ -442,38 +18,470 @@ preprocess.rs main():
   save_paris_binary()
 ```
 
-`place_doors` modifies only `TileMap` terrain values. It does not modify
-`BuildingRegistry`, `building_id` arrays, `block_id` arrays, or `quartier_id`
-arrays. Door tiles inherit the building_id of the wall tile they replace.
+Entry point in `loading_gis.rs`:
+```rust
+pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry)
+```
 
-### Terrain Transition Rules
+Call site in `preprocess.rs` (between occupant loading and binary save):
+```rust
+println!("Placing doors...");
+loading_gis::place_doors(&mut tiles, &buildings);
+```
 
-| Before | After | Condition |
-|--------|-------|-----------|
-| Wall | Door | Wall tile is a selected door candidate |
-| Wall | Floor | Carved passage interior tile (F06/F08) |
-| Floor | Garden | Garden building interior (F10) |
-| Wall | Floor | Small building interior fix (F09) |
+### Terrain transitions
 
-No other terrain transitions occur. Road, Courtyard, Water, Bridge, Fixture
-are never modified by B05.
+Only these transitions are permitted. All others are bugs.
 
-### Temperature Impact
+| Before | After | Trigger |
+|--------|-------|---------|
+| Wall | Door | Door candidate selected |
+| Wall | Floor | Passage interior (Phase 2) or small building fix (Phase 4) |
+| Floor | Garden | Garden conversion |
 
-- Door: 17°C target (between Floor 18°C and Road 16°C). Thermal transition zone.
-- Carved passages use Floor (18°C) in the interior with Door (17°C) only at
-  endpoints. No cold corridor artifacts.
-- Garden conversion (Floor 18°C → Garden 15°C) is a 3°C drop. Correct: outdoor
-  green space is cooler than building interior.
+Road, Courtyard, Water, Bridge, Fixture are never modified.
 
-### Known Limitations
+### Rendering glyphs
 
-1. **One unreachable landlocked building** (carve depth >50). Likely a data
-   artifact. Logged and skipped. 0 impact on Arcis.
+| Terrain | Glyph | Example wall run |
+|---------|-------|------------------|
+| Wall | `#` | `######` |
+| Door (closed) | `+` | `##+##` |
+| Door (open) | `-` | `##-##` (future) |
+
+Renderer already maps `Terrain::Door => '+'`. Open/closed differentiation
+is not yet implemented; all doors render as `+`. When door state is added,
+open doors switch to `-`.
+
+### Temperature
+
+- Door: 17°C (transition zone between Floor 18°C and Road 16°C).
+- Carved passage interior tiles use Floor (18°C), not Door, to avoid
+  cold corridor artifacts. Door only at passage endpoints.
+- Garden: 15°C (outdoor green space, 3°C cooler than Floor).
+
+### Downstream contracts
+
+- **B03 (entity spawning):** Every building with occupant data has ≥1 Door
+  tile reachable from the Road network. Door tile's `building_id` identifies
+  its building. B03 can pathfind from any Road tile to a building's Door.
+- **B06 (interior generation):** Door tiles have `terrain == Door` and retain
+  `building_id`. B06 must not place furniture on Door tiles.
+
+## Diagnostic baseline
+
+From `cargo run --bin building_diag`:
+
+| Metric | Value |
+|--------|-------|
+| BATI=1 buildings | 21,035 |
+| With interior (Floor > 0) | 20,368 (96.8%) |
+| All-wall (no Floor) | 667 (3.2%) |
+| Road-adjacent walls | 15,418 (75.7%) |
+| Courtyard-only access | 4,938 (24.2%) |
+| Landlocked (no Road or Courtyard neighbor) | 12 (0.06%) |
+| Dual-door candidates (Road + Courtyard) | 14,504 (71.2%) |
+| Island courtyard regions (4-connected) | 10,128 (875K tiles) |
+| Arcis BATI=1 with Floor | 437 |
+| Arcis landlocked | 1 |
+| Arcis buildings with occupants | 273 (1,814 records) |
+
+---
+
+## Phase 1 — MVP
+
+**Goal:** Every BATI=1 building with interior space gets doors. Entities can
+pathfind from Road to building interior. Unblocks B03.
+
+**Approach:** Convert ALL valid wall tiles to Door (no spacing heuristic).
+This is intentionally crude — maximizes connectivity, defers visual quality.
+
+### Entry criteria
+
+- `classify_walls_floors()` has run. Every BATI=1 building tile is Wall or Floor.
+- `BuildingRegistry` is populated with tile lists and BATI classification.
+
+### Steps
+
+**Step 1 — Door candidate detection and placement.**
+
+Iteration pattern (mirrors `classify_walls_floors` in `loading_gis.rs`):
+```rust
+let mut door_tiles: Vec<(usize, usize)> = Vec::new();
+for bdata in &buildings.buildings {
+    if bdata.bati != 1 { continue; }
+    let bid = bdata.id;                       // BuildingId
+    for &(cx, cy) in &bdata.tiles {           // tiles: Vec<(i32, i32)>
+        let ux = cx as usize;
+        let uy = cy as usize;
+        if tiles.get_terrain(ux, uy) != Some(Terrain::Wall) { continue; }
+        // ... candidate checks using ux, uy, bid ...
+    }
+}
+for (x, y) in door_tiles { tiles.set_terrain(x, y, Terrain::Door); }
+```
+
+For each Wall tile, check cardinal neighbors `(cx+dx, cy+dy)` with
+`dx, dy` in `[(-1,0), (1,0), (0,-1), (0,1)]`. Cast to usize; if either
+coord is negative, skip (map boundary).
+
+1. **Exterior candidate:** any neighbor where
+   `tiles.get_terrain(nx, ny).map_or(false, |t| t.is_walkable())` AND
+   `tiles.get_building_id(nx, ny) != Some(bid)`. Uses `Terrain::is_walkable()`
+   method (true for Road, Floor, Door, Courtyard, Garden, Bridge, Fixture).
+2. **Interior access:** any neighbor where
+   `tiles.get_terrain(nx, ny) == Some(Terrain::Floor)` AND
+   `tiles.get_building_id(nx, ny) == Some(bid)`.
+3. If BOTH pass, push `(ux, uy)` to `door_tiles`.
+
+Collect-then-apply: batch `set_terrain` calls after iteration.
+
+Skip buildings with `bati != 1`. Skip buildings with zero tiles.
+
+Edge cases handled automatically:
+- Wall adjacent to Water: `is_walkable()` returns false → no exterior candidate.
+- Wall at map boundary: `get_terrain` returns None → `map_or(false, ...)` → skip.
+- Building tiles overwritten by BATI=2/3 (Courtyard/Garden/Fixture terrain):
+  `get_terrain != Some(Wall)` → skipped.
+
+**Step 2 — Garden conversion.**
+
+For each building where `nom_bati: Option<String>` contains "parc" or "jardin":
+```rust
+if let Some(ref name) = bdata.nom_bati {
+    let lower = name.to_lowercase();
+    if lower.contains("parc") || lower.contains("jardin") { ... }
+}
+```
+(24 buildings match.) Iterate the building's tiles. For each tile that is
+`Terrain::Floor`, set `terrain = Garden`. Do NOT convert Door tiles.
+
+This runs AFTER door placement so doors are preserved.
+
+**Step 3 — Per-building door validation.**
+
+For each BATI=1 building with ≥1 Floor or Garden tile: scan its tiles for at
+least one Door. Log any doorless buildings (id, quartier, tile count).
+
+Expected: 667 doorless buildings (the all-wall buildings). 0 doorless
+buildings that have interior space.
+
+**Step 4 — Diagnostic log.**
+
+```
+Door placement: {N} doors on {M} buildings (avg {N/M:.1}/building)
+Gardens: {G} buildings, {T} tiles converted
+Doorless buildings with interior: {D} (expected 0)
+Doorless buildings without interior: {W} (all-wall, expected 667)
+```
+
+### Exit criteria
+
+- Every BATI=1 building with ≥1 Floor tile has ≥1 Door tile.
+- 24 garden buildings have Floor→Garden conversion.
+- `cargo run --bin building_diag` still runs clean on the output.
+- `cargo test` passes.
+- Arcis coverage: ≥430/437 buildings with doors (98.4%).
+
+### What this defers
+
+- Door density is maximal (buildings have 20+ doors). Phase 3 fixes this.
+- 12 landlocked buildings remain without doors. Phase 2 fixes this.
+- 667 all-wall buildings remain without doors. Phase 4 fixes this.
+- Island courtyard reachability is unknown — measure with Phase 2's
+  connectivity BFS to quantify before committing to piercing scope.
+
+---
+
+## Phase 2 — Connectivity
+
+**Goal:** Every courtyard region and every landlocked building is reachable
+from the Road network via walkable tiles.
+
+### Entry criteria
+
+Phase 1 complete. Doors placed on all non-landlocked buildings.
+
+### Steps
+
+**Step 1 — BFS carve routing utility.**
+
+Implement a shared BFS function:
+```rust
+fn bfs_to_walkable(
+    tiles: &TileMap,
+    seeds: &[(i32, i32)],
+    max_depth: usize,
+) -> Option<Vec<(i32, i32)>>
+```
+
+BFS from `seeds` outward through Wall and Floor tiles (treating both as
+traversable). Cardinal movement only (4-dir). Stop when a tile with
+walkable terrain outside any building is reached (Road, Courtyard, Garden,
+Bridge, Fixture with no building_id, or terrain already Door). Return the
+path from seed to the tile adjacent to the walkable destination (exclusive
+of destination). Return None if max_depth exceeded.
+
+Implementation: use `VecDeque<(i32, i32)>` as queue, `HashSet<(i32, i32)>`
+for visited. Track parents via `HashMap<(i32, i32), (i32, i32)>`. On
+reaching a goal tile, walk the parent chain back to the seed to reconstruct
+the path. Coordinates are `i32` throughout BFS; cast to `usize` only for
+TileMap accessor calls. Skip neighbors where `nx < 0 || ny < 0`.
+
+Max depth: 50 tiles (track depth per-node, or limit BFS expansions).
+
+**Step 2 — Landlocked building passage carving.**
+
+For each BATI=1 building where Phase 1 placed zero doors AND the building
+has ≥1 Floor tile (12 buildings):
+
+1. Collect all Wall tiles of this building as BFS seeds.
+2. Call `bfs_to_walkable(tiles, &seeds, 50)`.
+3. If path found (path = Vec of tiles from building wall to destination wall):
+   - First tile (building's own wall): set `terrain = Door`.
+   - Middle tiles (all except first and last): set `terrain = Floor`.
+     These tiles retain their original `building_id` (may belong to
+     intervening buildings). This is expected — they become walkable
+     corridor tiles. Do not change `building_id`.
+   - Last tile (wall of destination building): set `terrain = Door`.
+4. If not found: log warning with building id and quartier. Skip.
+
+Expected: 11 carved, 1 unreachable (data artifact, depth >50).
+
+Depth distribution from diagnostic: 2 at depth 1, 4 at depth 2, 2 at
+depth 3, 3 at depth 4–5, 1 unreachable.
+
+**Step 3 — Island courtyard piercing.**
+
+1. Build courtyard regions via 4-connected BFS over all `Terrain::Courtyard`
+   tiles. Each region is a `Vec<(usize, usize)>`. Also build a
+   `HashSet<(usize, usize)>` per region for O(1) membership tests.
+2. Classify each region: **connected** if any tile has a cardinal neighbor
+   with `terrain == Road`. Otherwise **island**. (Door neighbors are NOT
+   sufficient — the Door could face another island courtyard.)
+3. For each island region (process smallest to largest):
+   a. Scan boundary tiles (courtyard tiles with ≥1 non-courtyard cardinal
+      neighbor). For each boundary tile's cardinal neighbors: if the
+      neighbor has `terrain == Wall` and `get_building_id` returns
+      `Some(bid)`, collect `bid`. These are **perimeter buildings**.
+   b. Among perimeter buildings, find one with a Door tile adjacent to Road
+      (road-connected building). Query: does any of this building's tiles
+      have `terrain == Door` AND a cardinal neighbor with `terrain == Road`?
+   c. On that building, find a Wall tile where: (a) ≥1 cardinal neighbor is
+      in THIS region's tile set (`region_set.contains(&(nx, ny))`), AND
+      (b) ≥1 cardinal neighbor is `Terrain::Floor` with same building_id.
+      Set `terrain = Door`. If already Door, courtyard is already
+      connected — skip.
+   d. If no perimeter building has road access: find a perimeter building
+      adjacent to a **connected** courtyard region instead. Pierce through
+      that building (same logic as step c). After piercing, mark this
+      region as **connected** so subsequent island regions can chain
+      through it.
+   e. If no viable building found: log warning. Leave as island.
+
+Process regions from smallest to largest. This ensures small nested
+courtyards that depend on larger outer courtyards being connected are
+handled after those outer courtyards are pierced.
+
+**Step 4 — Global connectivity validation.**
+
+Find a starting Road tile by scanning the grid for the first
+`get_terrain(x, y) == Some(Terrain::Road)`. BFS through all walkable
+terrain (`is_walkable()` tiles). After BFS:
+- Count visited Door tiles vs total Door tiles.
+- Count visited Courtyard tiles vs total Courtyard tiles.
+- Build courtyard regions again (or reuse), count how many have ≥1 visited tile.
+
+Log:
+```
+Connectivity: {D}/{DT} doors reachable ({P:.1}%)
+Courtyards: {CR}/{CT} regions reachable ({CP:.1}%)
+Landlocked passages: {L}/12 carved (1 unreachable data artifact)
+```
+
+Target: >95% courtyard regions reachable, 100% doors reachable.
+
+### Exit criteria
+
+- Global BFS reaches 100% of Door tiles.
+- Global BFS reaches >95% of courtyard regions.
+- 11/12 landlocked buildings have passages carved.
+- `cargo test` passes.
+
+---
+
+## Phase 3 — Door Quality
+
+**Goal:** Replace "all valid candidates → Door" with a spacing heuristic.
+Buildings get 1–3 doors instead of 20+.
+
+### Entry criteria
+
+Phase 2 complete. All connectivity guarantees established.
+
+### Steps
+
+**Note:** Phase 3 REPLACES Phase 1's Step 1 entirely. The `place_doors`
+function is rewritten to use candidate detection → run grouping → selection
+instead of converting all candidates. Garden conversion (Step 2) and
+validation (Steps 3-4) remain unchanged.
+
+**Step 1 — Facade run detection.**
+
+Compute door candidates using the same criteria as Phase 1 Step 1 (exterior +
+interior adjacency), but collect candidates WITHOUT converting to Door.
+
+Group each building's candidates into **facade runs** via 4-connected BFS
+over the candidate set. Two candidate tiles are in the same run if they share
+a cardinal edge. Use a `HashSet<(usize, usize)>` of candidates, BFS from
+each unvisited candidate to find its connected component.
+
+Classify each run by **facing**: check the exterior walkable neighbor of the
+run's tiles. If any tile's exterior neighbor is `Terrain::Road`, the run is
+**Road-facing**. If any is `Terrain::Courtyard`, it is **Courtyard-facing**.
+A run can be both (dual-facing). Store this per run.
+
+Order tiles within each run: walk from one endpoint along cardinal edges.
+For L-shaped runs, use BFS traversal order (the exact order doesn't matter
+for midpoint selection — index `len / 2` picks a tile near the geometric
+center regardless).
+
+Output: `Vec<Vec<(usize, usize)>>` per building — list of runs, each run
+an ordered list of cardinally-adjacent candidate tiles, with facing metadata.
+
+**Step 2 — Door selection heuristic.**
+
+For each facade run, select tile positions:
+
+| Run length | Doors | Positions |
+|-----------|-------|-----------|
+| 1–2 | 1 | First tile |
+| 3–10 | 1 | Midpoint |
+| 11–20 | 2 | ⅓ and ⅔ |
+| 21+ | `max(2, len / 10)` | Evenly spaced: indices `i * len / count` |
+
+Midpoint for even-length runs: index `len / 2` (integer division). For the
+⅓/⅔ positions: indices `len / 3` and `2 * len / 3`.
+
+Each selected tile must pass **interior adjacency**: ≥1 cardinal neighbor is
+Floor or Garden with `get_building_id == Some(bid)`. If the selected index
+fails, slide outward in both directions (index ±1, ±2, …) and pick the
+first candidate that passes. If no candidate in the run passes, skip the
+entire run.
+
+Convert selected tiles to Door. All other candidates remain Wall. Then run
+garden conversion (same as Phase 1 Step 2).
+
+**Step 3 — Dual-door guarantee.**
+
+After selection, check each building that has facade runs facing BOTH Road
+and Courtyard (use the per-run facing metadata from Step 1). Verify it has
+≥1 Door adjacent to Road AND ≥1 Door adjacent to Courtyard. If either side
+is missing, force the midpoint of the longest run on that side (that passes
+the interior adjacency check, with the same slide fallback).
+
+This preserves the courtyard connectivity established in Phase 2. Without
+this fixup, the spacing heuristic could remove the only courtyard-facing
+door from a perimeter building, disconnecting the courtyard.
+
+**Step 4 — Door-floor adjacency validation.**
+
+After all placement (including garden conversion), check every Door tile:
+does it have ≥1 cardinal neighbor that is Floor or Garden? Log violations.
+Not a hard failure — violating doors are still walkable — but indicates a
+selection bug.
+
+### Exit criteria
+
+- Average doors per building drops to 1–3 range (from 6+ in Phase 1).
+- Phase 2's connectivity BFS still passes (re-run validation).
+- Zero door-floor adjacency violations.
+- `cargo test` passes.
+
+---
+
+## Phase 4 — Edge Cases
+
+**Goal:** Handle the 667 all-wall buildings. Full diagnostic suite.
+
+### Entry criteria
+
+Phase 3 complete.
+
+### Steps
+
+**Step 1 — Small building interior fix.**
+
+Run BEFORE door candidate detection (prepend to `place_doors` pipeline).
+
+Full `place_doors` internal ordering (Phases 3+4 combined):
+1. Small building interior fix (this step)
+2. Door candidate detection → facade run grouping → selection (Phase 3)
+3. Landlocked passage carving (Phase 2)
+4. Island courtyard piercing (Phase 2)
+5. Garden conversion
+6. Validation + diagnostic log
+
+For each BATI=1 building with zero Floor tiles:
+- **≤4 tiles (318 buildings):** Skip. Too small for occupants. No door.
+- **5–20 tiles (334 buildings):** Convert one Wall tile to Floor. Pick the
+  tile with the most same-building cardinal neighbors (most interior):
+  count how many of `(cx±1, cy), (cx, cy±1)` have
+  `get_building_id == Some(bid)`. If tied, pick the tile closest to the
+  building centroid (centroid = average of all tile `(cx, cy)` as `f32`).
+- **21+ tiles (15 buildings):** Re-classify with a RELAXED criterion (new
+  logic, not `classify_walls_floors`): a tile is Floor if ≥3 of its 4
+  cardinal neighbors belong to the same building. Otherwise Wall. This is
+  less strict than the original (which requires all 4), recovering interior
+  tiles from thin/irregular rasterization. Apply to ALL tiles of the
+  building, overwriting the previous all-Wall classification.
+
+After this step, normal door placement handles the newly-interior buildings.
+
+**Step 2 — Strict per-building door check.**
+
+Every BATI=1 building with ≥1 Floor or Garden tile must have ≥1 Door tile.
+Zero tolerance. Buildings with zero Floor AND zero Garden (≤4 tile skips)
+are excluded from this check.
+
+Log any failures with building id, quartier, superficie, tile count.
+Expected: 0 failures.
+
+**Step 3 — Full diagnostic log.**
+
+```
+Small buildings: {C} converted to Floor, {S} skipped (≤4 tiles)
+Door placement: {N} doors on {M} buildings (avg {N/M:.1}/building)
+  Road-facing: {R}  Courtyard-facing: {CF}
+Dual-door fixup: {DF} additional doors on {DB} buildings
+Island courtyards: {CR}/{CT} connected ({CP:.1}%)
+Landlocked passages: {L}/12 carved (1 unreachable)
+Gardens: {G} buildings, {GT} tiles converted
+Validation:
+  Door-floor adjacency violations: {V}
+  Doorless buildings (with interior): {DL}
+  Connectivity: {DP:.1}% doors reachable, {CP:.1}% courtyards reachable
+```
+
+### Exit criteria
+
+- Zero doorless buildings with interior space.
+- Full diagnostic log emitted.
+- `cargo test` passes.
+- `cargo run --bin building_diag` output consistent with expectations.
+
+---
+
+## Known limitations
+
+1. **One unreachable landlocked building** (carve depth >50). Data artifact.
+   Logged and skipped. Zero impact on Arcis.
 2. **Some island courtyards may remain** if enclosed entirely by all-wall
-   buildings or by buildings with no viable door position. Target >95% connected.
-3. **No door orientation metadata.** Terrain enum stores a single value per tile.
-   If future rendering needs door facing direction, a parallel data array would
-   be needed. Not worth adding now.
-4. **No per-floor door placement.** Buildings are 2D footprints. Upper-floor
-   access (stairwells) is implicit, not modeled in the tile map.
+   buildings with no viable door position. Target >95% connected.
+3. **No door orientation metadata.** Terrain enum stores a single value per
+   tile. If rendering needs door facing direction later, add a parallel
+   data array.
+4. **No per-floor doors.** Buildings are 2D footprints. Upper-floor access
+   (stairwells) is implicit.
+5. **No open/closed door state yet.** All doors render as `+` (closed).
+   When door state is added, open doors switch to `-`.
