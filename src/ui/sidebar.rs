@@ -14,13 +14,16 @@ use super::{Edges, EntityInspectorInfo, Position, Size, Sizing, WidgetId, Widget
 /// Width of the main-tab content panel in pixels.
 pub const MAIN_TAB_WIDTH: f32 = 400.0;
 /// Horizontal margin between the sidebar panel and the right screen edge.
-pub const SIDEBAR_MARGIN: f32 = 30.0;
+/// Derived from tab geometry: gap + tab + gap (outer gap consumed by flush-to-edge extension).
+pub const SIDEBAR_MARGIN: f32 = TAB_PANEL_GAP + TAB_WIDTH + TAB_PANEL_GAP;
 /// Width of each sidebar tab quad in pixels.
 const TAB_WIDTH: f32 = 24.0;
 /// Height of each sidebar tab quad in pixels.
 const TAB_HEIGHT: f32 = 24.0;
 /// Vertical gap between sidebar tab quads in pixels.
 const TAB_GAP: f32 = 4.0;
+/// Gap between the sidebar panel edge and the tab strip.
+const TAB_PANEL_GAP: f32 = 3.0;
 /// Number of sidebar tabs.
 pub const TAB_COUNT: usize = 3;
 
@@ -740,7 +743,9 @@ pub fn build_tab_strip(
     screen: Size,
     active_tab: Option<usize>,
 ) -> Vec<WidgetId> {
-    let x = screen.width - SIDEBAR_MARGIN + (SIDEBAR_MARGIN - TAB_WIDTH) / 2.0;
+    let x = screen.width - TAB_WIDTH - TAB_PANEL_GAP;
+    // Extend past screen edge so the right border is clipped off (Fitts's law).
+    let tab_w = screen.width - x + theme.panel_border_width;
     let y_start = screen.height * 0.25;
 
     let mut ids = Vec::with_capacity(TAB_COUNT);
@@ -759,7 +764,7 @@ pub fn build_tab_strip(
         });
         let y = y_start + i as f32 * (TAB_HEIGHT + TAB_GAP);
         tree.set_position(tab, Position::Fixed { x, y });
-        tree.set_sizing(tab, Sizing::Fixed(TAB_WIDTH), Sizing::Fixed(TAB_HEIGHT));
+        tree.set_sizing(tab, Sizing::Fixed(tab_w), Sizing::Fixed(TAB_HEIGHT));
         tree.set_on_click(tab, format!("sidebar::tab::{}", i));
         ids.push(tab);
     }
