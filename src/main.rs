@@ -538,14 +538,14 @@ impl ApplicationHandler for App {
 
         let panel_renderer = panel::PanelRenderer::new(&gpu.device, gpu.surface_format());
 
-        // Minimap sprite renderer (UI-407): 256×192 RGBA atlas.
-        let zeroed_pixels = vec![0u8; 256 * 192 * 4];
+        // Minimap sprite renderer (UI-407): 128×96 RGBA atlas.
+        let zeroed_pixels = vec![0u8; 128 * 96 * 4];
         let minimap_sprites = sprite_renderer::SpriteRenderer::new(
             &gpu.device,
             &gpu.queue,
             gpu.surface_format(),
-            256,
-            192,
+            128,
+            96,
             &zeroed_pixels,
         );
 
@@ -1754,8 +1754,8 @@ fn main() {
         target_zoom: 1.0,
     };
 
-    // Generate minimap texture from loaded tile data (UI-407).
-    let minimap_texture = ui::MinimapTexture::generate(&world.tiles);
+    // Minimap texture (UI-407): blank base, viewport indicator stamped per-frame.
+    let minimap_texture = ui::MinimapTexture::new();
 
     let event_loop = EventLoop::new().expect("create event loop");
     let ui_theme = ui::Theme::default();
