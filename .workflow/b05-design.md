@@ -209,7 +209,7 @@ buildings that have interior space.
 
 Commit: `B05 P1S3: Validate per-building door coverage`
 
-- [ ] **Step 4 — Diagnostic log.**
+- [x] **Step 4 — Diagnostic log.**
 
 ```
 Door placement: {N} doors on {M} buildings (avg {N/M:.1}/building)

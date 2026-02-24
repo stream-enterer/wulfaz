@@ -2350,6 +2350,7 @@ fn component_bbox(tiles: &[(usize, usize)]) -> (usize, usize, usize, usize) {
 pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     // Step 1: Door candidate detection and placement.
     let mut door_tiles: Vec<(usize, usize)> = Vec::new();
+    let mut buildings_with_doors: HashSet<BuildingId> = HashSet::new();
 
     for bdata in &buildings.buildings {
         if bdata.bati != 1 {
@@ -2393,10 +2394,12 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
 
             if has_exterior && has_interior {
                 door_tiles.push((ux, uy));
+                buildings_with_doors.insert(bid);
             }
         }
     }
 
+    let door_count = door_tiles.len();
     for (x, y) in door_tiles {
         tiles.set_terrain(x, y, Terrain::Door);
     }
@@ -2422,11 +2425,6 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
             }
         }
     }
-
-    println!(
-        "Gardens: {} buildings, {} tiles converted",
-        garden_buildings, garden_tiles_converted
-    );
 
     // Step 3: Per-building door validation.
     let mut doorless_with_interior = 0usize;
@@ -2465,6 +2463,21 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         }
     }
 
+    // Step 4: Diagnostic log.
+    let building_count = buildings_with_doors.len();
+    let avg = if building_count > 0 {
+        door_count as f64 / building_count as f64
+    } else {
+        0.0
+    };
+    println!(
+        "Door placement: {} doors on {} buildings (avg {:.1}/building)",
+        door_count, building_count, avg
+    );
+    println!(
+        "Gardens: {} buildings, {} tiles converted",
+        garden_buildings, garden_tiles_converted
+    );
     println!(
         "Doorless buildings with interior: {} (expected 0)",
         doorless_with_interior
