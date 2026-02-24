@@ -2427,6 +2427,52 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         "Gardens: {} buildings, {} tiles converted",
         garden_buildings, garden_tiles_converted
     );
+
+    // Step 3: Per-building door validation.
+    let mut doorless_with_interior = 0usize;
+    let mut doorless_without_interior = 0usize;
+
+    for bdata in &buildings.buildings {
+        if bdata.bati != 1 {
+            continue;
+        }
+
+        let has_interior = bdata.tiles.iter().any(|&(cx, cy)| {
+            matches!(
+                tiles.get_terrain(cx as usize, cy as usize),
+                Some(Terrain::Floor | Terrain::Garden)
+            )
+        });
+
+        if !has_interior {
+            doorless_without_interior += 1;
+            continue;
+        }
+
+        let has_door = bdata
+            .tiles
+            .iter()
+            .any(|&(cx, cy)| tiles.get_terrain(cx as usize, cy as usize) == Some(Terrain::Door));
+
+        if !has_door {
+            doorless_with_interior += 1;
+            println!(
+                "  WARNING: doorless building with interior: id={:?} quartier={} tiles={}",
+                bdata.id,
+                bdata.quartier,
+                bdata.tiles.len()
+            );
+        }
+    }
+
+    println!(
+        "Doorless buildings with interior: {} (expected 0)",
+        doorless_with_interior
+    );
+    println!(
+        "Doorless buildings without interior: {} (all-wall, expected 667)",
+        doorless_without_interior
+    );
 }
 
 #[cfg(test)]

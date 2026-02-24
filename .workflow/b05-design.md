@@ -199,7 +199,7 @@ This runs AFTER door placement so doors are preserved.
 
 Commit: `B05 P1S2: Convert park/garden buildings to Garden terrain`
 
-- [ ] **Step 3 — Per-building door validation.**
+- [x] **Step 3 — Per-building door validation.**
 
 For each BATI=1 building with ≥1 Floor or Garden tile: scan its tiles for at
 least one Door. Log any doorless buildings (id, quartier, tile count).
