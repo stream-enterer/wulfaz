@@ -32,8 +32,8 @@ struct ModalEntry {
     on_confirm: Option<String>,
 }
 
-/// Callback key set on the dim layer for click-outside-to-dismiss.
-pub const DIM_CLICK_ACTION: &str = "modal::dismiss";
+/// Callback action for dismissing the topmost modal (click-outside-to-dismiss).
+pub const MODAL_DISMISS: &str = "modal::dismiss";
 
 /// Modal dialog stack (UI-300).
 ///
@@ -74,7 +74,7 @@ impl ModalStack {
         );
         tree.set_position(dim, Position::Fixed { x: 0.0, y: 0.0 });
         tree.set_sizing(dim, Sizing::Percent(1.0), Sizing::Percent(1.0));
-        tree.set_on_click(dim, DIM_CLICK_ACTION);
+        tree.set_on_click(dim, MODAL_DISMISS);
 
         // Promote the content root to Modal tier and center it.
         tree.set_z_tier(content_root, ZTier::Modal);
@@ -248,7 +248,7 @@ mod tests {
         let dim_node = tree.get(*dim_id).unwrap();
         assert_eq!(
             dim_node.on_click.as_deref(),
-            Some(DIM_CLICK_ACTION),
+            Some(MODAL_DISMISS),
             "dim layer has click-outside-to-dismiss callback"
         );
     }

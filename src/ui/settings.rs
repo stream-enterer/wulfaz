@@ -205,7 +205,7 @@ pub fn build_settings_screen(
 
     // List keybindings
     let bindings = [
-        (Action::PauseSim, "Pause/Resume"),
+        (Action::Pause, "Pause/Resume"),
         (Action::CloseTopmost, "Close Panel"),
         (Action::ConfirmModal, "Confirm Dialog"),
         (Action::ToggleSidebar, "Toggle Sidebar"),

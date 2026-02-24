@@ -2787,7 +2787,7 @@ pub fn build_status_bar(tree: &mut WidgetTree, theme: &Theme, info: &StatusBarIn
         // Show "PAUSED (Space)" with keybinding label.
         let pause_label = info
             .keybindings
-            .label_for(keybindings::Action::PauseSim)
+            .label_for(keybindings::Action::Pause)
             .map(|k| format!("PAUSED ({k})"))
             .unwrap_or_else(|| "PAUSED".to_string());
         spans.push(TextSpan {
@@ -3844,7 +3844,7 @@ mod tests {
     fn demo_tree_uses_theme() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
-        let live = sidebar::SidebarLiveData {
+        let live = sidebar::SidebarInfo {
             entity_info: None,
             tick: 0,
             population: 0,
@@ -4072,7 +4072,7 @@ mod tests {
     fn demo_tree_includes_rich_text() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
-        let live = sidebar::SidebarLiveData {
+        let live = sidebar::SidebarInfo {
             entity_info: None,
             tick: 0,
             population: 0,
@@ -4388,7 +4388,7 @@ mod tests {
     fn widget_count_on_demo() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
-        let live = sidebar::SidebarLiveData {
+        let live = sidebar::SidebarInfo {
             entity_info: None,
             tick: 0,
             population: 0,
@@ -4630,7 +4630,7 @@ mod tests {
     fn demo_tree_includes_scroll_list() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
-        let live = sidebar::SidebarLiveData {
+        let live = sidebar::SidebarInfo {
             entity_info: None,
             tick: 0,
             population: 0,

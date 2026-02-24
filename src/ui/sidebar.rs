@@ -25,7 +25,7 @@ const TAB_GAP: f32 = 4.0;
 pub const TAB_COUNT: usize = 3;
 
 /// Live simulation data passed into sidebar views.
-pub struct SidebarLiveData<'a> {
+pub struct SidebarInfo<'a> {
     pub entity_info: Option<&'a EntityInspectorInfo>,
     pub tick: u64,
     pub population: usize,
@@ -39,7 +39,7 @@ pub fn build_showcase_view(
     tree: &mut WidgetTree,
     theme: &Theme,
     keybindings: &KeyBindings,
-    live: &SidebarLiveData,
+    live: &SidebarInfo,
     screen: Size,
     scroll_offset: f32,
 ) -> (WidgetId, WidgetId) {
@@ -275,7 +275,7 @@ pub fn build_showcase_view(
     tree.set_sizing(btn_row, Sizing::Fixed(inner_w), Sizing::Fit);
 
     let pause_label = keybindings
-        .label_for(Action::PauseSim)
+        .label_for(Action::Pause)
         .unwrap_or_else(|| "?".into());
     let pause_btn = tree.insert(
         btn_row,
@@ -876,8 +876,8 @@ mod tests {
     use super::*;
     use crate::ui::HeuristicMeasurer;
 
-    fn default_live() -> SidebarLiveData<'static> {
-        SidebarLiveData {
+    fn default_live() -> SidebarInfo<'static> {
+        SidebarInfo {
             entity_info: None,
             tick: 42,
             population: 0,
@@ -922,7 +922,7 @@ mod tests {
             action: Some("Wandering".into()),
             gait: Some("Walk".into()),
         };
-        let live = SidebarLiveData {
+        let live = SidebarInfo {
             entity_info: Some(&info),
             tick: 100,
             population: 5,
@@ -997,7 +997,7 @@ mod tests {
             action: Some("Idle".into()),
             gait: None,
         };
-        let live = SidebarLiveData {
+        let live = SidebarInfo {
             entity_info: Some(&info),
             tick: 1,
             population: 1,

@@ -1396,7 +1396,7 @@ mod tests {
     fn showcase_view_has_tooltip_button() {
         let theme = Theme::default();
         let kb = crate::ui::KeyBindings::defaults();
-        let live = crate::ui::sidebar::SidebarLiveData {
+        let live = crate::ui::sidebar::SidebarInfo {
             entity_info: None,
             tick: 0,
             population: 0,

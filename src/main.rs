@@ -454,7 +454,7 @@ impl App {
             "inspector::close" => {
                 self.selected_entity = None;
             }
-            ui::modal::DIM_CLICK_ACTION | ui::window::DIALOG_CANCEL => {
+            ui::modal::MODAL_DISMISS | ui::window::DIALOG_CANCEL => {
                 self.pop_modal_with(false);
             }
             ui::window::DIALOG_ACCEPT => {
@@ -577,7 +577,7 @@ impl ApplicationHandler for App {
                         };
                         if let Some(action) = self.keybindings.lookup(combo) {
                             match action {
-                                ui::Action::PauseSim => {
+                                ui::Action::Pause => {
                                     self.paused = !self.paused;
                                     if !self.paused {
                                         // Reset accumulator to avoid tick burst on unpause.
@@ -1225,7 +1225,7 @@ impl ApplicationHandler for App {
                                         let entity_info = first_entity.and_then(|e| {
                                             ui::collect_inspector_info(e, &self.world)
                                         });
-                                        let live = ui::sidebar::SidebarLiveData {
+                                        let live = ui::sidebar::SidebarInfo {
                                             entity_info: entity_info.as_ref(),
                                             tick: self.world.tick.0,
                                             population: self.world.alive.len(),

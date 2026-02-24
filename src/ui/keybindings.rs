@@ -39,7 +39,7 @@ impl KeyCombo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
     /// Toggle simulation pause.
-    PauseSim,
+    Pause,
     /// Set simulation speed (1 = normal, 2-5 = faster).
     SpeedSet(u32),
     /// Close topmost overlay (tooltip → inspector → exit).
@@ -74,7 +74,7 @@ impl KeyBindings {
     pub fn defaults() -> Self {
         let mut map = HashMap::new();
 
-        map.insert(KeyCombo::plain(KeyCode::Space), Action::PauseSim);
+        map.insert(KeyCombo::plain(KeyCode::Space), Action::Pause);
         map.insert(KeyCombo::plain(KeyCode::Escape), Action::CloseTopmost);
         map.insert(KeyCombo::plain(KeyCode::Enter), Action::ConfirmModal);
         map.insert(KeyCombo::plain(KeyCode::F11), Action::ToggleSidebar);
@@ -242,7 +242,7 @@ mod tests {
         let kb = KeyBindings::defaults();
         assert_eq!(
             kb.lookup(KeyCombo::plain(KeyCode::Space)),
-            Some(Action::PauseSim)
+            Some(Action::Pause)
         );
         assert_eq!(
             kb.lookup(KeyCombo::plain(KeyCode::Escape)),
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn label_for_pause() {
         let kb = KeyBindings::defaults();
-        let label = kb.label_for(Action::PauseSim);
+        let label = kb.label_for(Action::Pause);
         assert_eq!(label.as_deref(), Some("Space"));
     }
 
@@ -307,11 +307,11 @@ mod tests {
                 },
                 key: KeyCode::KeyP,
             },
-            Action::PauseSim,
+            Action::Pause,
         );
         let reverse = KeyBindings::build_reverse(&map);
         let kb = KeyBindings { map, reverse };
-        assert_eq!(kb.label_for(Action::PauseSim).as_deref(), Some("Ctrl+P"));
+        assert_eq!(kb.label_for(Action::Pause).as_deref(), Some("Ctrl+P"));
     }
 
     #[test]
