@@ -183,7 +183,7 @@ Edge cases handled automatically:
 
 Commit: `B05 P1S1: Place doors on all BATI=1 buildings`
 
-- [ ] **Step 2 — Garden conversion.**
+- [x] **Step 2 — Garden conversion.**
 
 For each building where `nom_bati: Option<String>` contains "parc" or "jardin":
 ```rust

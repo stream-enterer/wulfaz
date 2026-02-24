@@ -2400,6 +2400,33 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     for (x, y) in door_tiles {
         tiles.set_terrain(x, y, Terrain::Door);
     }
+
+    // Step 2: Garden conversion.
+    // For buildings named "parc" or "jardin", convert Floor→Garden (preserving Doors).
+    let mut garden_buildings = 0usize;
+    let mut garden_tiles_converted = 0usize;
+
+    for bdata in &buildings.buildings {
+        if let Some(ref name) = bdata.nom_bati {
+            let lower = name.to_lowercase();
+            if lower.contains("parc") || lower.contains("jardin") {
+                garden_buildings += 1;
+                for &(cx, cy) in &bdata.tiles {
+                    let ux = cx as usize;
+                    let uy = cy as usize;
+                    if tiles.get_terrain(ux, uy) == Some(Terrain::Floor) {
+                        tiles.set_terrain(ux, uy, Terrain::Garden);
+                        garden_tiles_converted += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    println!(
+        "Gardens: {} buildings, {} tiles converted",
+        garden_buildings, garden_tiles_converted
+    );
 }
 
 #[cfg(test)]
@@ -2662,6 +2689,66 @@ mod tests {
             }
         }
         assert!(doors_elsewhere > 0, "should have doors on non-Water sides");
+    }
+
+    #[test]
+    fn test_place_doors_garden_conversion() {
+        // Building with nom_bati containing "jardin" — Floor tiles should become Garden.
+        let mut tiles = TileMap::new(12, 12);
+        let mut buildings = BuildingRegistry::new();
+
+        let bid = buildings.next_id();
+        let mut tile_list = Vec::new();
+        for y in 2..8 {
+            for x in 2..8 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid);
+                tile_list.push((x as i32, y as i32));
+            }
+        }
+
+        buildings.insert(BuildingData {
+            id: bid,
+            identif: 1,
+            quartier: "Test".into(),
+            superficie: 100.0,
+            bati: 1,
+            nom_bati: Some("Jardin des Plantes".into()),
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 1,
+            tiles: tile_list,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        classify_walls_floors(&mut tiles, &buildings);
+        place_doors(&mut tiles, &buildings);
+
+        // After garden conversion, interior Floor tiles should be Garden.
+        // Door tiles should NOT be converted.
+        let mut gardens = 0;
+        let mut doors = 0;
+        for y in 2..8 {
+            for x in 2..8 {
+                match tiles.get_terrain(x, y) {
+                    Some(Terrain::Garden) => gardens += 1,
+                    Some(Terrain::Door) => doors += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert!(gardens > 0, "should have garden tiles");
+        assert!(doors > 0, "should still have door tiles");
+        // No Floor tiles remaining in a garden building (all converted)
+        let floors: usize = (2..8)
+            .flat_map(|y| (2..8).map(move |x| (x, y)))
+            .filter(|&(x, y)| tiles.get_terrain(x, y) == Some(Terrain::Floor))
+            .count();
+        assert_eq!(floors, 0, "all Floor should be converted to Garden");
     }
 
     #[test]
