@@ -378,7 +378,7 @@ pub fn build_demo(
     );
 
     // Text input.
-    tree.insert(
+    let text_input = tree.insert(
         col,
         Widget::TextInput {
             text: String::new(),
@@ -395,6 +395,7 @@ pub fn build_demo(
             focused: false,
         },
     );
+    tree.set_sizing(text_input, Sizing::Fixed(content_w), Sizing::Fit);
     insert_sep(tree, col, theme, content_w);
 
     // -------------------------------------------------------------------

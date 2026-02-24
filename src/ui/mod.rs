@@ -765,6 +765,19 @@ impl WidgetTree {
         };
         node.dirty = false;
 
+        self.layout_node_children(id, tm);
+    }
+
+    /// Lay out the children of a node according to its container type.
+    ///
+    /// Separated from `layout_node` so that container children (Row-in-Column,
+    /// Column-in-Collapsible, etc.) dispatch through their own layout logic
+    /// instead of being treated as flat grandchildren.
+    fn layout_node_children(&mut self, id: WidgetId, tm: &mut dyn TextMeasurer) {
+        let Some(node) = self.arena.get(id) else {
+            return;
+        };
+
         // Content area for children (inside padding).
         let content = Rect {
             x: node.rect.x + node.padding.left,
@@ -860,21 +873,8 @@ impl WidgetTree {
                     child_node.dirty = false;
                 }
 
-                // Recurse into child's children.
-                let child_content = Rect {
-                    x: cursor_x + cm.left + cp.left,
-                    y: child_y + cp.top,
-                    width: (child_w - cp.horizontal()).max(0.0),
-                    height: (stretched_h - cp.vertical()).max(0.0),
-                };
-                let grandchildren: Vec<WidgetId> = self
-                    .arena
-                    .get(*child_id)
-                    .map(|n| n.children.clone())
-                    .unwrap_or_default();
-                for gc in grandchildren {
-                    self.layout_node(gc, child_content, tm);
-                }
+                // Recurse into child's own layout (Row, Column, etc.).
+                self.layout_node_children(*child_id, tm);
 
                 cursor_x += child_total_w + gap;
             }
@@ -968,21 +968,8 @@ impl WidgetTree {
                     child_node.dirty = false;
                 }
 
-                // Recurse into child's children.
-                let child_content = Rect {
-                    x: child_x + cp.left,
-                    y: cursor_y + cm.top + cp.top,
-                    width: (stretched_w - cp.horizontal()).max(0.0),
-                    height: (child_h - cp.vertical()).max(0.0),
-                };
-                let grandchildren: Vec<WidgetId> = self
-                    .arena
-                    .get(*child_id)
-                    .map(|n| n.children.clone())
-                    .unwrap_or_default();
-                for gc in grandchildren {
-                    self.layout_node(gc, child_content, tm);
-                }
+                // Recurse into child's own layout (Row, Column, etc.).
+                self.layout_node_children(*child_id, tm);
 
                 cursor_y += child_total_h + gap;
             }
@@ -1083,11 +1070,6 @@ impl WidgetTree {
                         Sizing::Percent(frac) => content.height * frac,
                         Sizing::Fit => child_measured.height + cp.vertical(),
                     };
-                    let child_w = match child.width {
-                        Sizing::Fixed(px) => px,
-                        Sizing::Percent(frac) => content.width * frac,
-                        Sizing::Fit => child_measured.width + cp.horizontal(),
-                    };
 
                     if let Some(child_node) = self.arena.get_mut(child_id) {
                         child_node.measured = child_measured;
@@ -1101,20 +1083,8 @@ impl WidgetTree {
                         child_node.dirty = false;
                     }
 
-                    let child_content = Rect {
-                        x: content.x + cm.left + cp.left,
-                        y: cursor_y + cm.top + cp.top,
-                        width: (child_w - cp.horizontal()).max(0.0),
-                        height: (child_h - cp.vertical()).max(0.0),
-                    };
-                    let grandchildren: Vec<WidgetId> = self
-                        .arena
-                        .get(child_id)
-                        .map(|n| n.children.clone())
-                        .unwrap_or_default();
-                    for gc in grandchildren {
-                        self.layout_node(gc, child_content, tm);
-                    }
+                    // Recurse into child's own layout (Row, Column, etc.).
+                    self.layout_node_children(child_id, tm);
 
                     cursor_y += child_h + cm.vertical();
                 }
@@ -1163,20 +1133,8 @@ impl WidgetTree {
                     child_node.clip_rect = Self::merge_clips(parent_clip, child_node.clip_rect);
                 }
 
-                let child_content = Rect {
-                    x: content.x + cm.left + cp.left,
-                    y: cursor_y + cm.top + cp.top,
-                    width: (child_w - cp.horizontal()).max(0.0),
-                    height: (child_h - cp.vertical()).max(0.0),
-                };
-                let grandchildren: Vec<WidgetId> = self
-                    .arena
-                    .get(child_id)
-                    .map(|n| n.children.clone())
-                    .unwrap_or_default();
-                for gc in grandchildren {
-                    self.layout_node(gc, child_content, tm);
-                }
+                // Recurse into child's own layout (Row, Column, etc.).
+                self.layout_node_children(child_id, tm);
 
                 cursor_y += child_h + cm.vertical();
             }
@@ -1229,18 +1187,7 @@ impl WidgetTree {
         };
         node.dirty = false;
 
-        // Content area for children (inside padding).
-        let content = Rect {
-            x: x + node.padding.left,
-            y: y + node.padding.top,
-            width: (width - node.padding.horizontal()).max(0.0),
-            height: (height - node.padding.vertical()).max(0.0),
-        };
-
-        let children: Vec<WidgetId> = node.children.clone();
-        for child in children {
-            self.layout_node(child, content, tm);
-        }
+        self.layout_node_children(id, tm);
     }
 
     /// Measure intrinsic size of a widget (content only, no padding).
@@ -7899,5 +7846,149 @@ mod tests {
 
         assert_eq!(tree.z_tier_of_widget(modal_root), Some(ZTier::Modal));
         assert_eq!(tree.z_tier_of_widget(child), Some(ZTier::Modal));
+    }
+
+    /// Regression: Row-in-Column must dispatch Row layout for its children,
+    /// giving them distinct x positions instead of overlapping at x=0.
+    #[test]
+    fn row_in_column_children_have_distinct_x() {
+        let mut tree = WidgetTree::new();
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: [0.0; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+        tree.set_position(panel, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(panel, Sizing::Fixed(400.0), Sizing::Fixed(300.0));
+
+        let col = tree.insert(
+            panel,
+            Widget::Column {
+                gap: 4.0,
+                align: widget::CrossAlign::Start,
+            },
+        );
+        tree.set_sizing(col, Sizing::Fixed(400.0), Sizing::Fit);
+
+        let row = tree.insert(
+            col,
+            Widget::Row {
+                gap: 8.0,
+                align: widget::CrossAlign::Center,
+            },
+        );
+        tree.set_sizing(row, Sizing::Fixed(400.0), Sizing::Fit);
+
+        let label_a = tree.insert(
+            row,
+            Widget::Label {
+                text: "AAA".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        let label_b = tree.insert(
+            row,
+            Widget::Label {
+                text: "BBB".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            &mut HeuristicMeasurer,
+        );
+
+        let ra = tree.get(label_a).unwrap().rect;
+        let rb = tree.get(label_b).unwrap().rect;
+        assert!(
+            rb.x > ra.x,
+            "Row children must have distinct x: a.x={}, b.x={}",
+            ra.x,
+            rb.x
+        );
+    }
+
+    /// Regression: Column-in-Collapsible must dispatch Column layout,
+    /// giving children distinct y positions instead of overlapping at y=0.
+    #[test]
+    fn column_in_collapsible_children_have_distinct_y() {
+        let mut tree = WidgetTree::new();
+        let panel = tree.insert_root(Widget::Panel {
+            bg_color: [0.0; 4],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            shadow_width: 0.0,
+        });
+        tree.set_position(panel, Position::Fixed { x: 0.0, y: 0.0 });
+        tree.set_sizing(panel, Sizing::Fixed(400.0), Sizing::Fixed(400.0));
+
+        let collapsible = tree.insert(
+            panel,
+            Widget::Collapsible {
+                header: "Section".into(),
+                expanded: true,
+                color: [1.0; 4],
+                font_size: 14.0,
+            },
+        );
+        tree.set_sizing(collapsible, Sizing::Fixed(400.0), Sizing::Fit);
+
+        let inner_col = tree.insert(
+            collapsible,
+            Widget::Column {
+                gap: 4.0,
+                align: widget::CrossAlign::Start,
+            },
+        );
+        tree.set_sizing(inner_col, Sizing::Fixed(400.0), Sizing::Fit);
+
+        let label_a = tree.insert(
+            inner_col,
+            Widget::Label {
+                text: "First".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+        let label_b = tree.insert(
+            inner_col,
+            Widget::Label {
+                text: "Second".into(),
+                color: [1.0; 4],
+                font_size: 14.0,
+                font_family: FontFamily::default(),
+                wrap: false,
+            },
+        );
+
+        tree.layout(
+            Size {
+                width: 800.0,
+                height: 600.0,
+            },
+            &mut HeuristicMeasurer,
+        );
+
+        let ra = tree.get(label_a).unwrap().rect;
+        let rb = tree.get(label_b).unwrap().rect;
+        assert!(
+            rb.y > ra.y,
+            "Column children must have distinct y: a.y={}, b.y={}",
+            ra.y,
+            rb.y
+        );
     }
 }
