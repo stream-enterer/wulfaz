@@ -2,7 +2,6 @@ mod animation;
 pub(crate) mod character_finder;
 pub(crate) mod character_panel;
 mod context_menu;
-pub(crate) mod demo;
 mod draw;
 pub(crate) mod event_popup;
 mod input;
@@ -18,6 +17,7 @@ pub(crate) mod outliner;
 mod panel_manager;
 pub(crate) mod save_load;
 pub(crate) mod settings;
+pub(crate) mod sidebar;
 pub(crate) mod sprite;
 mod theme;
 mod widget;
@@ -3844,7 +3844,7 @@ mod tests {
     fn demo_tree_uses_theme() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
-        let live = demo::DemoLiveData {
+        let live = sidebar::SidebarLiveData {
             entity_info: None,
             tick: 0,
             population: 0,
@@ -3854,7 +3854,7 @@ mod tests {
             height: 600.0,
         };
         let mut tree = WidgetTree::new();
-        demo::build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
+        sidebar::build_showcase_view(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
 
         let mut dl = DrawList::new();
@@ -4072,7 +4072,7 @@ mod tests {
     fn demo_tree_includes_rich_text() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
-        let live = demo::DemoLiveData {
+        let live = sidebar::SidebarLiveData {
             entity_info: None,
             tick: 0,
             population: 0,
@@ -4082,7 +4082,7 @@ mod tests {
             height: 600.0,
         };
         let mut tree = WidgetTree::new();
-        demo::build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
+        sidebar::build_showcase_view(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
 
         let mut dl = DrawList::new();
@@ -4388,7 +4388,7 @@ mod tests {
     fn widget_count_on_demo() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
-        let live = demo::DemoLiveData {
+        let live = sidebar::SidebarLiveData {
             entity_info: None,
             tick: 0,
             population: 0,
@@ -4398,8 +4398,8 @@ mod tests {
             height: 600.0,
         };
         let mut tree = WidgetTree::new();
-        demo::build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
-        assert!(tree.widget_count() > 0, "demo tree should have widgets");
+        sidebar::build_showcase_view(&mut tree, &theme, &kb, &live, screen, 0.0);
+        assert!(tree.widget_count() > 0, "sidebar tree should have widgets");
     }
 
     #[test]
@@ -4630,7 +4630,7 @@ mod tests {
     fn demo_tree_includes_scroll_list() {
         let theme = Theme::default();
         let kb = keybindings::KeyBindings::defaults();
-        let live = demo::DemoLiveData {
+        let live = sidebar::SidebarLiveData {
             entity_info: None,
             tick: 0,
             population: 0,
@@ -4640,7 +4640,7 @@ mod tests {
             height: 600.0,
         };
         let mut tree = WidgetTree::new();
-        demo::build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
+        sidebar::build_showcase_view(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
 
         // Demo is a single root panel.

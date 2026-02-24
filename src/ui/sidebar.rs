@@ -1,8 +1,9 @@
-//! UI-DEMO: Widget showcase panel.
+//! Sidebar: right-side tabbed panel system.
 //!
-//! A persistent developer reference panel (toggled with F11 or `--ui-demo`)
-//! that renders every available widget type. Uses Column/Row auto-layout
-//! throughout — no manual position tracking.
+//! A CK3-style sidebar with a vertical tab strip and switchable main-tab
+//! views. The tab strip is always visible; clicking a tab slides in the
+//! corresponding view panel. Currently hosts the widget showcase (tab 0)
+//! with placeholder views for future tabs.
 
 use super::draw::{FontFamily, TextSpan};
 use super::keybindings::{Action, KeyBindings};
@@ -10,10 +11,10 @@ use super::theme::Theme;
 use super::widget::{CrossAlign, TooltipContent, Widget};
 use super::{Edges, EntityInspectorInfo, Position, Size, Sizing, WidgetId, WidgetTree};
 
-/// Demo panel width in pixels.
-pub const PANEL_WIDTH: f32 = 400.0;
-/// Horizontal margin between the demo panel and the right screen edge.
-pub const MARGIN_RIGHT: f32 = 30.0;
+/// Width of the main-tab content panel in pixels.
+pub const MAIN_TAB_WIDTH: f32 = 400.0;
+/// Horizontal margin between the sidebar panel and the right screen edge.
+pub const SIDEBAR_MARGIN: f32 = 30.0;
 /// Width of each sidebar tab quad in pixels.
 const TAB_WIDTH: f32 = 24.0;
 /// Height of each sidebar tab quad in pixels.
@@ -23,27 +24,26 @@ const TAB_GAP: f32 = 4.0;
 /// Number of sidebar tabs.
 pub const TAB_COUNT: usize = 3;
 
-/// Live simulation data for the demo's live-data section.
-pub struct DemoLiveData<'a> {
+/// Live simulation data passed into sidebar views.
+pub struct SidebarLiveData<'a> {
     pub entity_info: Option<&'a EntityInspectorInfo>,
     pub tick: u64,
     pub population: usize,
 }
 
-/// Build the demo widget showcase into an existing tree.
+/// Build the widget showcase view (sidebar tab 0).
 ///
 /// Returns `(root_panel, scroll_view)` so the caller can apply slide-in
-/// animation and persist scroll offset. The demo occupies a 400px-wide
-/// panel on the right side.
-pub fn build_demo(
+/// animation and persist scroll offset.
+pub fn build_showcase_view(
     tree: &mut WidgetTree,
     theme: &Theme,
     keybindings: &KeyBindings,
-    live: &DemoLiveData,
+    live: &SidebarLiveData,
     screen: Size,
     scroll_offset: f32,
 ) -> (WidgetId, WidgetId) {
-    let panel_w = PANEL_WIDTH;
+    let panel_w = MAIN_TAB_WIDTH;
     let panel_h = screen.height - 8.0; // 4px margin top+bottom
     let content_w = panel_w - theme.panel_padding * 2.0;
 
@@ -57,7 +57,7 @@ pub fn build_demo(
     tree.set_position(
         root,
         Position::Fixed {
-            x: screen.width - panel_w - MARGIN_RIGHT,
+            x: screen.width - panel_w - SIDEBAR_MARGIN,
             y: 4.0,
         },
     );
@@ -730,18 +730,18 @@ pub fn build_demo(
     (root, sv)
 }
 
-/// Build 3 vertical sidebar tabs in the right margin.
+/// Build the vertical tab strip in the right margin.
 ///
 /// Tabs are always visible regardless of panel state. Returns the root IDs
 /// so the caller can manage their lifetime (they are root widgets).
-pub fn build_sidebar_tabs(
+pub fn build_tab_strip(
     tree: &mut WidgetTree,
     theme: &Theme,
     screen: Size,
     active_tab: Option<usize>,
 ) -> Vec<WidgetId> {
     let total_h = TAB_COUNT as f32 * TAB_HEIGHT + (TAB_COUNT - 1) as f32 * TAB_GAP;
-    let x = screen.width - MARGIN_RIGHT + (MARGIN_RIGHT - TAB_WIDTH) / 2.0;
+    let x = screen.width - SIDEBAR_MARGIN + (SIDEBAR_MARGIN - TAB_WIDTH) / 2.0;
     let y_start = (screen.height - total_h) / 2.0;
 
     let mut ids = Vec::with_capacity(TAB_COUNT);
@@ -761,22 +761,22 @@ pub fn build_sidebar_tabs(
         let y = y_start + i as f32 * (TAB_HEIGHT + TAB_GAP);
         tree.set_position(tab, Position::Fixed { x, y });
         tree.set_sizing(tab, Sizing::Fixed(TAB_WIDTH), Sizing::Fixed(TAB_HEIGHT));
-        tree.set_on_click(tab, format!("tab::{}", i));
+        tree.set_on_click(tab, format!("sidebar::tab::{}", i));
         ids.push(tab);
     }
     ids
 }
 
-/// Build a placeholder panel for non-demo sidebar tabs.
+/// Build a placeholder view for unimplemented sidebar tabs.
 ///
-/// Same size and position as the demo panel. Shows centered "Placeholder N" text.
-pub fn build_placeholder_panel(
+/// Same size and position as other main-tab views. Shows "Placeholder N" text.
+pub fn build_placeholder_view(
     tree: &mut WidgetTree,
     theme: &Theme,
     screen: Size,
     tab_index: usize,
 ) -> WidgetId {
-    let panel_w = PANEL_WIDTH;
+    let panel_w = MAIN_TAB_WIDTH;
     let panel_h = screen.height - 8.0;
 
     let root = tree.insert_root(Widget::Panel {
@@ -788,7 +788,7 @@ pub fn build_placeholder_panel(
     tree.set_position(
         root,
         Position::Fixed {
-            x: screen.width - panel_w - MARGIN_RIGHT,
+            x: screen.width - panel_w - SIDEBAR_MARGIN,
             y: 4.0,
         },
     );
@@ -876,8 +876,8 @@ mod tests {
     use super::*;
     use crate::ui::HeuristicMeasurer;
 
-    fn default_live() -> DemoLiveData<'static> {
-        DemoLiveData {
+    fn default_live() -> SidebarLiveData<'static> {
+        SidebarLiveData {
             entity_info: None,
             tick: 42,
             population: 0,
@@ -898,7 +898,7 @@ mod tests {
         let live = default_live();
         let screen = default_screen();
         let mut tree = WidgetTree::new();
-        let (root, _sv) = build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
+        let (root, _sv) = build_showcase_view(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
         let rect = tree.node_rect(root);
         assert!(rect.is_some());
@@ -922,14 +922,14 @@ mod tests {
             action: Some("Wandering".into()),
             gait: Some("Walk".into()),
         };
-        let live = DemoLiveData {
+        let live = SidebarLiveData {
             entity_info: Some(&info),
             tick: 100,
             population: 5,
         };
         let screen = default_screen();
         let mut tree = WidgetTree::new();
-        let (root, _sv) = build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
+        let (root, _sv) = build_showcase_view(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
         let rect = tree.node_rect(root).unwrap();
         assert_eq!(rect.width, 400.0);
@@ -942,7 +942,7 @@ mod tests {
         let live = default_live();
         let screen = default_screen();
         let mut tree = WidgetTree::new();
-        build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
+        build_showcase_view(&mut tree, &theme, &kb, &live, screen, 0.0);
         tree.layout(screen, &mut HeuristicMeasurer);
         let mut dl = super::super::DrawList::new();
         tree.draw(&mut dl, &mut HeuristicMeasurer);
@@ -997,14 +997,14 @@ mod tests {
             action: Some("Idle".into()),
             gait: None,
         };
-        let live = DemoLiveData {
+        let live = SidebarLiveData {
             entity_info: Some(&info),
             tick: 1,
             population: 1,
         };
         let screen = default_screen();
         let mut tree = WidgetTree::new();
-        build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
+        build_showcase_view(&mut tree, &theme, &kb, &live, screen, 0.0);
 
         // Walk tree from roots, collect all widget types.
         let mut types = Vec::new();

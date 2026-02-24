@@ -357,10 +357,10 @@ struct App {
     modal_stack: ui::ModalStack,
     // Panel manager (UI-306)
     panel_manager: ui::PanelManager,
-    // Sidebar tab system (UI-DEMO). None = closed, Some(idx) = active tab.
-    active_tab: Option<usize>,
-    demo_scroll_offset: f32,
-    demo_scroll_view_id: Option<ui::WidgetId>,
+    // Sidebar tab system. None = closed, Some(idx) = active tab.
+    sidebar_active_tab: Option<usize>,
+    sidebar_scroll_offset: f32,
+    sidebar_scroll_view_id: Option<ui::WidgetId>,
     // Performance metrics (UI-505) — stores previous frame's metrics.
     ui_perf: ui::UiPerfMetrics,
 }
@@ -370,12 +370,15 @@ impl App {
     fn handle_tab_click(&mut self, tab_idx: usize) {
         let now = Instant::now();
         let is_closing = self.animator.target("sidebar_slide") == Some(1.0);
-        let current_slide = self
-            .animator
-            .get("sidebar_slide", now)
-            .unwrap_or(if self.active_tab.is_some() { 0.0 } else { 1.0 });
+        let current_slide = self.animator.get("sidebar_slide", now).unwrap_or(
+            if self.sidebar_active_tab.is_some() {
+                0.0
+            } else {
+                1.0
+            },
+        );
 
-        if self.active_tab == Some(tab_idx) && !is_closing {
+        if self.sidebar_active_tab == Some(tab_idx) && !is_closing {
             // Clicking active tab: start close animation.
             self.animator.start(
                 "sidebar_slide",
@@ -390,8 +393,8 @@ impl App {
             );
         } else {
             // Opening new tab or switching while open.
-            let need_slide = self.active_tab.is_none() || is_closing;
-            self.active_tab = Some(tab_idx);
+            let need_slide = self.sidebar_active_tab.is_none() || is_closing;
+            self.sidebar_active_tab = Some(tab_idx);
             if need_slide {
                 self.animator.start(
                     "sidebar_slide",
@@ -457,8 +460,8 @@ impl App {
             ui::window::DIALOG_ACCEPT => {
                 self.pop_modal_with(true);
             }
-            action if action.starts_with("tab::") => {
-                if let Ok(idx) = action[5..].parse::<usize>() {
+            action if action.starts_with("sidebar::tab::") => {
+                if let Ok(idx) = action["sidebar::tab::".len()..].parse::<usize>() {
                     self.handle_tab_click(idx);
                 }
             }
@@ -585,9 +588,8 @@ impl ApplicationHandler for App {
                                 ui::Action::SpeedSet(speed) => {
                                     self.sim_speed = speed;
                                 }
-                                ui::Action::ToggleDemo => {
-                                    // Toggle sidebar: if open, close; if closed, open tab 0.
-                                    let tab = self.active_tab.unwrap_or(0);
+                                ui::Action::ToggleSidebar => {
+                                    let tab = self.sidebar_active_tab.unwrap_or(0);
                                     self.handle_tab_click(tab);
                                 }
                                 ui::Action::ConfirmModal => {
@@ -603,7 +605,7 @@ impl ApplicationHandler for App {
                                     }
                                 }
                                 ui::Action::CloseTopmost => {
-                                    // Priority: tooltips → modals → panels → inspector → demo → exit.
+                                    // Priority: tooltips → modals → panels → inspector → sidebar → exit.
                                     if self.ui_state.tooltip_count() > 0 {
                                         self.ui_state.dismiss_all_tooltips(
                                             &mut self.ui_tree,
@@ -619,11 +621,11 @@ impl ApplicationHandler for App {
                                         // Closed a panel — done.
                                     } else if self.selected_entity.is_some() {
                                         self.selected_entity = None;
-                                    } else if self.active_tab.is_some()
+                                    } else if self.sidebar_active_tab.is_some()
                                         && self.animator.target("sidebar_slide") != Some(1.0)
                                     {
                                         // Close active sidebar tab.
-                                        let tab = self.active_tab.unwrap_or(0);
+                                        let tab = self.sidebar_active_tab.unwrap_or(0);
                                         self.handle_tab_click(tab);
                                     } else {
                                         event_loop.exit();
@@ -952,10 +954,10 @@ impl ApplicationHandler for App {
                                 .player
                                 .and_then(|p| self.world.body.names.get(&p))
                                 .map(|n| n.value.as_str());
-                            // Persist demo scroll offset before destroying the tree,
+                            // Persist sidebar scroll offset before destroying the tree,
                             // since handle_scroll may have modified it during this frame.
-                            if let Some(sv_id) = self.demo_scroll_view_id {
-                                self.demo_scroll_offset = self.ui_tree.scroll_offset(sv_id);
+                            if let Some(sv_id) = self.sidebar_scroll_view_id {
+                                self.sidebar_scroll_offset = self.ui_tree.scroll_offset(sv_id);
                             }
                             self.ui_tree = ui::WidgetTree::new();
                             self.ui_tree
@@ -1204,51 +1206,51 @@ impl ApplicationHandler for App {
                                 self.animator.remove("inspector_slide");
                             }
 
-                            // Build sidebar tab bar (always visible).
-                            let _tab_ids = ui::demo::build_sidebar_tabs(
+                            // Build sidebar tab strip (always visible).
+                            let _tab_ids = ui::sidebar::build_tab_strip(
                                 &mut self.ui_tree,
                                 &self.ui_theme,
                                 screen_size,
-                                self.active_tab,
+                                self.sidebar_active_tab,
                             );
 
-                            // Build active sidebar panel content.
+                            // Build active sidebar main-tab view.
                             let mut sidebar_panel_id = None;
-                            if let Some(tab_idx) = self.active_tab {
+                            if let Some(tab_idx) = self.sidebar_active_tab {
                                 match tab_idx {
                                     0 => {
-                                        // Demo widget showcase.
+                                        // Widget showcase view.
                                         let first_entity =
                                             self.world.alive.iter().copied().min_by_key(|e| e.0);
                                         let entity_info = first_entity.and_then(|e| {
                                             ui::collect_inspector_info(e, &self.world)
                                         });
-                                        let live = ui::demo::DemoLiveData {
+                                        let live = ui::sidebar::SidebarLiveData {
                                             entity_info: entity_info.as_ref(),
                                             tick: self.world.tick.0,
                                             population: self.world.alive.len(),
                                         };
-                                        let (demo_id, demo_sv) = ui::demo::build_demo(
+                                        let (view_id, view_sv) = ui::sidebar::build_showcase_view(
                                             &mut self.ui_tree,
                                             &self.ui_theme,
                                             &self.keybindings,
                                             &live,
                                             screen_size,
-                                            self.demo_scroll_offset,
+                                            self.sidebar_scroll_offset,
                                         );
-                                        sidebar_panel_id = Some(demo_id);
-                                        self.demo_scroll_view_id = Some(demo_sv);
+                                        sidebar_panel_id = Some(view_id);
+                                        self.sidebar_scroll_view_id = Some(view_sv);
                                     }
                                     n => {
-                                        // Placeholder panels for tabs 1+.
-                                        let pid = ui::demo::build_placeholder_panel(
+                                        // Placeholder views for tabs 1+.
+                                        let pid = ui::sidebar::build_placeholder_view(
                                             &mut self.ui_tree,
                                             &self.ui_theme,
                                             screen_size,
                                             n,
                                         );
                                         sidebar_panel_id = Some(pid);
-                                        self.demo_scroll_view_id = None;
+                                        self.sidebar_scroll_view_id = None;
                                     }
                                 }
                             }
@@ -1268,17 +1270,18 @@ impl ApplicationHandler for App {
                             let layout_start = Instant::now();
                             self.ui_tree.layout(screen_size, font);
 
-                            // Apply sidebar slide animation (UI-DEMO + UI-W05).
+                            // Apply sidebar slide animation.
                             if let Some(panel_id) = sidebar_panel_id {
                                 let slide = self.animator.get("sidebar_slide", now).unwrap_or(0.0);
                                 let base_x = screen_w as f32
-                                    - ui::demo::PANEL_WIDTH
-                                    - ui::demo::MARGIN_RIGHT;
+                                    - ui::sidebar::MAIN_TAB_WIDTH
+                                    - ui::sidebar::SIDEBAR_MARGIN;
                                 if slide > 0.0 {
                                     // Slide offset: panel must travel full width + margin
                                     // to clear the screen edge.
-                                    let offset =
-                                        slide * (ui::demo::PANEL_WIDTH + ui::demo::MARGIN_RIGHT);
+                                    let offset = slide
+                                        * (ui::sidebar::MAIN_TAB_WIDTH
+                                            + ui::sidebar::SIDEBAR_MARGIN);
                                     self.ui_tree.set_position(
                                         panel_id,
                                         ui::Position::Fixed {
@@ -1293,7 +1296,7 @@ impl ApplicationHandler for App {
                                 if self.animator.target("sidebar_slide") == Some(1.0)
                                     && !self.animator.is_active("sidebar_slide", now)
                                 {
-                                    self.active_tab = None;
+                                    self.sidebar_active_tab = None;
                                     self.animator.remove("sidebar_slide");
                                     self.ui_tree.remove(panel_id);
                                 }
@@ -1641,13 +1644,13 @@ fn main() {
         inspector_close_id: None,
         modal_stack: ui::ModalStack::new(),
         panel_manager: ui::PanelManager::new(),
-        active_tab: if std::env::args().any(|a| a == "--ui-demo") {
+        sidebar_active_tab: if std::env::args().any(|a| a == "--sidebar") {
             Some(0)
         } else {
             None
         },
-        demo_scroll_offset: 0.0,
-        demo_scroll_view_id: None,
+        sidebar_scroll_offset: 0.0,
+        sidebar_scroll_view_id: None,
         ui_perf: ui::UiPerfMetrics::default(),
     };
     event_loop.run_app(&mut app).expect("run event loop");

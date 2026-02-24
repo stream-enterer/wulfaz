@@ -46,8 +46,8 @@ pub enum Action {
     CloseTopmost,
     /// Confirm/accept the topmost modal dialog.
     ConfirmModal,
-    /// Toggle the widget showcase (UI-DEMO).
-    ToggleDemo,
+    /// Toggle the sidebar panel.
+    ToggleSidebar,
     /// Toggle the character finder panel (UI-402).
     ToggleFinder,
     /// Toggle the outliner panel (UI-405).
@@ -77,7 +77,7 @@ impl KeyBindings {
         map.insert(KeyCombo::plain(KeyCode::Space), Action::PauseSim);
         map.insert(KeyCombo::plain(KeyCode::Escape), Action::CloseTopmost);
         map.insert(KeyCombo::plain(KeyCode::Enter), Action::ConfirmModal);
-        map.insert(KeyCombo::plain(KeyCode::F11), Action::ToggleDemo);
+        map.insert(KeyCombo::plain(KeyCode::F11), Action::ToggleSidebar);
         map.insert(KeyCombo::plain(KeyCode::Digit1), Action::SpeedSet(1));
         map.insert(KeyCombo::plain(KeyCode::Digit2), Action::SpeedSet(2));
         map.insert(KeyCombo::plain(KeyCode::Digit3), Action::SpeedSet(3));

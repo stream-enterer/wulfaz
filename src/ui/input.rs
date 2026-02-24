@@ -1393,10 +1393,10 @@ mod tests {
     }
 
     #[test]
-    fn demo_tree_has_tooltip_button() {
+    fn showcase_view_has_tooltip_button() {
         let theme = Theme::default();
         let kb = crate::ui::KeyBindings::defaults();
-        let live = crate::ui::demo::DemoLiveData {
+        let live = crate::ui::sidebar::SidebarLiveData {
             entity_info: None,
             tick: 0,
             population: 0,
@@ -1406,9 +1406,10 @@ mod tests {
             height: 600.0,
         };
         let mut tree = crate::ui::WidgetTree::new();
-        let (root, _sv) = crate::ui::demo::build_demo(&mut tree, &theme, &kb, &live, screen, 0.0);
+        let (root, _sv) =
+            crate::ui::sidebar::build_showcase_view(&mut tree, &theme, &kb, &live, screen, 0.0);
 
-        // Demo has a single root panel.
+        // Showcase view has a single root panel.
         assert_eq!(tree.roots().len(), 1);
         assert_eq!(tree.roots()[0], root);
 
@@ -1419,7 +1420,7 @@ mod tests {
             .any(|&id| tree.get(id).map(|n| n.tooltip.is_some()).unwrap_or(false));
         assert!(
             has_tooltip,
-            "demo should have at least one widget with tooltip"
+            "showcase view should have at least one widget with tooltip"
         );
     }
 
