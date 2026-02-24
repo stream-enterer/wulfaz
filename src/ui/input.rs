@@ -628,7 +628,9 @@ impl UiState {
         x = x.clamp(0.0, (screen.width - tooltip_size.width).max(0.0));
         y = y.clamp(0.0, (screen.height - tooltip_size.height).max(0.0));
 
-        (x, y)
+        // Snap to whole pixels so glyph positions stay stable as the tooltip
+        // follows the cursor (avoids subpixel shimmer in the text).
+        (x.round(), y.round())
     }
 
     /// Effective delay, accounting for fast-show window.

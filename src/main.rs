@@ -1117,23 +1117,27 @@ impl ApplicationHandler for App {
                                         );
                                         hover_tooltip_id = Some(tooltip_id);
 
-                                        // Start fade-in when hovering a new tile (UI-W05).
+                                        // Start fade-in only on first appearance (no previous
+                                        // tile), not when sliding between adjacent tiles.
                                         let current_tile = (tile_x, tile_y);
+                                        let first_hover = self.last_hover_tile.is_none();
                                         if self.last_hover_tile != Some(current_tile) {
                                             self.last_hover_tile = Some(current_tile);
-                                            self.animator.start(
-                                                "hover_tooltip",
-                                                ui::Anim {
-                                                    from: 0.0,
-                                                    to: 1.0,
-                                                    duration: std::time::Duration::from_millis(
-                                                        self.ui_theme.anim_tooltip_fade_ms,
-                                                    ),
-                                                    easing: ui::Easing::EaseOut,
-                                                    ..ui::Anim::DEFAULT
-                                                },
-                                                now,
-                                            );
+                                            if first_hover {
+                                                self.animator.start(
+                                                    "hover_tooltip",
+                                                    ui::Anim {
+                                                        from: 0.0,
+                                                        to: 1.0,
+                                                        duration: std::time::Duration::from_millis(
+                                                            self.ui_theme.anim_tooltip_fade_ms,
+                                                        ),
+                                                        easing: ui::Easing::EaseOut,
+                                                        ..ui::Anim::DEFAULT
+                                                    },
+                                                    now,
+                                                );
+                                            }
                                         }
                                     }
                                 }
