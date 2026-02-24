@@ -51,7 +51,7 @@ pub use main_menu::{AppState, MainMenuInfo, build_main_menu};
 #[allow(unused_imports)] // Public API: used by main.rs for map mode selector (UI-403).
 pub use map_mode::{MapMode, MapModeInfo, build_map_mode_selector};
 #[allow(unused_imports)] // Public API: used by main.rs for minimap (UI-407).
-pub use minimap::{MinimapInfo, build_minimap, minimap_click_to_world};
+pub use minimap::{MinimapInfo, MinimapTexture, build_minimap, minimap_click_to_world};
 #[allow(unused_imports)] // Public API: used by main.rs for modal management (UI-300).
 pub use modal::{ModalOptions, ModalPop, ModalStack};
 #[allow(unused_imports)] // Public API: used by main.rs for notification system (UI-302).

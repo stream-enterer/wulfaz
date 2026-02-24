@@ -16,7 +16,6 @@ mod panel;
 mod registry;
 mod render;
 mod rng;
-#[allow(dead_code)] // Used by sprite render pass (UI-202c wires this up)
 mod sprite_renderer;
 mod systems;
 mod tile_map;
@@ -49,13 +48,17 @@ const FG_SRGB: [f32; 3] = [235.0 / 255.0, 219.0 / 255.0, 178.0 / 255.0]; // #ebd
 
 /// Vertex counts per render layer.
 /// The render pass draws back-to-front:
-///   map text -> map overlay panels -> for each root { panels -> text }
+///   map text -> map overlay panels -> for each root { panels -> [sprite?] -> text }
 struct FrameLayers {
     map_text_vertices: u32,
     map_overlay_panel_vertices: u32,
     /// Per-root (panel_range, text_range) in back-to-front draw order.
     /// panel_range and text_range are each (start, count) in their vertex buffers.
     root_layers: Vec<((u32, u32), (u32, u32))>,
+    /// If set, draw sprites after this root's panels (before its text).
+    /// Used for the minimap: sprite renders inside the minimap panel but
+    /// under later roots (tooltips).
+    sprite_after_root_panels: Option<usize>,
 }
 
 struct GpuState {
@@ -143,11 +146,14 @@ impl GpuState {
     /// 2. Map text (ASCII grid) — under panels
     /// 3. UI panels (overlays + widgets)
     /// 4. UI text (labels, buttons, etc.) — over panels
+    /// 5. Sprite overlay (minimap) — topmost
     fn render(
         &self,
         font: &font::FontRenderer,
         panel: &panel::PanelRenderer,
         layers: &FrameLayers,
+        sprites: Option<&sprite_renderer::SpriteRenderer>,
+        sprite_vertices: u32,
     ) {
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
@@ -199,10 +205,17 @@ impl GpuState {
             font.render_range(&mut render_pass, 0, layers.map_text_vertices);
             // Layer 2: map overlay panels (tile highlights)
             panel.render_range(&mut render_pass, 0, layers.map_overlay_panel_vertices);
-            // Layers 3+: per-root panels then text (fixes cross-root text bleed-through)
-            for &(panel_range, text_range) in &layers.root_layers {
+            // Layers 3+: per-root panels then text (fixes cross-root text bleed-through).
+            // Minimap sprite is inserted after the minimap root's panels so that
+            // later roots (tooltips) properly occlude it.
+            for (i, &(panel_range, text_range)) in layers.root_layers.iter().enumerate() {
                 let (ps, pc) = panel_range;
                 panel.render_range(&mut render_pass, ps, pc);
+                if layers.sprite_after_root_panels == Some(i)
+                    && let Some(sr) = sprites
+                {
+                    sr.render(&mut render_pass, sprite_vertices);
+                }
                 let (ts, tc) = text_range;
                 font.render_range(&mut render_pass, ts, tc);
             }
@@ -363,6 +376,15 @@ struct App {
     sidebar_scroll_view_id: Option<ui::WidgetId>,
     // Performance metrics (UI-505) — stores previous frame's metrics.
     ui_perf: ui::UiPerfMetrics,
+    // Minimap (UI-407)
+    minimap_sprites: Option<sprite_renderer::SpriteRenderer>,
+    minimap_texture: Option<ui::MinimapTexture>,
+    minimap_panel_id: Option<ui::WidgetId>,
+    minimap_area_id: Option<ui::WidgetId>,
+    minimap_dragging: bool,
+    // Cached viewport dimensions for minimap click centering.
+    viewport_cols: usize,
+    viewport_rows: usize,
 }
 
 impl App {
@@ -410,6 +432,26 @@ impl App {
                     now,
                 );
             }
+        }
+    }
+
+    /// Convert a screen-space cursor position to world coords via the minimap
+    /// and set the camera target. Used for both click-to-jump and drag-to-pan.
+    fn update_minimap_drag(&mut self, px: f32, py: f32) {
+        if let Some(area_id) = self.minimap_area_id
+            && let Some(rect) = self.ui_tree.node_rect(area_id)
+        {
+            let (wx, wy) = ui::minimap_click_to_world(
+                px,
+                py,
+                rect.x,
+                rect.y,
+                self.world.tiles.width() as u32,
+                self.world.tiles.height() as u32,
+            );
+            // Center viewport on the world position.
+            self.camera.target_x = wx - self.viewport_cols as f32 / 2.0;
+            self.camera.target_y = wy - self.viewport_rows as f32 / 2.0;
         }
     }
 
@@ -496,9 +538,21 @@ impl ApplicationHandler for App {
 
         let panel_renderer = panel::PanelRenderer::new(&gpu.device, gpu.surface_format());
 
+        // Minimap sprite renderer (UI-407): 256×192 RGBA atlas.
+        let zeroed_pixels = vec![0u8; 256 * 192 * 4];
+        let minimap_sprites = sprite_renderer::SpriteRenderer::new(
+            &gpu.device,
+            &gpu.queue,
+            gpu.surface_format(),
+            256,
+            192,
+            &zeroed_pixels,
+        );
+
         self.gpu = Some(gpu);
         self.font = Some(font_renderer);
         self.panel = Some(panel_renderer);
+        self.minimap_sprites = Some(minimap_sprites);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -506,6 +560,10 @@ impl ApplicationHandler for App {
             // Input tracking (no GPU needed)
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_pos = position;
+                // Minimap drag-to-pan (UI-407).
+                if self.minimap_dragging {
+                    self.update_minimap_drag(position.x as f32, position.y as f32);
+                }
                 // Route to UI input system.
                 self.ui_state.handle_cursor_moved(
                     &mut self.ui_tree,
@@ -750,6 +808,26 @@ impl ApplicationHandler for App {
                             _ => ui::MouseButton::Left,
                         };
                         let pressed = btn_state == ElementState::Pressed;
+
+                        // Minimap drag-to-pan (UI-407): handle before UI system.
+                        if button == MouseButton::Left {
+                            if pressed {
+                                if let Some(area_id) = self.minimap_area_id
+                                    && let Some(rect) = self.ui_tree.node_rect(area_id)
+                                    && px >= rect.x
+                                    && px < rect.x + rect.width
+                                    && py >= rect.y
+                                    && py < rect.y + rect.height
+                                {
+                                    self.minimap_dragging = true;
+                                    self.update_minimap_drag(px, py);
+                                    return;
+                                }
+                            } else if self.minimap_dragging {
+                                self.minimap_dragging = false;
+                                return;
+                            }
+                        }
 
                         // UI consumes click — don't pass to game.
                         if self.ui_state.handle_mouse_input(
@@ -1040,6 +1118,8 @@ impl ApplicationHandler for App {
                             self.map_origin = (padding, map_y);
                             self.map_cell_w = mcw;
                             self.map_cell_h = mch;
+                            self.viewport_cols = viewport_cols;
+                            self.viewport_rows = viewport_rows;
 
                             // Camera: follow player in roguelike mode
                             if let Some(player) = self.world.player
@@ -1180,6 +1260,29 @@ impl ApplicationHandler for App {
                                         self.sidebar_scroll_view_id = None;
                                     }
                                 }
+                            }
+
+                            // Minimap (UI-407).
+                            self.minimap_panel_id = None;
+                            self.minimap_area_id = None;
+                            if self.minimap_texture.is_some() {
+                                let minimap_info = ui::MinimapInfo {
+                                    map_width: self.world.tiles.width() as u32,
+                                    map_height: self.world.tiles.height() as u32,
+                                    camera_x: self.camera.x as f32,
+                                    camera_y: self.camera.y as f32,
+                                    viewport_w: viewport_cols as f32,
+                                    viewport_h: viewport_rows as f32,
+                                    screen_width: screen_w as f32,
+                                    screen_height: screen_h as f32,
+                                };
+                                let (panel_id, area_id) = ui::build_minimap(
+                                    &mut self.ui_tree,
+                                    &self.ui_theme,
+                                    &minimap_info,
+                                );
+                                self.minimap_panel_id = Some(panel_id);
+                                self.minimap_area_id = Some(area_id);
                             }
 
                             // Pause overlay (UI-105): dim layer when paused.
@@ -1456,8 +1559,13 @@ impl ApplicationHandler for App {
                             font.prepare_map(&map_text, padding, map_y, fg4);
                             let map_text_vertices = font.pending_vertex_count();
 
+                            let root_ids = self.ui_tree.roots();
+                            let mut sprite_after_root_panels = None;
                             let mut root_layers = Vec::with_capacity(draw_list.root_slices.len());
-                            for slice in &draw_list.root_slices {
+                            for (root_idx, slice) in draw_list.root_slices.iter().enumerate() {
+                                if root_ids.get(root_idx) == self.minimap_panel_id.as_ref() {
+                                    sprite_after_root_panels = Some(root_idx);
+                                }
                                 // Panels for this root
                                 let ps = panel.pending_vertex_count();
                                 for cmd in &draw_list.panels[slice.panels.clone()] {
@@ -1522,12 +1630,57 @@ impl ApplicationHandler for App {
                             panel.flush(&gpu.queue, &gpu.device);
                             font.flush(&gpu.queue, &gpu.device);
 
+                            // Minimap sprite pass (UI-407).
+                            let sprite_vertex_count = if let Some(sprites) =
+                                self.minimap_sprites.as_mut()
+                            {
+                                if let Some(tex) = self.minimap_texture.as_mut() {
+                                    let cam_cx = self.camera.x as f32 + viewport_cols as f32 / 2.0;
+                                    let cam_cy = self.camera.y as f32 + viewport_rows as f32 / 2.0;
+                                    tex.render_frame(
+                                        cam_cx,
+                                        cam_cy,
+                                        viewport_cols as f32,
+                                        viewport_rows as f32,
+                                        map_w as u32,
+                                        map_h as u32,
+                                    );
+                                    sprites.upload_atlas(&gpu.queue, tex.pixels());
+                                }
+                                sprites.begin_frame(&gpu.queue, screen_w, screen_h);
+                                if let Some(area_id) = self.minimap_area_id
+                                    && let Some(rect) = self.ui_tree.node_rect(area_id)
+                                {
+                                    sprites.add_sprite(
+                                        rect.x,
+                                        rect.y,
+                                        rect.width,
+                                        rect.height,
+                                        0.0,
+                                        0.0,
+                                        1.0,
+                                        1.0,
+                                        [1.0, 1.0, 1.0, 1.0],
+                                    );
+                                }
+                                sprites.flush(&gpu.queue, &gpu.device)
+                            } else {
+                                0
+                            };
+
                             let layers = FrameLayers {
                                 map_text_vertices,
                                 map_overlay_panel_vertices,
                                 root_layers,
+                                sprite_after_root_panels,
                             };
-                            gpu.render(font, panel, &layers);
+                            gpu.render(
+                                font,
+                                panel,
+                                &layers,
+                                self.minimap_sprites.as_ref(),
+                                sprite_vertex_count,
+                            );
                             let render_us = render_start.elapsed().as_micros() as u64;
 
                             // Capture perf metrics (UI-505) — one-frame lag.
@@ -1601,6 +1754,9 @@ fn main() {
         target_zoom: 1.0,
     };
 
+    // Generate minimap texture from loaded tile data (UI-407).
+    let minimap_texture = ui::MinimapTexture::generate(&world.tiles);
+
     let event_loop = EventLoop::new().expect("create event loop");
     let ui_theme = ui::Theme::default();
     let mut app = App {
@@ -1642,6 +1798,13 @@ fn main() {
         sidebar_scroll_offset: 0.0,
         sidebar_scroll_view_id: None,
         ui_perf: ui::UiPerfMetrics::default(),
+        minimap_sprites: None, // created in resumed() when GPU is available
+        minimap_texture: Some(minimap_texture),
+        minimap_panel_id: None,
+        minimap_area_id: None,
+        minimap_dragging: false,
+        viewport_cols: 0,
+        viewport_rows: 0,
     };
     event_loop.run_app(&mut app).expect("run event loop");
 }
