@@ -1674,7 +1674,7 @@ fn save_meta_bincode(metadata: &ParisMetadataRon, uuid: &[u8; 16], path: &str) {
 }
 
 /// Read metadata from a bincode+zstd file. Returns (metadata, uuid).
-fn load_meta_bincode(path: &str) -> io::Result<(ParisMetadataRon, [u8; 16])> {
+pub fn load_meta_bincode(path: &str) -> io::Result<(ParisMetadataRon, [u8; 16])> {
     let file = std::fs::File::open(path)?;
     let mut r = std::io::BufReader::new(file);
 

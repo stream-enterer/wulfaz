@@ -17,6 +17,7 @@ That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
   - **North arm bridge gap**: No detected bridge components in the north arm between Pont Neuf and Ile Saint-Louis (Pont au Change, Notre-Dame, d'Arcole). Either ALPAGE data doesn't fully cover this arm or bridges merged with island road network. Needs investigation.
   - **Canal Saint-Martin**: not in the ALPAGE Vasserot Hydrography layer. Separate historical data source needed.
   - **Diagnostic match rate**: 7/15 in-coverage bridges match (47%). 7 confident matches (dist 2-6 tiles). 8 misses are north-arm bridges or small bridges without separate components.
+  - **Bridge names**: Should name bridges as landmarks consistent with current naming system
 
 ## Phase B — Entities in One Neighborhood
 
