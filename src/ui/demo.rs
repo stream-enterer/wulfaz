@@ -20,7 +20,7 @@ pub struct DemoLiveData<'a> {
 /// Build the demo widget showcase into an existing tree.
 ///
 /// Returns the root panel `WidgetId` so the caller can apply slide-in
-/// animation. The demo occupies a 400px-wide panel on the left side.
+/// animation. The demo occupies a 400px-wide panel on the right side.
 pub fn build_demo(
     tree: &mut WidgetTree,
     theme: &Theme,
@@ -39,7 +39,13 @@ pub fn build_demo(
         border_width: theme.panel_border_width,
         shadow_width: theme.panel_shadow_width,
     });
-    tree.set_position(root, Position::Fixed { x: 4.0, y: 4.0 });
+    tree.set_position(
+        root,
+        Position::Fixed {
+            x: screen.width - panel_w - 4.0,
+            y: 4.0,
+        },
+    );
     tree.set_sizing(root, Sizing::Fixed(panel_w), Sizing::Fixed(panel_h));
     tree.set_padding(root, Edges::all(theme.panel_padding));
 

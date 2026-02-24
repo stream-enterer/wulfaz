@@ -537,12 +537,12 @@ impl ApplicationHandler for App {
                                 ui::Action::ToggleDemo => {
                                     let now = Instant::now();
                                     if !self.show_demo {
-                                        // Open: slide in from left.
+                                        // Open: slide in from right.
                                         self.show_demo = true;
                                         self.animator.start(
                                             "demo_slide",
                                             ui::Anim {
-                                                from: -1.0,
+                                                from: 1.0,
                                                 to: 0.0,
                                                 duration: std::time::Duration::from_millis(
                                                     self.ui_theme.anim_inspector_slide_ms,
@@ -552,15 +552,15 @@ impl ApplicationHandler for App {
                                             },
                                             now,
                                         );
-                                    } else if self.animator.target("demo_slide") != Some(-1.0) {
-                                        // Close: reverse slide to off-screen left.
+                                    } else if self.animator.target("demo_slide") != Some(1.0) {
+                                        // Close: slide off-screen right.
                                         let current =
                                             self.animator.get("demo_slide", now).unwrap_or(0.0);
                                         self.animator.start(
                                             "demo_slide",
                                             ui::Anim {
                                                 from: current,
-                                                to: -1.0,
+                                                to: 1.0,
                                                 duration: std::time::Duration::from_millis(
                                                     self.ui_theme.anim_panel_hide_ms,
                                                 ),
@@ -601,7 +601,7 @@ impl ApplicationHandler for App {
                                     } else if self.selected_entity.is_some() {
                                         self.selected_entity = None;
                                     } else if self.show_demo
-                                        && self.animator.target("demo_slide") != Some(-1.0)
+                                        && self.animator.target("demo_slide") != Some(1.0)
                                     {
                                         // Start hide animation (don't set show_demo = false yet).
                                         let now = Instant::now();
@@ -611,7 +611,7 @@ impl ApplicationHandler for App {
                                             "demo_slide",
                                             ui::Anim {
                                                 from: current,
-                                                to: -1.0,
+                                                to: 1.0,
                                                 duration: std::time::Duration::from_millis(
                                                     self.ui_theme.anim_panel_hide_ms,
                                                 ),
@@ -1231,13 +1231,14 @@ impl ApplicationHandler for App {
                             // Apply demo slide animation (UI-DEMO + UI-W05).
                             if let Some(demo_id) = demo_root_id {
                                 let slide = self.animator.get("demo_slide", now).unwrap_or(0.0);
-                                if slide < 0.0 {
-                                    // Slide offset: slide * panel_width.
+                                let base_x = screen_w as f32 - 400.0 - 4.0;
+                                if slide > 0.0 {
+                                    // Slide offset: slide * panel_width (positive = off-screen right).
                                     let offset = slide * 404.0; // 400 + 4 margin
                                     self.ui_tree.set_position(
                                         demo_id,
                                         ui::Position::Fixed {
-                                            x: 4.0 + offset,
+                                            x: base_x + offset,
                                             y: 4.0,
                                         },
                                     );
@@ -1245,7 +1246,7 @@ impl ApplicationHandler for App {
                                     self.ui_tree.layout(screen_size, font);
                                 }
                                 // Hide animation complete: panel fully off-screen.
-                                if self.animator.target("demo_slide") == Some(-1.0)
+                                if self.animator.target("demo_slide") == Some(1.0)
                                     && !self.animator.is_active("demo_slide", now)
                                 {
                                     self.show_demo = false;
