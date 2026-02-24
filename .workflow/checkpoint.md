@@ -1,24 +1,21 @@
 # Checkpoint
 
 ## Active Task
-Phase UI-5 — COMPLETE (3/3 tasks done)
+B05 Phase 1 — COMPLETE (4/4 steps done)
 
-## Phase UI-5 Status
-- UI-505 Performance profiling — done (UiPerfMetrics, timing instrumentation, status bar display)
-- UI-501 Variable-height ScrollList — done (helper functions, layout/draw/scroll updates, backward compat)
-- UI-504 UI scaling / accessibility — done (Theme.s()/font_size(), ScaleUp/ScaleDown keybindings)
+## B05 Phase 1 Status
+- P1S1 Door candidate detection — done (place_doors in loading_gis.rs, preprocess call site)
+- P1S2 Garden conversion — done (parc/jardin Floor→Garden)
+- P1S3 Per-building door validation — done (doorless building warnings)
+- P1S4 Diagnostic log — done (door count, garden count, doorless count)
 
 ## Modified Files
-- src/ui/mod.rs — UiPerfMetrics, widget_count(), scroll helpers, perf in StatusBarInfo
-- src/ui/widget.rs — item_heights field on ScrollList
-- src/ui/theme.rs — ui_scale, high_contrast, s(), font_size(), border_width(), text_alpha()
-- src/ui/keybindings.rs — ScaleUp/ScaleDown actions, Ctrl+=/Ctrl+- bindings
-- src/ui/input.rs — variable-height scroll nav + scrollbar drag
-- src/ui/demo.rs, character_finder.rs, save_load.rs — item_heights: Vec::new()
-- src/main.rs — timing instrumentation, ScaleUp/ScaleDown handlers
+- src/loading_gis.rs — place_doors() function + 3 unit tests
+- src/bin/preprocess.rs — place_doors() call site between occupant loading and binary save
+- .workflow/b05-design.md — Phase 1 step checkboxes marked
 
 ## Test Count
-456 unit + 5 determinism + 6 invariant = 467 total, all passing
+219 lib + 506 tile_map + 5 determinism + 6 invariant = 736 total, all passing
 
 ## Next Action
-Delete Phase UI-5 from backlog. Start next phase.
+B05 Phase 2 — Connectivity (BFS carving, landlocked buildings, island courtyards)
