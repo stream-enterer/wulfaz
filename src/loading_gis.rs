@@ -2583,6 +2583,113 @@ fn slide_to_valid(
 // Used by preprocess binary, not main binary.
 #[allow(dead_code)]
 pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
+    // Phase 4 Step 1: Small building interior fix.
+    // All-wall buildings need interior space before door candidate detection can work.
+    // Three tiers based on tile count.
+    let mut small_converted = 0usize;
+    let mut small_skipped = 0usize;
+
+    for bdata in &buildings.buildings {
+        if bdata.bati != 1 {
+            continue;
+        }
+        let bid = bdata.id;
+
+        // Check if this building has any Floor tiles already.
+        let has_floor = bdata
+            .tiles
+            .iter()
+            .any(|&(cx, cy)| tiles.get_terrain(cx as usize, cy as usize) == Some(Terrain::Floor));
+        if has_floor {
+            continue;
+        }
+
+        let tile_count = bdata.tiles.len();
+
+        if tile_count <= 4 {
+            // Too small for occupants. Skip entirely.
+            small_skipped += 1;
+        } else if tile_count <= 20 {
+            // Convert one Wall tile to Floor: pick the most interior tile
+            // (most same-building cardinal neighbors). Tie-break by closest to centroid.
+            let centroid_x: f32 =
+                bdata.tiles.iter().map(|&(cx, _)| cx as f32).sum::<f32>() / tile_count as f32;
+            let centroid_y: f32 =
+                bdata.tiles.iter().map(|&(_, cy)| cy as f32).sum::<f32>() / tile_count as f32;
+
+            let mut best: Option<((i32, i32), usize, f32)> = None; // (pos, neighbor_count, dist)
+            for &(cx, cy) in &bdata.tiles {
+                if tiles.get_terrain(cx as usize, cy as usize) != Some(Terrain::Wall) {
+                    continue;
+                }
+                let neighbors = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                    .iter()
+                    .filter(|&&(dx, dy)| {
+                        let nx = cx + dx;
+                        let ny = cy + dy;
+                        if nx < 0 || ny < 0 {
+                            return false;
+                        }
+                        tiles.get_building_id(nx as usize, ny as usize) == Some(bid)
+                    })
+                    .count();
+                let dx = cx as f32 - centroid_x;
+                let dy = cy as f32 - centroid_y;
+                let dist = dx * dx + dy * dy; // squared distance, no need for sqrt
+
+                if let Some((_, best_n, best_d)) = best {
+                    if neighbors > best_n || (neighbors == best_n && dist < best_d) {
+                        best = Some(((cx, cy), neighbors, dist));
+                    }
+                } else {
+                    best = Some(((cx, cy), neighbors, dist));
+                }
+            }
+
+            if let Some(((bx, by), _, _)) = best {
+                tiles.set_terrain(bx as usize, by as usize, Terrain::Floor);
+                small_converted += 1;
+            }
+        } else {
+            // 21+ tiles: Re-classify with relaxed criterion.
+            // A tile is Floor if >=3 of its 4 cardinal neighbors belong to the same building.
+            let changes: Vec<((i32, i32), Terrain)> = bdata
+                .tiles
+                .iter()
+                .map(|&(cx, cy)| {
+                    let same_bldg = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                        .iter()
+                        .filter(|&&(dx, dy)| {
+                            let nx = cx + dx;
+                            let ny = cy + dy;
+                            if nx < 0 || ny < 0 {
+                                return false;
+                            }
+                            tiles.get_building_id(nx as usize, ny as usize) == Some(bid)
+                        })
+                        .count();
+                    let terrain = if same_bldg >= 3 {
+                        Terrain::Floor
+                    } else {
+                        Terrain::Wall
+                    };
+                    ((cx, cy), terrain)
+                })
+                .collect();
+
+            let mut converted_any = false;
+            for ((cx, cy), terrain) in changes {
+                if terrain == Terrain::Floor {
+                    converted_any = true;
+                }
+                tiles.set_terrain(cx as usize, cy as usize, terrain);
+            }
+            if converted_any {
+                small_converted += 1;
+            }
+        }
+    }
+
     // Step 1: Detect door candidates per building and group into facade runs.
     let mut door_tiles: Vec<(usize, usize)> = Vec::new();
     let mut buildings_with_doors: HashSet<BuildingId> = HashSet::new();
@@ -3224,6 +3331,10 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     }
 
     // Diagnostic log.
+    println!(
+        "Small buildings: {} converted to Floor, {} skipped (<=4 tiles)",
+        small_converted, small_skipped
+    );
     let building_count = buildings_with_doors.len();
     let avg = if building_count > 0 {
         door_count as f64 / building_count as f64
@@ -3989,6 +4100,123 @@ mod tests {
             "landlocked B1 should get at least 1 door via passage carving, got {}",
             b1_doors
         );
+    }
+
+    #[test]
+    fn test_small_building_interior_fix_medium() {
+        // A 3×3 all-wall building (9 tiles, in the 5-20 range).
+        // place_doors should convert the most interior tile to Floor,
+        // then place a door on it.
+        let mut tiles = TileMap::new(8, 8);
+        let mut buildings = BuildingRegistry::new();
+
+        // Road border
+        for y in 0..8 {
+            for x in 0..8 {
+                tiles.set_terrain(x, y, Terrain::Road);
+            }
+        }
+
+        // 3×3 building at (2..5, 2..5) — 9 tiles, all Wall.
+        let bid = buildings.next_id();
+        let mut btiles = Vec::new();
+        for y in 2..5 {
+            for x in 2..5 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid);
+                btiles.push((x as i32, y as i32));
+            }
+        }
+        buildings.insert(BuildingData {
+            id: bid,
+            identif: 1,
+            quartier: "Test".into(),
+            superficie: 9.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 1,
+            tiles: btiles,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        place_doors(&mut tiles, &buildings);
+
+        // The center tile (3,3) should have become Floor (most interior: 4 same-building neighbors).
+        // And the building should have at least 1 Door.
+        let has_floor = (2..5)
+            .flat_map(|y| (2..5).map(move |x| (x, y)))
+            .any(|(x, y)| tiles.get_terrain(x, y) == Some(Terrain::Floor));
+        assert!(
+            has_floor,
+            "medium all-wall building should have >=1 Floor tile after fix"
+        );
+
+        let has_door = (2..5)
+            .flat_map(|y| (2..5).map(move |x| (x, y)))
+            .any(|(x, y)| tiles.get_terrain(x, y) == Some(Terrain::Door));
+        assert!(
+            has_door,
+            "medium all-wall building should get a door after interior fix"
+        );
+    }
+
+    #[test]
+    fn test_small_building_interior_fix_skip() {
+        // A 2×2 all-wall building (4 tiles, <=4 range) should be skipped.
+        let mut tiles = TileMap::new(8, 8);
+        let mut buildings = BuildingRegistry::new();
+
+        for y in 0..8 {
+            for x in 0..8 {
+                tiles.set_terrain(x, y, Terrain::Road);
+            }
+        }
+
+        let bid = buildings.next_id();
+        let mut btiles = Vec::new();
+        for y in 2..4 {
+            for x in 2..4 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid);
+                btiles.push((x as i32, y as i32));
+            }
+        }
+        buildings.insert(BuildingData {
+            id: bid,
+            identif: 1,
+            quartier: "Test".into(),
+            superficie: 4.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 1,
+            tiles: btiles,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        place_doors(&mut tiles, &buildings);
+
+        // Should remain all-wall, no Floor or Door.
+        let has_floor = (2..4)
+            .flat_map(|y| (2..4).map(move |x| (x, y)))
+            .any(|(x, y)| tiles.get_terrain(x, y) == Some(Terrain::Floor));
+        assert!(!has_floor, "<=4 tile building should not get Floor tiles");
+
+        let has_door = (2..4)
+            .flat_map(|y| (2..4).map(move |x| (x, y)))
+            .any(|(x, y)| tiles.get_terrain(x, y) == Some(Terrain::Door));
+        assert!(!has_door, "<=4 tile building should not get Door tiles");
     }
 
     #[test]
