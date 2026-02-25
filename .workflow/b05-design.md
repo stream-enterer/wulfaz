@@ -303,7 +303,7 @@ depth 3, 3 at depth 4–5, 1 unreachable.
 
 Commit: `B05 P2S2: Carve passages for landlocked buildings`
 
-- [ ] **Step 3 — Island courtyard piercing.**
+- [x] **Step 3 — Island courtyard piercing.**
 
 1. Build courtyard regions via 4-connected BFS over all `Terrain::Courtyard`
    tiles. Each region is a `Vec<(usize, usize)>`. Also build a
