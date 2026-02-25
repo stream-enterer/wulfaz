@@ -2479,6 +2479,102 @@ fn detect_facade_runs(
     runs
 }
 
+/// Check if a candidate tile has interior adjacency: ≥1 cardinal neighbor
+/// is Floor or Garden with the same building_id.
+fn has_interior_adjacency(tiles: &TileMap, x: usize, y: usize, bid: BuildingId) -> bool {
+    for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+        let nx = x as i32 + dx;
+        let ny = y as i32 + dy;
+        if nx < 0 || ny < 0 {
+            continue;
+        }
+        let nux = nx as usize;
+        let nuy = ny as usize;
+        if matches!(
+            tiles.get_terrain(nux, nuy),
+            Some(Terrain::Floor | Terrain::Garden)
+        ) && tiles.get_building_id(nux, nuy) == Some(bid)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Select door positions from a facade run using a spacing heuristic.
+///
+/// | Run length | Doors | Positions            |
+/// |-----------|-------|----------------------|
+/// | 1–2       | 1     | First tile           |
+/// | 3–10      | 1     | Midpoint             |
+/// | 11–20     | 2     | ⅓ and ⅔             |
+/// | 21+       | max(2, len/10) | Evenly spaced |
+///
+/// Each selected position must pass interior adjacency. If the preferred index
+/// fails, slide outward (±1, ±2, …) and pick the first passing candidate.
+fn select_doors_from_run(run: &FacadeRun, tiles: &TileMap, bid: BuildingId) -> Vec<(usize, usize)> {
+    let len = run.tiles.len();
+    if len == 0 {
+        return Vec::new();
+    }
+
+    // Compute preferred indices based on run length.
+    let preferred_indices: Vec<usize> = if len <= 2 {
+        vec![0]
+    } else if len <= 10 {
+        vec![len / 2]
+    } else if len <= 20 {
+        vec![len / 3, 2 * len / 3]
+    } else {
+        let count = (len / 10).max(2);
+        (0..count).map(|i| i * len / count).collect()
+    };
+
+    let mut selected = Vec::new();
+    for &idx in &preferred_indices {
+        // Try the preferred index, then slide outward.
+        if let Some(pos) = slide_to_valid(run, tiles, bid, idx)
+            && !selected.contains(&pos)
+        {
+            selected.push(pos);
+        }
+    }
+
+    selected
+}
+
+/// Starting from `center_idx`, slide outward (±1, ±2, …) to find the first
+/// tile in the run that passes interior adjacency. Returns None if no tile passes.
+fn slide_to_valid(
+    run: &FacadeRun,
+    tiles: &TileMap,
+    bid: BuildingId,
+    center_idx: usize,
+) -> Option<(usize, usize)> {
+    let len = run.tiles.len();
+    let (x, y) = run.tiles[center_idx];
+    if has_interior_adjacency(tiles, x, y, bid) {
+        return Some((x, y));
+    }
+
+    for offset in 1..len {
+        if center_idx + offset < len {
+            let (x, y) = run.tiles[center_idx + offset];
+            if has_interior_adjacency(tiles, x, y, bid) {
+                return Some((x, y));
+            }
+        }
+        if offset <= center_idx {
+            let (x, y) = run.tiles[center_idx - offset];
+            if has_interior_adjacency(tiles, x, y, bid) {
+                return Some((x, y));
+            }
+        }
+    }
+
+    None
+}
+
 /// Place doors on all BATI=1 buildings.
 ///
 /// A wall tile becomes a door if it has BOTH:
@@ -2559,7 +2655,7 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         // Group into facade runs.
         let runs = detect_facade_runs(&candidates, &candidate_facing);
 
-        // Select all candidates from all runs (Phase 3 Step 2 replaces with heuristic).
+        // Select doors from each run via spacing heuristic.
         for run in &runs {
             total_runs += 1;
             if run.road_facing {
@@ -2568,10 +2664,13 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
             if run.courtyard_facing {
                 courtyard_facing_runs += 1;
             }
-            for &pos in &run.tiles {
+            let selected = select_doors_from_run(run, tiles, bid);
+            if !selected.is_empty() {
+                buildings_with_doors.insert(bid);
+            }
+            for pos in selected {
                 door_tiles.push(pos);
             }
-            buildings_with_doors.insert(bid);
         }
     }
 
