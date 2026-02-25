@@ -2589,6 +2589,8 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     let mut total_runs = 0usize;
     let mut road_facing_runs = 0usize;
     let mut courtyard_facing_runs = 0usize;
+    let mut dual_fixup_count = 0usize;
+    let mut dual_fixup_buildings = 0usize;
 
     for bdata in &buildings.buildings {
         if bdata.bati != 1 {
@@ -2656,6 +2658,11 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         let runs = detect_facade_runs(&candidates, &candidate_facing);
 
         // Select doors from each run via spacing heuristic.
+        let has_road_runs = runs.iter().any(|r| r.road_facing);
+        let has_courtyard_runs = runs.iter().any(|r| r.courtyard_facing);
+        let is_dual = has_road_runs && has_courtyard_runs;
+        let mut building_doors: Vec<(usize, usize)> = Vec::new();
+
         for run in &runs {
             total_runs += 1;
             if run.road_facing {
@@ -2665,12 +2672,76 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
                 courtyard_facing_runs += 1;
             }
             let selected = select_doors_from_run(run, tiles, bid);
-            if !selected.is_empty() {
-                buildings_with_doors.insert(bid);
-            }
             for pos in selected {
-                door_tiles.push(pos);
+                building_doors.push(pos);
             }
+        }
+
+        // Dual-door guarantee: if building has both Road and Courtyard facing
+        // runs, ensure at least one door on each side.
+        if is_dual {
+            let has_road_door = building_doors.iter().any(|&(x, y)| {
+                [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                    .iter()
+                    .any(|&(dx, dy)| {
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        if nx < 0 || ny < 0 {
+                            return false;
+                        }
+                        tiles.get_terrain(nx as usize, ny as usize) == Some(Terrain::Road)
+                    })
+            });
+            let has_courtyard_door = building_doors.iter().any(|&(x, y)| {
+                [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                    .iter()
+                    .any(|&(dx, dy)| {
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        if nx < 0 || ny < 0 {
+                            return false;
+                        }
+                        tiles.get_terrain(nx as usize, ny as usize) == Some(Terrain::Courtyard)
+                    })
+            });
+
+            let doors_before = building_doors.len();
+            if !has_road_door {
+                // Force midpoint of longest road-facing run.
+                if let Some(run) = runs
+                    .iter()
+                    .filter(|r| r.road_facing)
+                    .max_by_key(|r| r.tiles.len())
+                    && let Some(pos) = slide_to_valid(run, tiles, bid, run.tiles.len() / 2)
+                    && !building_doors.contains(&pos)
+                {
+                    building_doors.push(pos);
+                    dual_fixup_count += 1;
+                }
+            }
+            if !has_courtyard_door {
+                // Force midpoint of longest courtyard-facing run.
+                if let Some(run) = runs
+                    .iter()
+                    .filter(|r| r.courtyard_facing)
+                    .max_by_key(|r| r.tiles.len())
+                    && let Some(pos) = slide_to_valid(run, tiles, bid, run.tiles.len() / 2)
+                    && !building_doors.contains(&pos)
+                {
+                    building_doors.push(pos);
+                    dual_fixup_count += 1;
+                }
+            }
+            if building_doors.len() > doors_before {
+                dual_fixup_buildings += 1;
+            }
+        }
+
+        if !building_doors.is_empty() {
+            buildings_with_doors.insert(bid);
+        }
+        for pos in building_doors {
+            door_tiles.push(pos);
         }
     }
 
@@ -3113,6 +3184,10 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     println!(
         "Facade runs: {} total (road-facing: {}, courtyard-facing: {})",
         total_runs, road_facing_runs, courtyard_facing_runs
+    );
+    println!(
+        "Dual-door fixup: {} additional doors on {} buildings",
+        dual_fixup_count, dual_fixup_buildings
     );
     println!(
         "Landlocked passages: {}/12 carved (1 unreachable data artifact)",
