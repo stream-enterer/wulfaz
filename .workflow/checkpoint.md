@@ -1,25 +1,24 @@
 # Checkpoint
 
 ## Active Task
-B05 Phase 3 — COMPLETE (4/4 steps done)
+B05 Phase 4 — COMPLETE (3/3 steps done)
+
+## B05 Phase 4 Status
+- P4S1 Small building interior fix — done (3-tier: skip <=4, convert 1 wall for 5-20, relaxed reclassify for 21+)
+- P4S2 Strict per-building door check — done (zero tolerance, log failures with id/quartier/superficie/tiles)
+- P4S3 Full diagnostic log — done (comprehensive format with all pipeline stages)
 
 ## B05 Phase 3 Status
-- P3S1 Facade run detection — done (detect_facade_runs with facing metadata)
-- P3S2 Door selection heuristic — done (spacing by run length, top-3 runs per building with facing diversity)
-- P3S3 Dual-door guarantee — done (force road + courtyard doors on dual-faced buildings)
-- P3S4 Door-floor adjacency validation — done (scan all Door tiles for Floor/Garden neighbor)
-
-Metrics after Phase 3:
-- avg 3.0 doors/building (down from ~17 in Phase 1)
-- 98.5% doors reachable, 98.1% courtyards reachable
-- 18 adjacency violations (all from P2 passage carving, not P3 selection)
-- 575 dual-door fixups on 575 buildings
+- P3S1 Facade run detection — done
+- P3S2 Door selection heuristic — done
+- P3S3 Dual-door guarantee — done
+- P3S4 Door-floor adjacency validation — done
 
 ## B05 Phase 2 Status
-- P2S1 BFS carve routing utility — done (bfs_to_walkable in loading_gis.rs)
-- P2S2 Landlocked building passage carving — done (carve through walls to reach walkable terrain)
-- P2S3 Island courtyard piercing — done (4-connected BFS regions, pierce perimeter buildings)
-- P2S4 Global connectivity validation — done (BFS from Road, count reachable doors/courtyards)
+- P2S1 BFS carve routing utility — done
+- P2S2 Landlocked building passage carving — done
+- P2S3 Island courtyard piercing — done
+- P2S4 Global connectivity validation — done
 
 ## B05 Phase 1 Status
 - P1S1 Door candidate detection — done
@@ -28,11 +27,11 @@ Metrics after Phase 3:
 - P1S4 Diagnostic log — done
 
 ## Modified Files
-- src/loading_gis.rs — FacadeRun struct, detect_facade_runs(), select_doors_from_run(), slide_to_valid(), has_interior_adjacency(), dual-door guarantee, adjacency validation, 1 new test (8 total B05 tests)
-- .workflow/b05-design.md — Phase 3 step checkboxes marked
+- src/loading_gis.rs — small building interior fix, strict door check, full diagnostic log, 2 new tests (10 total B05 tests)
+- .workflow/b05-design.md — Phase 4 step checkboxes marked
 
 ## Test Count
-224 lib + 5 determinism + 6 invariant = 235 total, all passing
+226 lib + 5 determinism + 6 invariant = 237 total, all passing
 
 ## Next Action
-B05 Phase 4 — Edge Cases (all-wall building fix, strict door check, full diagnostic log)
+B05 Final Completion — delete SCALE-B05 from backlog, commit

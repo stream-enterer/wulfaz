@@ -480,7 +480,7 @@ Phase 3 complete.
 
 ### Steps
 
-- [ ] **Step 1 — Small building interior fix.**
+- [x] **Step 1 — Small building interior fix.**
 
 Run BEFORE door candidate detection (prepend to `place_doors` pipeline).
 
@@ -510,7 +510,7 @@ After this step, normal door placement handles the newly-interior buildings.
 
 Commit: `B05 P4S1: Fix all-wall buildings with interior conversion`
 
-- [ ] **Step 2 — Strict per-building door check.**
+- [x] **Step 2 — Strict per-building door check.**
 
 Every BATI=1 building with ≥1 Floor or Garden tile must have ≥1 Door tile.
 Zero tolerance. Buildings with zero Floor AND zero Garden (≤4 tile skips)
@@ -521,7 +521,7 @@ Expected: 0 failures.
 
 Commit: `B05 P4S2: Strict zero-tolerance door check`
 
-- [ ] **Step 3 — Full diagnostic log.**
+- [x] **Step 3 — Full diagnostic log.**
 
 ```
 Small buildings: {C} converted to Floor, {S} skipped (≤4 tiles)
