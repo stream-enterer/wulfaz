@@ -385,7 +385,7 @@ function is rewritten to use candidate detection → run grouping → selection
 instead of converting all candidates. Garden conversion (Step 2) and
 validation (Steps 3-4) remain unchanged.
 
-- [ ] **Step 1 — Facade run detection.**
+- [x] **Step 1 — Facade run detection.**
 
 Compute door candidates using the same criteria as Phase 1 Step 1 (exterior +
 interior adjacency), but collect candidates WITHOUT converting to Door.
@@ -410,7 +410,7 @@ an ordered list of cardinally-adjacent candidate tiles, with facing metadata.
 
 Commit: `B05 P3S1: Detect facade runs with facing metadata`
 
-- [ ] **Step 2 — Door selection heuristic.**
+- [x] **Step 2 — Door selection heuristic.**
 
 For each facade run, select tile positions:
 
@@ -435,7 +435,7 @@ garden conversion (same as Phase 1 Step 2).
 
 Commit: `B05 P3S2: Select doors via spacing heuristic`
 
-- [ ] **Step 3 — Dual-door guarantee.**
+- [x] **Step 3 — Dual-door guarantee.**
 
 After selection, check each building that has facade runs facing BOTH Road
 and Courtyard (use the per-run facing metadata from Step 1). Verify it has
@@ -449,7 +449,7 @@ door from a perimeter building, disconnecting the courtyard.
 
 Commit: `B05 P3S3: Ensure dual-door buildings keep both facings`
 
-- [ ] **Step 4 — Door-floor adjacency validation.**
+- [x] **Step 4 — Door-floor adjacency validation.**
 
 After all placement (including garden conversion), check every Door tile:
 does it have ≥1 cardinal neighbor that is Floor or Garden? Log violations.
