@@ -3076,6 +3076,34 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         }
     }
 
+    // Door-floor adjacency validation.
+    // Every Door tile should have ≥1 cardinal neighbor that is Floor or Garden.
+    let mut adjacency_violations = 0usize;
+    for y in 0..h {
+        for x in 0..w {
+            if tiles.get_terrain(x, y) != Some(Terrain::Door) {
+                continue;
+            }
+            let has_floor_or_garden =
+                [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                    .iter()
+                    .any(|&(dx, dy)| {
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        if nx < 0 || ny < 0 {
+                            return false;
+                        }
+                        matches!(
+                            tiles.get_terrain(nx as usize, ny as usize),
+                            Some(Terrain::Floor | Terrain::Garden)
+                        )
+                    });
+            if !has_floor_or_garden {
+                adjacency_violations += 1;
+            }
+        }
+    }
+
     // Phase 2 Step 4: Global connectivity validation.
     // BFS from a Road tile through all walkable terrain.
     let mut total_doors = 0usize;
@@ -3220,6 +3248,7 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         "Gardens: {} buildings, {} tiles converted",
         garden_buildings, garden_tiles_converted
     );
+    println!("Door-floor adjacency violations: {}", adjacency_violations);
     println!(
         "Doorless buildings with interior: {} (expected 0)",
         doorless_with_interior
