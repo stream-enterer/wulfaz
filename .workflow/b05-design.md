@@ -280,7 +280,7 @@ Max depth: 50 tiles (track depth per-node, or limit BFS expansions).
 
 Commit: `B05 P2S1: Implement BFS carve routing utility`
 
-- [ ] **Step 2 — Landlocked building passage carving.**
+- [x] **Step 2 — Landlocked building passage carving.**
 
 For each BATI=1 building where Phase 1 placed zero doors AND the building
 has ≥1 Floor tile (12 buildings):
