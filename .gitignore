@@ -18,6 +18,7 @@ data/.preprocess.stamp
 # Claude Code
 .claude/
 .mcp.json
+.workflow/
 
 # Shell/personal dotfiles
 .bash_profile
