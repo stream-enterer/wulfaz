@@ -1751,6 +1751,8 @@ fn main() {
 
     loading::load_utility_config(&mut world, "data/utility.ron");
 
+    loading_gis::spawn_gis_entities(&mut world, "Arcis");
+
     // Start camera overlooking the Seine near Ile de la Cité / Notre-Dame
     let start_camera = Camera {
         x: 3750,

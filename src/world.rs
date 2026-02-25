@@ -56,6 +56,7 @@ pub struct MindTables {
     pub intentions: HashMap<Entity, Intention>,
     pub action_states: HashMap<Entity, ActionState>,
     pub wander_targets: HashMap<Entity, WanderTarget>,
+    pub occupations: HashMap<Entity, Occupation>,
     pub utility_config: UtilityConfig,
 }
 
@@ -67,6 +68,7 @@ impl MindTables {
             intentions: HashMap::new(),
             action_states: HashMap::new(),
             wander_targets: HashMap::new(),
+            occupations: HashMap::new(),
             utility_config: UtilityConfig::default(),
         }
     }
@@ -77,6 +79,7 @@ impl MindTables {
         self.intentions.remove(entity);
         self.action_states.remove(entity);
         self.wander_targets.remove(entity);
+        self.occupations.remove(entity);
     }
 }
 
@@ -89,6 +92,9 @@ pub struct GisTables {
     pub streets: StreetRegistry,
     /// Active SoDUCo snapshot year for occupant display.
     pub active_year: u16,
+    // Per-entity GIS links
+    pub home_buildings: HashMap<Entity, HomeBuilding>,
+    pub workplaces: HashMap<Entity, Workplace>,
 }
 
 impl GisTables {
@@ -98,8 +104,15 @@ impl GisTables {
             blocks: BlockRegistry::new(),
             quartier_names: Vec::new(),
             streets: StreetRegistry::new(),
-            active_year: 1839,
+            active_year: 1845,
+            home_buildings: HashMap::new(),
+            workplaces: HashMap::new(),
         }
+    }
+
+    fn remove(&mut self, entity: &Entity) {
+        self.home_buildings.remove(entity);
+        self.workplaces.remove(entity);
     }
 }
 
@@ -208,6 +221,7 @@ impl World {
         }
         self.body.remove(&entity);
         self.mind.remove(&entity);
+        self.gis.remove(&entity);
     }
 }
 
@@ -328,6 +342,31 @@ pub fn validate_world(world: &World) {
             entity
         );
     }
+
+    for entity in world.mind.occupations.keys() {
+        assert!(
+            world.alive.contains(entity),
+            "zombie entity {:?} in occupations but not in alive",
+            entity
+        );
+    }
+
+    // GIS per-entity tables
+    for entity in world.gis.home_buildings.keys() {
+        assert!(
+            world.alive.contains(entity),
+            "zombie entity {:?} in home_buildings but not in alive",
+            entity
+        );
+    }
+
+    for entity in world.gis.workplaces.keys() {
+        assert!(
+            world.alive.contains(entity),
+            "zombie entity {:?} in workplaces but not in alive",
+            entity
+        );
+    }
 }
 
 #[cfg(test)]
@@ -411,6 +450,21 @@ mod tests {
                 goal_y: 7,
             },
         );
+        world.mind.occupations.insert(
+            e,
+            Occupation {
+                activity: "boulanger".to_string(),
+                naics: "311".to_string(),
+            },
+        );
+        world
+            .gis
+            .home_buildings
+            .insert(e, HomeBuilding(crate::registry::BuildingId(1)));
+        world
+            .gis
+            .workplaces
+            .insert(e, Workplace(crate::registry::BuildingId(1)));
 
         world.despawn(e);
 
@@ -429,6 +483,9 @@ mod tests {
         assert!(!world.mind.intentions.contains_key(&e));
         assert!(!world.mind.action_states.contains_key(&e));
         assert!(!world.mind.wander_targets.contains_key(&e));
+        assert!(!world.mind.occupations.contains_key(&e));
+        assert!(!world.gis.home_buildings.contains_key(&e));
+        assert!(!world.gis.workplaces.contains_key(&e));
     }
 
     #[test]

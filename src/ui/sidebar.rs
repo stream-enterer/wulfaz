@@ -925,6 +925,9 @@ mod tests {
             combat: Some((5.0, 3.0, 0.7)),
             action: Some("Wandering".into()),
             gait: Some("Walk".into()),
+            occupation: None,
+            home_building: None,
+            workplace: None,
         };
         let live = SidebarInfo {
             entity_info: Some(&info),
@@ -1000,6 +1003,9 @@ mod tests {
             combat: None,
             action: Some("Idle".into()),
             gait: None,
+            occupation: None,
+            home_building: None,
+            workplace: None,
         };
         let live = SidebarInfo {
             entity_info: Some(&info),

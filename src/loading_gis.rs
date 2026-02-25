@@ -1784,7 +1784,7 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
 
     // Reconstruct street registry from building address data
     world.gis.streets = StreetRegistry::build_from_buildings(&world.gis.buildings);
-    world.gis.active_year = 1839;
+    world.gis.active_year = 1845;
     log::info!(
         "  {} streets reconstructed",
         world.gis.streets.streets.len()
@@ -1793,6 +1793,164 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
     log::info!(
         "Paris binary loaded in {:.1}s",
         total_start.elapsed().as_secs_f64()
+    );
+}
+
+/// Spawn simulation entities from SoDUCo directory data.
+///
+/// For each known occupant in the target quartier, creates an entity with full
+/// component set, positioned on a floor tile of their building.
+pub fn spawn_gis_entities(world: &mut World, target_quartier: &str) {
+    use crate::components::*;
+    use rand::RngExt;
+
+    type SpawnEntry = (BuildingId, Vec<(i32, i32)>, Vec<Occupant>);
+
+    let start = std::time::Instant::now();
+    let active_year = world.gis.active_year;
+
+    // Phase 1 — Collect spawn data (immutable borrows only).
+    let mut spawn_data: Vec<SpawnEntry> = Vec::new();
+    let mut buildings_in_quartier: u32 = 0;
+    let mut buildings_with_occupants: u32 = 0;
+    let mut buildings_skipped_no_floors: u32 = 0;
+    let mut occupant_records: u32 = 0;
+
+    for building in &world.gis.buildings.buildings {
+        if building.quartier != target_quartier {
+            continue;
+        }
+        buildings_in_quartier += 1;
+
+        let Some((_year, occupants)) = building.occupants_nearest(active_year, 20) else {
+            continue;
+        };
+        buildings_with_occupants += 1;
+        occupant_records += occupants.len() as u32;
+
+        let floor_tiles: Vec<(i32, i32)> = building
+            .tiles
+            .iter()
+            .filter(|&&(x, y)| {
+                world.tiles.get_terrain(x as usize, y as usize) == Some(Terrain::Floor)
+            })
+            .copied()
+            .collect();
+        if floor_tiles.is_empty() {
+            buildings_skipped_no_floors += 1;
+            log::debug!(
+                "Building {:?} has {} occupants but no floor tiles — skipped",
+                building.id,
+                occupants.len()
+            );
+            continue;
+        }
+
+        spawn_data.push((building.id, floor_tiles, occupants.to_vec()));
+    }
+
+    // Phase 2 — Spawn entities (mutable world).
+    let mut entities_spawned: u32 = 0;
+    let mut empty_names_skipped: u32 = 0;
+
+    for (building_id, floor_tiles, occupants) in &spawn_data {
+        for occupant in occupants {
+            for raw_name in occupant.name.split(',') {
+                let name = raw_name.trim();
+                if name.is_empty() {
+                    empty_names_skipped += 1;
+                    continue;
+                }
+
+                let e = world.spawn();
+
+                // Position: random floor tile (deterministic via world.rng)
+                let idx = world.rng.random_range(0..floor_tiles.len());
+                let (x, y) = floor_tiles[idx];
+
+                // Body tables
+                world.body.names.insert(
+                    e,
+                    Name {
+                        value: name.to_string(),
+                    },
+                );
+                world.body.icons.insert(e, Icon { ch: '☻' });
+                world.body.positions.insert(e, Position { x, y });
+                world.body.healths.insert(
+                    e,
+                    Health {
+                        current: 100.0,
+                        max: 100.0,
+                    },
+                );
+                world.body.fatigues.insert(e, Fatigue { current: 0.0 });
+                world.body.combat_stats.insert(
+                    e,
+                    CombatStats {
+                        attack: 10.0,
+                        defense: 5.0,
+                        aggression: 0.0,
+                    },
+                );
+                world.body.gait_profiles.insert(e, GaitProfile::biped());
+                world.body.current_gaits.insert(e, Gait::Walk);
+                world
+                    .body
+                    .move_cooldowns
+                    .insert(e, MoveCooldown { remaining: 0 });
+
+                // Mind tables
+                world.mind.hungers.insert(
+                    e,
+                    Hunger {
+                        current: 0.0,
+                        max: 100.0,
+                    },
+                );
+                world.mind.action_states.insert(
+                    e,
+                    ActionState {
+                        current_action: None,
+                        ticks_in_action: 0,
+                        cooldowns: HashMap::new(),
+                    },
+                );
+                world.mind.occupations.insert(
+                    e,
+                    Occupation {
+                        activity: occupant.activity.clone(),
+                        naics: occupant.naics.clone(),
+                    },
+                );
+
+                // GIS tables
+                world
+                    .gis
+                    .home_buildings
+                    .insert(e, HomeBuilding(*building_id));
+                world.gis.workplaces.insert(e, Workplace(*building_id));
+
+                // Event
+                world.events.push(crate::events::Event::Spawned {
+                    entity: e,
+                    tick: world.tick,
+                });
+                entities_spawned += 1;
+            }
+        }
+    }
+
+    let ms = start.elapsed().as_millis();
+    if buildings_in_quartier == 0 {
+        log::warn!("spawn_gis_entities: no buildings match quartier '{target_quartier}'");
+    }
+    log::info!(
+        "GIS spawn '{target_quartier}': {buildings_in_quartier} buildings, \
+         {buildings_with_occupants} with occupants ({occupant_records} records), \
+         {buildings_skipped_no_floors} skipped (no floors), \
+         {entities_spawned} entities spawned \
+         ({empty_names_skipped} empty names skipped) [{ms}ms]"
     );
 }
 

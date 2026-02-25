@@ -18,6 +18,9 @@ pub struct EntityInspectorInfo {
     pub combat: Option<(f32, f32, f32)>, // (atk, def, aggression)
     pub action: Option<String>,          // "Idle", "Wandering", etc.
     pub gait: Option<String>,            // "Walk", "Run", etc.
+    pub occupation: Option<String>,      // "activity [naics]"
+    pub home_building: Option<u32>,      // BuildingId for display
+    pub workplace: Option<u32>,          // BuildingId for display
 }
 
 /// Collect inspector data for an entity. Returns `None` if the entity is
@@ -60,6 +63,16 @@ pub fn collect_inspector_info(
         .get(&entity)
         .map(|g| format!("{:?}", g));
 
+    let occupation = world
+        .mind
+        .occupations
+        .get(&entity)
+        .map(|o| format!("{} [{}]", o.activity, o.naics));
+
+    let home_building = world.gis.home_buildings.get(&entity).map(|h| h.0.0);
+
+    let workplace = world.gis.workplaces.get(&entity).map(|w| w.0.0);
+
     Some(EntityInspectorInfo {
         name,
         icon,
@@ -70,6 +83,9 @@ pub fn collect_inspector_info(
         combat,
         action,
         gait,
+        occupation,
+        home_building,
+        workplace,
     })
 }
 
@@ -158,6 +174,30 @@ pub fn build_entity_inspector(
     );
     tree.set_position(pos_label, Position::Fixed { x: 0.0, y });
     y += data_h + gap;
+
+    // Occupation
+    if let Some(ref occ) = info.occupation {
+        let occ_label = tree.insert(
+            panel,
+            Widget::RichText {
+                spans: vec![
+                    TextSpan {
+                        text: "Occ ".to_string(),
+                        color: theme.disabled,
+                        font_family: FontFamily::Mono,
+                    },
+                    TextSpan {
+                        text: occ.clone(),
+                        color: theme.gold,
+                        font_family: FontFamily::Serif,
+                    },
+                ],
+                font_size: theme.font_body_size,
+            },
+        );
+        tree.set_position(occ_label, Position::Fixed { x: 0.0, y });
+        y += body_h + gap;
+    }
 
     // Separator gap
     y += gap;
@@ -469,6 +509,9 @@ mod tests {
             combat: None,
             action: None,
             gait: None,
+            occupation: None,
+            home_building: None,
+            workplace: None,
         };
         let (panel_id, _close_id) = build_entity_inspector(&mut tree, &theme, &info);
 
@@ -490,6 +533,9 @@ mod tests {
             combat: None,
             action: None,
             gait: None,
+            occupation: None,
+            home_building: None,
+            workplace: None,
         };
         let (panel_id, close_id) = build_entity_inspector(&mut tree, &theme, &info);
 
@@ -519,6 +565,9 @@ mod tests {
             combat: None,
             action: None,
             gait: None,
+            occupation: None,
+            home_building: None,
+            workplace: None,
         };
         let (panel_id, _) = build_entity_inspector(&mut tree, &theme, &info_low);
 
@@ -549,6 +598,9 @@ mod tests {
             combat: None,
             action: None,
             gait: None,
+            occupation: None,
+            home_building: None,
+            workplace: None,
         };
         let (panel_id2, _) = build_entity_inspector(&mut tree2, &theme, &info_high);
         let panel_node2 = tree2.get(panel_id2).expect("panel");
@@ -580,6 +632,9 @@ mod tests {
             combat: Some((12.0, 8.0, 0.7)),
             action: Some("Idle".into()),
             gait: Some("Walk".into()),
+            occupation: None,
+            home_building: None,
+            workplace: None,
         };
         let (panel_id, _) = build_entity_inspector(&mut tree, &theme, &info);
 

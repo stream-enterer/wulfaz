@@ -3,6 +3,8 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
+use crate::registry::BuildingId;
+
 /// Unique entity identifier. Never use raw u64 where an Entity is meant.
 /// Never cast between Entity and Tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +146,20 @@ pub struct Intention {
 pub struct WanderTarget {
     pub goal_x: i32,
     pub goal_y: i32,
+}
+
+/// The building where this entity lives.
+pub struct HomeBuilding(pub BuildingId);
+
+/// The building where this entity works.
+pub struct Workplace(pub BuildingId);
+
+/// Professional activity from SoDUCo directory data.
+pub struct Occupation {
+    /// Free-text French activity string, e.g. "boulanger", "rentier".
+    pub activity: String,
+    /// NAICS industry category code. Used by systems for behavior differentiation.
+    pub naics: String,
 }
 
 /// Per-entity scoring state: current action, how long it's been doing it, cooldowns.
