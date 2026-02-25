@@ -5247,4 +5247,176 @@ mod tests {
         assert_eq!(strip_bis_ter("12"), "12");
         assert_eq!(strip_bis_ter("3quater"), "3");
     }
+
+    #[test]
+    fn test_spawn_gis_entities() {
+        use crate::components::*;
+
+        let mut world = crate::world::World::new_with_seed(42);
+
+        // Set up a 20×20 tile map with floor tiles at (5,5)..(8,8).
+        world.tiles = TileMap::new(20, 20);
+        let bid = BuildingId(1);
+        let mut tiles = Vec::new();
+        for y in 5..8 {
+            for x in 5..8 {
+                world.tiles.set_terrain(x, y, Terrain::Floor);
+                world.tiles.set_building_id(x, y, bid);
+                tiles.push((x as i32, y as i32));
+            }
+        }
+
+        // Create a building in quartier "TestQ" with occupants for 1845.
+        let mut occupants_by_year = HashMap::new();
+        occupants_by_year.insert(
+            1845,
+            vec![
+                Occupant {
+                    name: "Dupont".to_string(),
+                    activity: "boulanger".to_string(),
+                    naics: "311".to_string(),
+                },
+                Occupant {
+                    name: "Lefèvre, Martin".to_string(),
+                    activity: "rentier".to_string(),
+                    naics: "531".to_string(),
+                },
+                Occupant {
+                    name: "".to_string(),
+                    activity: "unknown".to_string(),
+                    naics: "000".to_string(),
+                },
+            ],
+        );
+        let building = BuildingData {
+            id: bid,
+            identif: 100,
+            quartier: "TestQ".to_string(),
+            superficie: 50.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "001".to_string(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 1,
+            tiles,
+            addresses: Vec::new(),
+            occupants_by_year,
+        };
+        world.gis.buildings.insert(building);
+
+        // active_year should already be 1845 from GisTables::new().
+        assert_eq!(world.gis.active_year, 1845);
+
+        spawn_gis_entities(&mut world, "TestQ");
+
+        // "Dupont" → 1, "Lefèvre, Martin" → 2 (comma split), "" → 0 (skipped)
+        assert_eq!(world.alive.len(), 3);
+
+        let entities: Vec<Entity> = world.alive.iter().copied().collect();
+        for e in &entities {
+            // Every entity has a position on a floor tile.
+            let pos = world.body.positions.get(e).expect("should have position");
+            assert!((5..8).contains(&pos.x), "x={} out of range", pos.x);
+            assert!((5..8).contains(&pos.y), "y={} out of range", pos.y);
+
+            // Icon is ☻.
+            assert_eq!(world.body.icons.get(e).unwrap().ch, '☻');
+
+            // Has HomeBuilding and Workplace pointing to building 1.
+            assert_eq!(world.gis.home_buildings.get(e).unwrap().0, bid);
+            assert_eq!(world.gis.workplaces.get(e).unwrap().0, bid);
+
+            // Has Occupation.
+            assert!(world.mind.occupations.get(e).is_some());
+
+            // Has all required body/mind components.
+            assert!(world.body.healths.get(e).is_some());
+            assert!(world.body.fatigues.get(e).is_some());
+            assert!(world.body.combat_stats.get(e).is_some());
+            assert!(world.body.gait_profiles.get(e).is_some());
+            assert!(world.body.current_gaits.get(e).is_some());
+            assert!(world.body.move_cooldowns.get(e).is_some());
+            assert!(world.mind.hungers.get(e).is_some());
+            assert!(world.mind.action_states.get(e).is_some());
+        }
+
+        // validate_world should pass (no zombie entries).
+        crate::world::validate_world(&world);
+
+        // Deterministic: same seed → same positions.
+        let mut world2 = crate::world::World::new_with_seed(42);
+        world2.tiles = TileMap::new(20, 20);
+        let mut occupants_by_year2 = HashMap::new();
+        occupants_by_year2.insert(
+            1845,
+            vec![
+                Occupant {
+                    name: "Dupont".to_string(),
+                    activity: "boulanger".to_string(),
+                    naics: "311".to_string(),
+                },
+                Occupant {
+                    name: "Lefèvre, Martin".to_string(),
+                    activity: "rentier".to_string(),
+                    naics: "531".to_string(),
+                },
+                Occupant {
+                    name: "".to_string(),
+                    activity: "unknown".to_string(),
+                    naics: "000".to_string(),
+                },
+            ],
+        );
+        let mut tiles2 = Vec::new();
+        for y in 5..8 {
+            for x in 5..8 {
+                world2.tiles.set_terrain(x, y, Terrain::Floor);
+                world2.tiles.set_building_id(x, y, bid);
+                tiles2.push((x as i32, y as i32));
+            }
+        }
+        let building2 = BuildingData {
+            id: bid,
+            identif: 100,
+            quartier: "TestQ".to_string(),
+            superficie: 50.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "001".to_string(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 1,
+            tiles: tiles2,
+            addresses: Vec::new(),
+            occupants_by_year: occupants_by_year2,
+        };
+        world2.gis.buildings.insert(building2);
+
+        spawn_gis_entities(&mut world2, "TestQ");
+
+        // Same entity positions as world1.
+        let mut positions1: Vec<(i32, i32)> =
+            world.body.positions.values().map(|p| (p.x, p.y)).collect();
+        let mut positions2: Vec<(i32, i32)> =
+            world2.body.positions.values().map(|p| (p.x, p.y)).collect();
+        positions1.sort();
+        positions2.sort();
+        assert_eq!(positions1, positions2, "deterministic replay failed");
+    }
+
+    #[test]
+    fn test_spawn_gis_entities_unknown_quartier() {
+        let mut world = crate::world::World::new_with_seed(42);
+        world.tiles = TileMap::new(10, 10);
+
+        // No buildings at all — should produce 0 entities.
+        spawn_gis_entities(&mut world, "Nonexistent");
+        assert!(world.alive.is_empty());
+        crate::world::validate_world(&world);
+    }
 }
