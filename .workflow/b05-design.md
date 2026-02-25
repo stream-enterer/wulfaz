@@ -337,7 +337,7 @@ handled after those outer courtyards are pierced.
 
 Commit: `B05 P2S3: Pierce island courtyards to Road network`
 
-- [ ] **Step 4 — Global connectivity validation.**
+- [x] **Step 4 — Global connectivity validation.**
 
 Find a starting Road tile by scanning the grid for the first
 `get_terrain(x, y) == Some(Terrain::Road)`. BFS through all walkable
