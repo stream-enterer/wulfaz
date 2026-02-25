@@ -2654,15 +2654,14 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
             continue;
         }
 
-        // Group into facade runs.
-        let runs = detect_facade_runs(&candidates, &candidate_facing);
+        // Group into facade runs, sort by length (longest = most significant).
+        let mut runs = detect_facade_runs(&candidates, &candidate_facing);
+        runs.sort_by(|a, b| b.tiles.len().cmp(&a.tiles.len()));
 
-        // Select doors from each run via spacing heuristic.
+        // Track stats for all runs.
         let has_road_runs = runs.iter().any(|r| r.road_facing);
         let has_courtyard_runs = runs.iter().any(|r| r.courtyard_facing);
         let is_dual = has_road_runs && has_courtyard_runs;
-        let mut building_doors: Vec<(usize, usize)> = Vec::new();
-
         for run in &runs {
             total_runs += 1;
             if run.road_facing {
@@ -2671,7 +2670,33 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
             if run.courtyard_facing {
                 courtyard_facing_runs += 1;
             }
-            let selected = select_doors_from_run(run, tiles, bid);
+        }
+
+        // Select doors from the top 3 longest runs, ensuring facing diversity.
+        // Reserve slots for the longest road-facing and courtyard-facing runs,
+        // then fill remaining from the longest overall.
+        let mut active_indices: Vec<usize> = Vec::new();
+        if let Some(i) = runs.iter().position(|r| r.road_facing) {
+            active_indices.push(i);
+        }
+        for (i, run) in runs.iter().enumerate() {
+            if run.courtyard_facing && !active_indices.contains(&i) {
+                active_indices.push(i);
+                break;
+            }
+        }
+        for i in 0..runs.len() {
+            if active_indices.len() >= 3 {
+                break;
+            }
+            if !active_indices.contains(&i) {
+                active_indices.push(i);
+            }
+        }
+
+        let mut building_doors: Vec<(usize, usize)> = Vec::new();
+        for &i in &active_indices {
+            let selected = select_doors_from_run(&runs[i], tiles, bid);
             for pos in selected {
                 building_doors.push(pos);
             }
