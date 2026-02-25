@@ -23,13 +23,6 @@ That is ~99 x 75 chunks at 64×64 = ~7,400 chunks, ~30M tiles.
 
 Goal: ~200 entities with full AI on the real map.
 
-- **SCALE-B05** — Door placement + passage carving. Needs: A03 (done). Blocks: B06, B03. **BLOCKED: design review required.**
-  - **Preprocessor** (extend `preprocess.rs`): runs after wall/floor classification, same pattern as classify_walls_floors. Static tile modification baked into `paris.tiles`.
-  - Place Door tiles: for each building, find a wall tile adjacent to both a floor tile and a Road or Courtyard tile. That tile becomes a Door.
-  - Landlocked buildings (no wall tile adjacent to Road or Courtyard): carve a 1-tile passage through intervening buildings to the nearest Road or Courtyard. This models the narrow covered passages (allées) that provided access to interior buildings in dense Parisian blocks.
-  - Garden buildings (24 "parc ou jardin"): convert their interior Floor tiles to Garden instead of Floor.
-  - Game loads Door/Garden terrain from binary, no runtime classification needed.
-
 - **SCALE-B06** — Building interior generation. Needs: B05, A07 (done). **BLOCKED: design review required.**
   - **Preprocessor** (extend `preprocess.rs`): runs after door placement + address loading. Static tile modifications baked into `paris.tiles`.
   - Furnish building interiors based on occupant type. NAICS category from building registry (populated by A07 in preprocessor). Place furniture tiles:
@@ -222,3 +215,6 @@ Developable on test map or integrated after Phase B.
 
 - **GROW-002** — Phase function grouping. Trigger: >30 system calls.
 - **GROW-003** — System dependency analyzer. Trigger: >15 system files.
+- **GROW-004** — Revisit D14 (modals as panels merge). Trigger: ModalStack and PanelManager start diverging in behavior (different close semantics, different animation patterns, or duplicate logic appearing in both). Current ModalStack is clean at ~80 lines; merge is principled but margin is narrow (72% confidence). Requires P1S6 (PanelKind enum) from `ui-architecture-migration.md` Phase 1 to be complete first. See `.workflow/ui-architecture-patterns.md` Pass 5.
+- **GROW-005** — Revisit D1 (UiContext sub-struct boundaries). Trigger: UiContext sub-fields feel unnatural during implementation, or a new piece of UI state doesn't fit cleanly into any existing sub-struct. Evaluate after `ui-architecture-migration.md` Phase 2 (P2S1–P2S5) is complete and has been used for at least one feature cycle. The sim layer's World uses `BodyTables`/`MindTables`/`GisTables` groupings; if UI state proves more heterogeneous than sim state, the sub-struct approach may need adjustment. 75% confidence. See `.workflow/ui-architecture-patterns.md` Pass 5.
+- **GROW-006** — Revisit D15 (scroll key type). Trigger: `ui-architecture-migration.md` Phase 1 (P1S6, PanelKind enum) is complete. Scroll keys should match panel keys for consistency — migrate from `HashMap<String, f32>` to `HashMap<ScrollKey, f32>` where `ScrollKey` is either `PanelKind` or a new enum that covers both panel and non-panel scrollables. Depends on Phase 2 (P2S2, scroll decoupling) being done. 75% confidence. See `.workflow/ui-architecture-patterns.md` Pass 5.
