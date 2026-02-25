@@ -3322,9 +3322,10 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         if !has_door {
             doorless_with_interior += 1;
             println!(
-                "  WARNING: doorless building with interior: id={:?} quartier={} tiles={}",
+                "  FAIL: doorless building with interior: id={:?} quartier={} superficie={:.0} tiles={}",
                 bdata.id,
                 bdata.quartier,
+                bdata.superficie,
                 bdata.tiles.len()
             );
         }
