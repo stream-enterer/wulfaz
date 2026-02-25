@@ -252,7 +252,7 @@ Phase 1 complete. Doors placed on all non-landlocked buildings.
 
 ### Steps
 
-- [ ] **Step 1 — BFS carve routing utility.**
+- [x] **Step 1 — BFS carve routing utility.**
 
 Implement a shared BFS function:
 ```rust

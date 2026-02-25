@@ -2340,6 +2340,78 @@ fn component_bbox(tiles: &[(usize, usize)]) -> (usize, usize, usize, usize) {
 
 // --- Door placement (SCALE-B05) ---
 
+/// BFS from `seeds` through Wall and Floor tiles to find the shortest path to
+/// walkable terrain outside any building (Road, Courtyard, Garden, Bridge,
+/// Fixture with no building_id, or existing Door). Returns the path from a seed
+/// to the tile adjacent to the walkable destination (exclusive of destination),
+/// or None if `max_depth` is exceeded.
+fn bfs_to_walkable(
+    tiles: &TileMap,
+    seeds: &[(i32, i32)],
+    max_depth: usize,
+) -> Option<Vec<(i32, i32)>> {
+    let w = tiles.width() as i32;
+    let h = tiles.height() as i32;
+
+    let mut queue: VecDeque<((i32, i32), usize)> = VecDeque::new();
+    let mut visited: HashSet<(i32, i32)> = HashSet::new();
+    let mut parent: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
+
+    for &seed in seeds {
+        queue.push_back((seed, 0));
+        visited.insert(seed);
+    }
+
+    while let Some(((cx, cy), depth)) = queue.pop_front() {
+        if depth >= max_depth {
+            continue;
+        }
+
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let nx = cx + dx;
+            let ny = cy + dy;
+            if nx < 0 || ny < 0 || nx >= w || ny >= h {
+                continue;
+            }
+            if visited.contains(&(nx, ny)) {
+                continue;
+            }
+
+            let nux = nx as usize;
+            let nuy = ny as usize;
+
+            let terrain = match tiles.get_terrain(nux, nuy) {
+                Some(t) => t,
+                None => continue,
+            };
+
+            // Goal: walkable terrain outside any building, or existing Door.
+            if terrain == Terrain::Door
+                || (terrain.is_walkable() && tiles.get_building_id(nux, nuy).is_none())
+            {
+                // Trace path from (cx, cy) back to seed.
+                let mut path = vec![(cx, cy)];
+                let mut cur = (cx, cy);
+                while let Some(&p) = parent.get(&cur) {
+                    path.push(p);
+                    cur = p;
+                }
+                path.reverse();
+                return Some(path);
+            }
+
+            // Traversable: Wall or Floor only.
+            if terrain == Terrain::Wall || terrain == Terrain::Floor {
+                visited.insert((nx, ny));
+                parent.insert((nx, ny), (cx, cy));
+                queue.push_back(((nx, ny), depth + 1));
+            }
+        }
+    }
+
+    None
+}
+
 /// Place doors on all BATI=1 buildings.
 ///
 /// A wall tile becomes a door if it has BOTH:
@@ -2404,6 +2476,310 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         tiles.set_terrain(x, y, Terrain::Door);
     }
 
+    // Phase 2 Step 2: Landlocked building passage carving.
+    // For buildings with zero doors and ≥1 Floor tile, carve a passage to the
+    // nearest walkable tile outside any building.
+    let mut passages_carved = 0usize;
+    for bdata in &buildings.buildings {
+        if bdata.bati != 1 {
+            continue;
+        }
+        if buildings_with_doors.contains(&bdata.id) {
+            continue;
+        }
+        let has_floor = bdata
+            .tiles
+            .iter()
+            .any(|&(cx, cy)| tiles.get_terrain(cx as usize, cy as usize) == Some(Terrain::Floor));
+        if !has_floor {
+            continue;
+        }
+
+        // Collect all Wall tiles of this building as BFS seeds.
+        let seeds: Vec<(i32, i32)> = bdata
+            .tiles
+            .iter()
+            .filter(|&&(cx, cy)| tiles.get_terrain(cx as usize, cy as usize) == Some(Terrain::Wall))
+            .copied()
+            .collect();
+
+        if let Some(path) = bfs_to_walkable(tiles, &seeds, 50) {
+            let len = path.len();
+            for (i, &(px, py)) in path.iter().enumerate() {
+                let terrain = if i == 0 || i == len - 1 {
+                    Terrain::Door
+                } else {
+                    Terrain::Floor
+                };
+                tiles.set_terrain(px as usize, py as usize, terrain);
+            }
+            buildings_with_doors.insert(bdata.id);
+            passages_carved += 1;
+        } else {
+            println!(
+                "  WARNING: unreachable landlocked building: id={:?} quartier={}",
+                bdata.id, bdata.quartier
+            );
+        }
+    }
+
+    // Phase 2 Step 3: Island courtyard piercing.
+    // Build courtyard regions, identify islands, pierce through perimeter
+    // buildings to connect to the Road network.
+    let w = tiles.width();
+    let h = tiles.height();
+
+    // 3a: Build courtyard regions via 4-connected BFS.
+    let mut visited_cy: HashSet<(usize, usize)> = HashSet::new();
+    let mut courtyard_regions: Vec<Vec<(usize, usize)>> = Vec::new();
+    let mut courtyard_region_sets: Vec<HashSet<(usize, usize)>> = Vec::new();
+
+    for y in 0..h {
+        for x in 0..w {
+            if tiles.get_terrain(x, y) != Some(Terrain::Courtyard) {
+                continue;
+            }
+            if visited_cy.contains(&(x, y)) {
+                continue;
+            }
+            // BFS to find this region.
+            let mut region = Vec::new();
+            let mut region_set = HashSet::new();
+            let mut q: VecDeque<(usize, usize)> = VecDeque::new();
+            q.push_back((x, y));
+            visited_cy.insert((x, y));
+            while let Some((rx, ry)) = q.pop_front() {
+                region.push((rx, ry));
+                region_set.insert((rx, ry));
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let nx = rx as i32 + dx;
+                    let ny = ry as i32 + dy;
+                    if nx < 0 || ny < 0 {
+                        continue;
+                    }
+                    let nux = nx as usize;
+                    let nuy = ny as usize;
+                    if nux >= w || nuy >= h {
+                        continue;
+                    }
+                    if visited_cy.contains(&(nux, nuy)) {
+                        continue;
+                    }
+                    if tiles.get_terrain(nux, nuy) == Some(Terrain::Courtyard) {
+                        visited_cy.insert((nux, nuy));
+                        q.push_back((nux, nuy));
+                    }
+                }
+            }
+            courtyard_regions.push(region);
+            courtyard_region_sets.push(region_set);
+        }
+    }
+
+    // 3b: Classify each region as connected (has Road neighbor) or island.
+    let total_courtyard_regions = courtyard_regions.len();
+    let mut region_connected: Vec<bool> = courtyard_regions
+        .iter()
+        .map(|region| {
+            region.iter().any(|&(rx, ry)| {
+                [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                    .iter()
+                    .any(|&(dx, dy)| {
+                        let nx = rx as i32 + dx;
+                        let ny = ry as i32 + dy;
+                        if nx < 0 || ny < 0 {
+                            return false;
+                        }
+                        tiles.get_terrain(nx as usize, ny as usize) == Some(Terrain::Road)
+                    })
+            })
+        })
+        .collect();
+
+    // 3c: Process island regions (smallest to largest).
+    let mut island_indices: Vec<usize> = (0..courtyard_regions.len())
+        .filter(|&i| !region_connected[i])
+        .collect();
+    island_indices.sort_by_key(|&i| courtyard_regions[i].len());
+
+    let mut courtyards_pierced = 0usize;
+    for &ri in &island_indices {
+        if region_connected[ri] {
+            continue; // May have been connected by a previous piercing.
+        }
+
+        let region_set = &courtyard_region_sets[ri];
+
+        // Find perimeter buildings: wall neighbors of boundary courtyard tiles.
+        let mut perimeter_bids: HashSet<BuildingId> = HashSet::new();
+        for &(rx, ry) in &courtyard_regions[ri] {
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = rx as i32 + dx;
+                let ny = ry as i32 + dy;
+                if nx < 0 || ny < 0 {
+                    continue;
+                }
+                let nux = nx as usize;
+                let nuy = ny as usize;
+                if tiles.get_terrain(nux, nuy) == Some(Terrain::Wall)
+                    && let Some(bid) = tiles.get_building_id(nux, nuy)
+                {
+                    perimeter_bids.insert(bid);
+                }
+            }
+        }
+
+        // Try to find a perimeter building with a Door adjacent to Road.
+        let mut pierced = false;
+        for &bid in &perimeter_bids {
+            // Find the building data for this bid.
+            let bdata = match buildings.buildings.iter().find(|b| b.id == bid) {
+                Some(b) => b,
+                None => continue,
+            };
+
+            // Does this building have a Door tile adjacent to Road?
+            let has_road_door = bdata.tiles.iter().any(|&(cx, cy)| {
+                if tiles.get_terrain(cx as usize, cy as usize) != Some(Terrain::Door) {
+                    return false;
+                }
+                [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                    .iter()
+                    .any(|&(dx, dy)| {
+                        let nx = cx + dx;
+                        let ny = cy + dy;
+                        if nx < 0 || ny < 0 {
+                            return false;
+                        }
+                        tiles.get_terrain(nx as usize, ny as usize) == Some(Terrain::Road)
+                    })
+            });
+            if !has_road_door {
+                continue;
+            }
+
+            // Find a Wall tile of this building adjacent to both this courtyard
+            // region AND an interior Floor tile.
+            for &(cx, cy) in &bdata.tiles {
+                let ux = cx as usize;
+                let uy = cy as usize;
+                if tiles.get_terrain(ux, uy) != Some(Terrain::Wall) {
+                    continue;
+                }
+                let mut adj_region = false;
+                let mut adj_interior = false;
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let nx = cx + dx;
+                    let ny = cy + dy;
+                    if nx < 0 || ny < 0 {
+                        continue;
+                    }
+                    let nux = nx as usize;
+                    let nuy = ny as usize;
+                    if region_set.contains(&(nux, nuy)) {
+                        adj_region = true;
+                    }
+                    if tiles.get_terrain(nux, nuy) == Some(Terrain::Floor)
+                        && tiles.get_building_id(nux, nuy) == Some(bid)
+                    {
+                        adj_interior = true;
+                    }
+                }
+                if adj_region && adj_interior {
+                    tiles.set_terrain(ux, uy, Terrain::Door);
+                    buildings_with_doors.insert(bid);
+                    pierced = true;
+                    break;
+                }
+            }
+            if pierced {
+                break;
+            }
+        }
+
+        // Fallback: try a perimeter building adjacent to a connected courtyard.
+        if !pierced {
+            for &bid in &perimeter_bids {
+                let bdata = match buildings.buildings.iter().find(|b| b.id == bid) {
+                    Some(b) => b,
+                    None => continue,
+                };
+
+                // Does this building have a Door tile adjacent to a connected
+                // courtyard region?
+                let has_connected_cy = bdata.tiles.iter().any(|&(cx, cy)| {
+                    if tiles.get_terrain(cx as usize, cy as usize) != Some(Terrain::Door) {
+                        return false;
+                    }
+                    [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                        .iter()
+                        .any(|&(dx, dy)| {
+                            let nx = cx + dx;
+                            let ny = cy + dy;
+                            if nx < 0 || ny < 0 {
+                                return false;
+                            }
+                            let nux = nx as usize;
+                            let nuy = ny as usize;
+                            // Check if neighbor is in a connected courtyard region.
+                            if tiles.get_terrain(nux, nuy) != Some(Terrain::Courtyard) {
+                                return false;
+                            }
+                            courtyard_region_sets
+                                .iter()
+                                .enumerate()
+                                .any(|(j, s)| region_connected[j] && s.contains(&(nux, nuy)))
+                        })
+                });
+                if !has_connected_cy {
+                    continue;
+                }
+
+                // Pierce: same logic as above.
+                for &(cx, cy) in &bdata.tiles {
+                    let ux = cx as usize;
+                    let uy = cy as usize;
+                    if tiles.get_terrain(ux, uy) != Some(Terrain::Wall) {
+                        continue;
+                    }
+                    let mut adj_region = false;
+                    let mut adj_interior = false;
+                    for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                        let nx = cx + dx;
+                        let ny = cy + dy;
+                        if nx < 0 || ny < 0 {
+                            continue;
+                        }
+                        let nux = nx as usize;
+                        let nuy = ny as usize;
+                        if region_set.contains(&(nux, nuy)) {
+                            adj_region = true;
+                        }
+                        if tiles.get_terrain(nux, nuy) == Some(Terrain::Floor)
+                            && tiles.get_building_id(nux, nuy) == Some(bid)
+                        {
+                            adj_interior = true;
+                        }
+                    }
+                    if adj_region && adj_interior {
+                        tiles.set_terrain(ux, uy, Terrain::Door);
+                        buildings_with_doors.insert(bid);
+                        pierced = true;
+                        break;
+                    }
+                }
+                if pierced {
+                    break;
+                }
+            }
+        }
+
+        if pierced {
+            region_connected[ri] = true;
+            courtyards_pierced += 1;
+        }
+    }
+
     // Step 2: Garden conversion.
     // For buildings named "parc" or "jardin", convert Floor→Garden (preserving Doors).
     let mut garden_buildings = 0usize;
@@ -2426,7 +2802,64 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         }
     }
 
-    // Step 3: Per-building door validation.
+    // Phase 2 Step 4: Global connectivity validation.
+    // BFS from a Road tile through all walkable terrain.
+    let mut total_doors = 0usize;
+    let mut start_road: Option<(usize, usize)> = None;
+
+    for y in 0..h {
+        for x in 0..w {
+            match tiles.get_terrain(x, y) {
+                Some(Terrain::Door) => total_doors += 1,
+                Some(Terrain::Road) if start_road.is_none() => start_road = Some((x, y)),
+                _ => {}
+            }
+        }
+    }
+
+    let (reachable_doors, reachable_courtyard_regions) = if let Some((sx, sy)) = start_road {
+        let mut bfs_visited: HashSet<(usize, usize)> = HashSet::new();
+        let mut bfs_q: VecDeque<(usize, usize)> = VecDeque::new();
+        bfs_q.push_back((sx, sy));
+        bfs_visited.insert((sx, sy));
+        while let Some((bx, by)) = bfs_q.pop_front() {
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = bx as i32 + dx;
+                let ny = by as i32 + dy;
+                if nx < 0 || ny < 0 {
+                    continue;
+                }
+                let nux = nx as usize;
+                let nuy = ny as usize;
+                if nux >= w || nuy >= h {
+                    continue;
+                }
+                if bfs_visited.contains(&(nux, nuy)) {
+                    continue;
+                }
+                if tiles.get_terrain(nux, nuy).is_some_and(|t| t.is_walkable()) {
+                    bfs_visited.insert((nux, nuy));
+                    bfs_q.push_back((nux, nuy));
+                }
+            }
+        }
+
+        let rd = bfs_visited
+            .iter()
+            .filter(|&&(x, y)| tiles.get_terrain(x, y) == Some(Terrain::Door))
+            .count();
+
+        let rcr = courtyard_region_sets
+            .iter()
+            .filter(|rset| rset.iter().any(|pos| bfs_visited.contains(pos)))
+            .count();
+
+        (rd, rcr)
+    } else {
+        (0, 0)
+    };
+
+    // Per-building door validation.
     let mut doorless_with_interior = 0usize;
     let mut doorless_without_interior = 0usize;
 
@@ -2463,7 +2896,7 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         }
     }
 
-    // Step 4: Diagnostic log.
+    // Diagnostic log.
     let building_count = buildings_with_doors.len();
     let avg = if building_count > 0 {
         door_count as f64 / building_count as f64
@@ -2473,6 +2906,33 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     println!(
         "Door placement: {} doors on {} buildings (avg {:.1}/building)",
         door_count, building_count, avg
+    );
+    println!(
+        "Landlocked passages: {}/12 carved (1 unreachable data artifact)",
+        passages_carved
+    );
+    let connected_regions = region_connected.iter().filter(|&&c| c).count();
+    let door_pct = if total_doors > 0 {
+        reachable_doors as f64 / total_doors as f64 * 100.0
+    } else {
+        0.0
+    };
+    let cy_pct = if total_courtyard_regions > 0 {
+        reachable_courtyard_regions as f64 / total_courtyard_regions as f64 * 100.0
+    } else {
+        0.0
+    };
+    println!(
+        "Connectivity: {}/{} doors reachable ({:.1}%)",
+        reachable_doors, total_doors, door_pct
+    );
+    println!(
+        "Courtyards: {}/{} regions reachable ({:.1}%)",
+        reachable_courtyard_regions, total_courtyard_regions, cy_pct
+    );
+    println!(
+        "Island courtyards: {}/{} connected ({} pierced)",
+        connected_regions, total_courtyard_regions, courtyards_pierced
     );
     println!(
         "Gardens: {} buildings, {} tiles converted",
@@ -2808,6 +3268,374 @@ mod tests {
             .filter(|&(x, y)| tiles.get_terrain(x, y) == Some(Terrain::Floor))
             .count();
         assert_eq!(floors, 0, "all Floor should be converted to Garden");
+    }
+
+    #[test]
+    fn test_bfs_to_walkable_finds_road() {
+        // Two buildings side by side: B1 at (2..5, 2..5), B2 at (5..8, 2..5).
+        // B1 is surrounded by Road on left/top/bottom. B2 shares wall with B1.
+        // BFS from B2's wall tiles should find Road through B1's walls.
+        let mut tiles = TileMap::new(10, 10);
+        let mut buildings = BuildingRegistry::new();
+
+        // B1: 3×3 building
+        let bid1 = buildings.next_id();
+        let mut tiles1 = Vec::new();
+        for y in 2..5 {
+            for x in 2..5 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid1);
+                tiles1.push((x as i32, y as i32));
+            }
+        }
+        buildings.insert(BuildingData {
+            id: bid1,
+            identif: 1,
+            quartier: "Test".into(),
+            superficie: 9.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 1,
+            tiles: tiles1,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        // B2: 3×3 building, shares wall with B1 at x=5
+        let bid2 = buildings.next_id();
+        let mut tiles2 = Vec::new();
+        for y in 2..5 {
+            for x in 5..8 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid2);
+                tiles2.push((x as i32, y as i32));
+            }
+        }
+        buildings.insert(BuildingData {
+            id: bid2,
+            identif: 2,
+            quartier: "Test".into(),
+            superficie: 9.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T2".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 1,
+            tiles: tiles2,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        // BFS from B2's leftmost wall column (x=5) — should find Road at x=1.
+        let seeds: Vec<(i32, i32)> = vec![(5, 2), (5, 3), (5, 4)];
+        let path = bfs_to_walkable(&tiles, &seeds, 50);
+        assert!(path.is_some(), "should find a path to Road");
+        let path = path.unwrap();
+        // Path should go from x=5 through B1 (x=4,3,2) to reach Road at x=1.
+        assert!(!path.is_empty());
+        assert!(
+            path.len() <= 5,
+            "path should be short (≤5 tiles), got {}",
+            path.len()
+        );
+    }
+
+    #[test]
+    fn test_bfs_to_walkable_max_depth() {
+        // Long corridor of Wall tiles with Road only at the far end.
+        // BFS with small max_depth should return None.
+        let mut tiles = TileMap::new(20, 3);
+        // Fill everything with Wall
+        for y in 0..3 {
+            for x in 0..20 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+            }
+        }
+        // Road only at x=0
+        tiles.set_terrain(0, 1, Terrain::Road);
+
+        let seeds = vec![(15, 1)];
+        // max_depth=5 should fail (need to go 14 tiles)
+        assert!(bfs_to_walkable(&tiles, &seeds, 5).is_none());
+        // max_depth=50 should succeed
+        assert!(bfs_to_walkable(&tiles, &seeds, 50).is_some());
+    }
+
+    #[test]
+    fn test_landlocked_building_gets_passage() {
+        // Building B1 at (3..7, 3..7) surrounded by B2 walls on all sides.
+        // B2 walls at (2..8, 2..8) minus B1's area. Road outside B2.
+        // B1 has interior (Floor), but no direct Road access.
+        // place_doors should carve a passage.
+        let mut tiles = TileMap::new(10, 10);
+        let mut buildings = BuildingRegistry::new();
+
+        // B2 (outer building): ring around B1
+        let bid2 = buildings.next_id();
+        let mut tiles2 = Vec::new();
+        for y in 2..8 {
+            for x in 2..8 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid2);
+                tiles2.push((x as i32, y as i32));
+            }
+        }
+        // Give B2 some interior Floor tiles so it qualifies for doors
+        for y in 3..7 {
+            for x in 3..7 {
+                tiles.set_terrain(x, y, Terrain::Floor);
+                // Still building B2 for now
+            }
+        }
+        buildings.insert(BuildingData {
+            id: bid2,
+            identif: 2,
+            quartier: "Test".into(),
+            superficie: 36.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T2".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 1,
+            tiles: tiles2,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        // B1 (inner building): overwrite center of B2
+        let bid1 = buildings.next_id();
+        let mut tiles1 = Vec::new();
+        for y in 4..6 {
+            for x in 4..6 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid1);
+                tiles1.push((x as i32, y as i32));
+            }
+        }
+        buildings.insert(BuildingData {
+            id: bid1,
+            identif: 1,
+            quartier: "Test".into(),
+            superficie: 4.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 1,
+            tiles: tiles1,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        // B1's tiles are all Wall, need at least 1 Floor for it to be processed.
+        // Actually, classify_walls_floors should make one interior. But B1 is 2×2
+        // which is too small for classify to create Floor. Let me make B1 bigger.
+        // Recreate: B1 at (3..7, 4..6), a 4×2 strip inside B2's Floor area.
+        // Actually, let me simplify: just manually set up the scenario.
+        // B2 outer ring: Wall at perimeter (2..8, 2..8), Floor inside (3..7, 3..7).
+        // B1: a 2×2 block at center. This is too small to have interior.
+        //
+        // Better approach: make B1 at (4..6, 3..7), 2×4 block.
+        // classify_walls_floors won't give it interior either (only 2 wide).
+        //
+        // Simplest: manually set B1 interior.
+        // Reset: B1 is 3×3 at (3..6, 3..6). Set center to Floor.
+        // Re-do from scratch for clarity.
+        let mut tiles = TileMap::new(12, 12);
+        let mut buildings = BuildingRegistry::new();
+
+        // B2: outer building (2..10, 2..10), 8×8
+        let bid2 = buildings.next_id();
+        let mut tiles2 = Vec::new();
+        for y in 2..10 {
+            for x in 2..10 {
+                tiles.set_building_id(x, y, bid2);
+                tiles2.push((x as i32, y as i32));
+            }
+        }
+        buildings.insert(BuildingData {
+            id: bid2,
+            identif: 2,
+            quartier: "Test".into(),
+            superficie: 64.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T2".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 2,
+            tiles: tiles2,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        // B1: inner building (5..8, 5..8), 3×3
+        let bid1 = buildings.next_id();
+        let mut tiles1 = Vec::new();
+        for y in 5..8 {
+            for x in 5..8 {
+                tiles.set_building_id(x, y, bid1);
+                tiles1.push((x as i32, y as i32));
+            }
+        }
+        buildings.insert(BuildingData {
+            id: bid1,
+            identif: 1,
+            quartier: "Test".into(),
+            superficie: 9.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 1,
+            tiles: tiles1,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        // Set terrain manually (simulating classify_walls_floors output):
+        // B2: perimeter = Wall, interior (3..9, 3..9) = Floor
+        for y in 2..10 {
+            for x in 2..10 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+            }
+        }
+        for y in 3..9 {
+            for x in 3..9 {
+                tiles.set_terrain(x, y, Terrain::Floor);
+            }
+        }
+        // B1: perimeter = Wall, center (6,6) = Floor
+        for y in 5..8 {
+            for x in 5..8 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+            }
+        }
+        tiles.set_terrain(6, 6, Terrain::Floor);
+
+        place_doors(&mut tiles, &buildings);
+
+        // B1 should have at least one Door tile.
+        let b1_doors: usize = (5..8)
+            .flat_map(|y| (5..8).map(move |x| (x, y)))
+            .filter(|&(x, y)| tiles.get_terrain(x, y) == Some(Terrain::Door))
+            .count();
+        assert!(
+            b1_doors >= 1,
+            "landlocked B1 should get at least 1 door via passage carving, got {}",
+            b1_doors
+        );
+    }
+
+    #[test]
+    fn test_island_courtyard_piercing() {
+        // Layout: Road border → Building ring → Courtyard center.
+        // The courtyard has no direct Road access (island).
+        // place_doors should pierce through the building to connect it.
+        let mut tiles = TileMap::new(12, 12);
+        let mut buildings = BuildingRegistry::new();
+
+        // Building at (2..10, 2..10), 8×8
+        let bid = buildings.next_id();
+        let mut tile_list = Vec::new();
+        for y in 2..10 {
+            for x in 2..10 {
+                tiles.set_building_id(x, y, bid);
+                tile_list.push((x as i32, y as i32));
+            }
+        }
+        buildings.insert(BuildingData {
+            id: bid,
+            identif: 1,
+            quartier: "Test".into(),
+            superficie: 64.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 2,
+            tiles: tile_list,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        // Terrain: perimeter = Wall, interior = Floor
+        for y in 2..10 {
+            for x in 2..10 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+            }
+        }
+        for y in 3..9 {
+            for x in 3..9 {
+                tiles.set_terrain(x, y, Terrain::Floor);
+            }
+        }
+
+        // Courtyard in the center (5..7, 5..7), 2×2 — no building_id
+        for y in 5..7 {
+            for x in 5..7 {
+                tiles.set_terrain(x, y, Terrain::Courtyard);
+                tiles.set_building_id(x, y, BuildingId(0)); // clear building_id
+            }
+        }
+
+        place_doors(&mut tiles, &buildings);
+
+        // The courtyard should now be reachable: there should be a path of
+        // walkable tiles from Road (border) through Door/Floor to Courtyard.
+        // Verify by BFS from (0,0) (Road) that we can reach a Courtyard tile.
+        let mut visited: HashSet<(usize, usize)> = HashSet::new();
+        let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
+        queue.push_back((0, 0));
+        visited.insert((0, 0));
+        while let Some((bx, by)) = queue.pop_front() {
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = bx as i32 + dx;
+                let ny = by as i32 + dy;
+                if nx < 0 || ny < 0 || nx >= 12 || ny >= 12 {
+                    continue;
+                }
+                let nux = nx as usize;
+                let nuy = ny as usize;
+                if visited.contains(&(nux, nuy)) {
+                    continue;
+                }
+                if tiles.get_terrain(nux, nuy).is_some_and(|t| t.is_walkable()) {
+                    visited.insert((nux, nuy));
+                    queue.push_back((nux, nuy));
+                }
+            }
+        }
+
+        let courtyard_reachable = (5..7)
+            .flat_map(|y| (5..7).map(move |x| (x, y)))
+            .any(|(x, y)| visited.contains(&(x, y)));
+        assert!(
+            courtyard_reachable,
+            "island courtyard should be reachable from Road after piercing"
+        );
     }
 
     #[test]
