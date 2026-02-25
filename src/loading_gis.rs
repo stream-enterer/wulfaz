@@ -2693,9 +2693,8 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     // Step 1: Detect door candidates per building and group into facade runs.
     let mut door_tiles: Vec<(usize, usize)> = Vec::new();
     let mut buildings_with_doors: HashSet<BuildingId> = HashSet::new();
-    let mut total_runs = 0usize;
-    let mut road_facing_runs = 0usize;
-    let mut courtyard_facing_runs = 0usize;
+    let mut road_facing_doors = 0usize;
+    let mut courtyard_facing_doors = 0usize;
     let mut dual_fixup_count = 0usize;
     let mut dual_fixup_buildings = 0usize;
 
@@ -2765,19 +2764,9 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         let mut runs = detect_facade_runs(&candidates, &candidate_facing);
         runs.sort_by(|a, b| b.tiles.len().cmp(&a.tiles.len()));
 
-        // Track stats for all runs.
         let has_road_runs = runs.iter().any(|r| r.road_facing);
         let has_courtyard_runs = runs.iter().any(|r| r.courtyard_facing);
         let is_dual = has_road_runs && has_courtyard_runs;
-        for run in &runs {
-            total_runs += 1;
-            if run.road_facing {
-                road_facing_runs += 1;
-            }
-            if run.courtyard_facing {
-                courtyard_facing_runs += 1;
-            }
-        }
 
         // Select doors from the top 3 longest runs, ensuring facing diversity.
         // Reserve slots for the longest road-facing and courtyard-facing runs,
@@ -2804,6 +2793,13 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         let mut building_doors: Vec<(usize, usize)> = Vec::new();
         for &i in &active_indices {
             let selected = select_doors_from_run(&runs[i], tiles, bid);
+            let count = selected.len();
+            if runs[i].road_facing {
+                road_facing_doors += count;
+            }
+            if runs[i].courtyard_facing {
+                courtyard_facing_doors += count;
+            }
             for pos in selected {
                 building_doors.push(pos);
             }
@@ -3008,7 +3004,6 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         .collect();
     island_indices.sort_by_key(|&i| courtyard_regions[i].len());
 
-    let mut courtyards_pierced = 0usize;
     for &ri in &island_indices {
         if region_connected[ri] {
             continue; // May have been connected by a previous piercing.
@@ -3182,7 +3177,6 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
 
         if pierced {
             region_connected[ri] = true;
-            courtyards_pierced += 1;
         }
     }
 
@@ -3295,7 +3289,6 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
 
     // Per-building door validation.
     let mut doorless_with_interior = 0usize;
-    let mut doorless_without_interior = 0usize;
 
     for bdata in &buildings.buildings {
         if bdata.bati != 1 {
@@ -3310,7 +3303,6 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         });
 
         if !has_interior {
-            doorless_without_interior += 1;
             continue;
         }
 
@@ -3331,33 +3323,13 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         }
     }
 
-    // Diagnostic log.
-    println!(
-        "Small buildings: {} converted to Floor, {} skipped (<=4 tiles)",
-        small_converted, small_skipped
-    );
+    // Full diagnostic log.
     let building_count = buildings_with_doors.len();
     let avg = if building_count > 0 {
         door_count as f64 / building_count as f64
     } else {
         0.0
     };
-    println!(
-        "Door placement: {} doors on {} buildings (avg {:.1}/building)",
-        door_count, building_count, avg
-    );
-    println!(
-        "Facade runs: {} total (road-facing: {}, courtyard-facing: {})",
-        total_runs, road_facing_runs, courtyard_facing_runs
-    );
-    println!(
-        "Dual-door fixup: {} additional doors on {} buildings",
-        dual_fixup_count, dual_fixup_buildings
-    );
-    println!(
-        "Landlocked passages: {}/12 carved (1 unreachable data artifact)",
-        passages_carved
-    );
     let connected_regions = region_connected.iter().filter(|&&c| c).count();
     let door_pct = if total_doors > 0 {
         reachable_doors as f64 / total_doors as f64 * 100.0
@@ -3369,30 +3341,53 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
     } else {
         0.0
     };
+
     println!(
-        "Connectivity: {}/{} doors reachable ({:.1}%)",
-        reachable_doors, total_doors, door_pct
+        "Small buildings: {} converted to Floor, {} skipped (<=4 tiles)",
+        small_converted, small_skipped
     );
     println!(
-        "Courtyards: {}/{} regions reachable ({:.1}%)",
-        reachable_courtyard_regions, total_courtyard_regions, cy_pct
+        "Door placement: {} doors on {} buildings (avg {:.1}/building)",
+        door_count, building_count, avg
     );
     println!(
-        "Island courtyards: {}/{} connected ({} pierced)",
-        connected_regions, total_courtyard_regions, courtyards_pierced
+        "  Road-facing: {}  Courtyard-facing: {}",
+        road_facing_doors, courtyard_facing_doors
+    );
+    println!(
+        "Dual-door fixup: {} additional doors on {} buildings",
+        dual_fixup_count, dual_fixup_buildings
+    );
+    println!(
+        "Island courtyards: {}/{} connected ({:.1}%)",
+        connected_regions,
+        total_courtyard_regions,
+        if total_courtyard_regions > 0 {
+            connected_regions as f64 / total_courtyard_regions as f64 * 100.0
+        } else {
+            0.0
+        }
+    );
+    println!(
+        "Landlocked passages: {}/12 carved (1 unreachable)",
+        passages_carved
     );
     println!(
         "Gardens: {} buildings, {} tiles converted",
         garden_buildings, garden_tiles_converted
     );
-    println!("Door-floor adjacency violations: {}", adjacency_violations);
+    println!("Validation:");
     println!(
-        "Doorless buildings with interior: {} (expected 0)",
+        "  Door-floor adjacency violations: {}",
+        adjacency_violations
+    );
+    println!(
+        "  Doorless buildings (with interior): {}",
         doorless_with_interior
     );
     println!(
-        "Doorless buildings without interior: {} (all-wall, expected 667)",
-        doorless_without_interior
+        "  Connectivity: {:.1}% doors reachable, {:.1}% courtyards reachable",
+        door_pct, cy_pct
     );
 }
 
