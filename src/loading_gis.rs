@@ -2412,6 +2412,73 @@ fn bfs_to_walkable(
     None
 }
 
+/// A contiguous group of door candidate tiles on a building's facade.
+struct FacadeRun {
+    tiles: Vec<(usize, usize)>,
+    road_facing: bool,
+    courtyard_facing: bool,
+}
+
+/// Group door candidates into 4-connected facade runs with facing metadata.
+///
+/// Takes a set of candidate positions and per-candidate facing info (road, courtyard).
+/// Returns a list of runs, where each run is a connected component of candidates
+/// (two candidates are connected if they share a cardinal edge).
+fn detect_facade_runs(
+    candidates: &HashSet<(usize, usize)>,
+    candidate_facing: &HashMap<(usize, usize), (bool, bool)>,
+) -> Vec<FacadeRun> {
+    let mut visited: HashSet<(usize, usize)> = HashSet::new();
+    let mut runs = Vec::new();
+
+    for &(cx, cy) in candidates {
+        if visited.contains(&(cx, cy)) {
+            continue;
+        }
+
+        // BFS to find this connected component.
+        let mut component = Vec::new();
+        let mut road = false;
+        let mut courtyard = false;
+        let mut q: VecDeque<(usize, usize)> = VecDeque::new();
+        q.push_back((cx, cy));
+        visited.insert((cx, cy));
+
+        while let Some((rx, ry)) = q.pop_front() {
+            component.push((rx, ry));
+            if let Some(&(r, c)) = candidate_facing.get(&(rx, ry)) {
+                road |= r;
+                courtyard |= c;
+            }
+
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = rx as i32 + dx;
+                let ny = ry as i32 + dy;
+                if nx < 0 || ny < 0 {
+                    continue;
+                }
+                let nux = nx as usize;
+                let nuy = ny as usize;
+                if visited.contains(&(nux, nuy)) {
+                    continue;
+                }
+                if candidates.contains(&(nux, nuy)) {
+                    visited.insert((nux, nuy));
+                    q.push_back((nux, nuy));
+                }
+            }
+        }
+
+        runs.push(FacadeRun {
+            tiles: component,
+            road_facing: road,
+            courtyard_facing: courtyard,
+        });
+    }
+
+    runs
+}
+
 /// Place doors on all BATI=1 buildings.
 ///
 /// A wall tile becomes a door if it has BOTH:
@@ -2420,15 +2487,22 @@ fn bfs_to_walkable(
 // Used by preprocess binary, not main binary.
 #[allow(dead_code)]
 pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
-    // Step 1: Door candidate detection and placement.
+    // Step 1: Detect door candidates per building and group into facade runs.
     let mut door_tiles: Vec<(usize, usize)> = Vec::new();
     let mut buildings_with_doors: HashSet<BuildingId> = HashSet::new();
+    let mut total_runs = 0usize;
+    let mut road_facing_runs = 0usize;
+    let mut courtyard_facing_runs = 0usize;
 
     for bdata in &buildings.buildings {
         if bdata.bati != 1 {
             continue;
         }
         let bid = bdata.id;
+
+        // Collect candidates with facing metadata.
+        let mut candidates: HashSet<(usize, usize)> = HashSet::new();
+        let mut candidate_facing: HashMap<(usize, usize), (bool, bool)> = HashMap::new();
 
         for &(cx, cy) in &bdata.tiles {
             let ux = cx as usize;
@@ -2439,6 +2513,8 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
 
             let mut has_exterior = false;
             let mut has_interior = false;
+            let mut faces_road = false;
+            let mut faces_courtyard = false;
 
             for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
                 let nx = cx + dx;
@@ -2454,6 +2530,12 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
                     && tiles.get_building_id(nux, nuy) != Some(bid)
                 {
                     has_exterior = true;
+                    if tiles.get_terrain(nux, nuy) == Some(Terrain::Road) {
+                        faces_road = true;
+                    }
+                    if tiles.get_terrain(nux, nuy) == Some(Terrain::Courtyard) {
+                        faces_courtyard = true;
+                    }
                 }
 
                 // Interior: Floor terrain, same building
@@ -2465,9 +2547,31 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
             }
 
             if has_exterior && has_interior {
-                door_tiles.push((ux, uy));
-                buildings_with_doors.insert(bid);
+                candidates.insert((ux, uy));
+                candidate_facing.insert((ux, uy), (faces_road, faces_courtyard));
             }
+        }
+
+        if candidates.is_empty() {
+            continue;
+        }
+
+        // Group into facade runs.
+        let runs = detect_facade_runs(&candidates, &candidate_facing);
+
+        // Select all candidates from all runs (Phase 3 Step 2 replaces with heuristic).
+        for run in &runs {
+            total_runs += 1;
+            if run.road_facing {
+                road_facing_runs += 1;
+            }
+            if run.courtyard_facing {
+                courtyard_facing_runs += 1;
+            }
+            for &pos in &run.tiles {
+                door_tiles.push(pos);
+            }
+            buildings_with_doors.insert(bid);
         }
     }
 
@@ -2908,6 +3012,10 @@ pub fn place_doors(tiles: &mut TileMap, buildings: &BuildingRegistry) {
         door_count, building_count, avg
     );
     println!(
+        "Facade runs: {} total (road-facing: {}, courtyard-facing: {})",
+        total_runs, road_facing_runs, courtyard_facing_runs
+    );
+    println!(
         "Landlocked passages: {}/12 carved (1 unreachable data artifact)",
         passages_carved
     );
@@ -3268,6 +3376,115 @@ mod tests {
             .filter(|&(x, y)| tiles.get_terrain(x, y) == Some(Terrain::Floor))
             .count();
         assert_eq!(floors, 0, "all Floor should be converted to Garden");
+    }
+
+    #[test]
+    fn test_detect_facade_runs_square_building() {
+        // 7×7 building at (2..9, 2..9), surrounded by Road.
+        // After classify_walls_floors: perimeter = Wall, interior = Floor (5×5=25).
+        // Candidates: perimeter walls with both Road and Floor neighbors.
+        // Expected: 4 runs (one per side), each length 5 (corners excluded).
+        let mut tiles = TileMap::new(12, 12);
+        let mut buildings = BuildingRegistry::new();
+
+        let bid = buildings.next_id();
+        let mut tile_list = Vec::new();
+        for y in 2..9 {
+            for x in 2..9 {
+                tiles.set_terrain(x, y, Terrain::Wall);
+                tiles.set_building_id(x, y, bid);
+                tile_list.push((x as i32, y as i32));
+            }
+        }
+        buildings.insert(BuildingData {
+            id: bid,
+            identif: 1,
+            quartier: "Test".into(),
+            superficie: 100.0,
+            bati: 1,
+            nom_bati: None,
+            num_ilot: "T1".into(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: 3,
+            tiles: tile_list,
+            addresses: Vec::new(),
+            occupants_by_year: HashMap::new(),
+        });
+
+        classify_walls_floors(&mut tiles, &buildings);
+
+        // Detect candidates (same logic as place_doors Step 1).
+        let bdata = &buildings.buildings[0];
+        let mut candidates: HashSet<(usize, usize)> = HashSet::new();
+        let mut candidate_facing: HashMap<(usize, usize), (bool, bool)> = HashMap::new();
+
+        for &(cx, cy) in &bdata.tiles {
+            let ux = cx as usize;
+            let uy = cy as usize;
+            if tiles.get_terrain(ux, uy) != Some(Terrain::Wall) {
+                continue;
+            }
+            let mut has_exterior = false;
+            let mut has_interior = false;
+            let mut faces_road = false;
+            let mut faces_courtyard = false;
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = cx + dx;
+                let ny = cy + dy;
+                if nx < 0 || ny < 0 {
+                    continue;
+                }
+                let nux = nx as usize;
+                let nuy = ny as usize;
+                if tiles.get_terrain(nux, nuy).is_some_and(|t| t.is_walkable())
+                    && tiles.get_building_id(nux, nuy) != Some(bid)
+                {
+                    has_exterior = true;
+                    if tiles.get_terrain(nux, nuy) == Some(Terrain::Road) {
+                        faces_road = true;
+                    }
+                    if tiles.get_terrain(nux, nuy) == Some(Terrain::Courtyard) {
+                        faces_courtyard = true;
+                    }
+                }
+                if tiles.get_terrain(nux, nuy) == Some(Terrain::Floor)
+                    && tiles.get_building_id(nux, nuy) == Some(bid)
+                {
+                    has_interior = true;
+                }
+            }
+            if has_exterior && has_interior {
+                candidates.insert((ux, uy));
+                candidate_facing.insert((ux, uy), (faces_road, faces_courtyard));
+            }
+        }
+
+        let runs = detect_facade_runs(&candidates, &candidate_facing);
+
+        // 4 runs (one per side, corners are not candidates).
+        assert_eq!(runs.len(), 4, "should have 4 facade runs");
+
+        // All runs should be road-facing (building surrounded by Road).
+        for run in &runs {
+            assert!(run.road_facing, "all runs should be road-facing");
+            assert!(!run.courtyard_facing, "no runs should be courtyard-facing");
+        }
+
+        // Each run should have 5 tiles.
+        let mut run_lengths: Vec<usize> = runs.iter().map(|r| r.tiles.len()).collect();
+        run_lengths.sort();
+        assert_eq!(
+            run_lengths,
+            vec![5, 5, 5, 5],
+            "each side should have 5 candidates"
+        );
+
+        // Total candidates = 20.
+        let total: usize = runs.iter().map(|r| r.tiles.len()).sum();
+        assert_eq!(total, 20, "total candidates should be 20");
     }
 
     #[test]
