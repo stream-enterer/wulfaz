@@ -1873,16 +1873,35 @@ impl WidgetTree {
                 wrap,
             } => {
                 if *wrap && node.rect.width > 0.0 {
-                    let ts = tm.measure_text("M", *font_family, *font_size);
-                    let char_w = ts.width;
-                    let line_h = ts.height;
-                    let max_chars = (node.rect.width / char_w).max(1.0) as usize;
-                    let lines = wrap_text(text, max_chars);
-                    for (i, line) in lines.iter().enumerate() {
+                    let text_size = tm.measure_text(text, *font_family, *font_size);
+                    // Only wrap when the text's pixel width actually exceeds
+                    // the laid-out rect width — matching the same check used
+                    // by wrapped_content_height during layout.  Without this
+                    // guard the character-count heuristic (M-width) can wrap
+                    // narrow proportional text that layout sized as one line.
+                    if text_size.width > node.rect.width {
+                        let ts = tm.measure_text("M", *font_family, *font_size);
+                        let char_w = ts.width;
+                        let line_h = ts.height;
+                        let max_chars = (node.rect.width / char_w).max(1.0) as usize;
+                        let lines = wrap_text(text, max_chars);
+                        for (i, line) in lines.iter().enumerate() {
+                            draw_list.texts.push(TextCommand {
+                                text: line.clone(),
+                                x: node.rect.x,
+                                y: node.rect.y + i as f32 * line_h,
+                                color: *color,
+                                font_size: *font_size,
+                                font_family: *font_family,
+                                clip,
+                                tier,
+                            });
+                        }
+                    } else {
                         draw_list.texts.push(TextCommand {
-                            text: line.clone(),
+                            text: text.clone(),
                             x: node.rect.x,
-                            y: node.rect.y + i as f32 * line_h,
+                            y: node.rect.y,
                             color: *color,
                             font_size: *font_size,
                             font_family: *font_family,
