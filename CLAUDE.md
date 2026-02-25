@@ -246,6 +246,71 @@ No code changes needed. `loading.rs` maps KDL nodes to spawned entities.
   showing >5ms per tick for that system.
 - Do not add concurrency to the simulation loop.
 
+## UI Architecture
+
+The UI layer mirrors the simulation layer's principles. `WidgetTree` is
+the UI's `World`. Builders are the UI's systems. Operations (layout, draw,
+hit-test) are the UI's phases.
+
+- **UiContext** is a struct of pub sub-fields for all persistent UI state.
+  Analogous to World. Lives on App as `self.ui`. Sub-fields are pub for
+  Rust's field-level split borrowing.
+- **WidgetTree** is ephemeral — destroyed and rebuilt from scratch every
+  frame. It is NOT persistent state. Lives on App as `self.ui_tree`.
+- **Builders** are free functions: `fn build_*(tree: &mut WidgetTree, ...) -> WidgetId`.
+  One builder per file in `src/ui/`.
+- **Widget** is a closed enum. Exhaustive match in layout and draw.
+  No trait objects.
+- **UiAction** enum for callbacks. Exhaustive match in `dispatch_click`.
+- **PanelKind** enum for panel identity. No string names.
+- **Theme** is a flat struct, const-constructible. Passed by `&Theme`.
+  Not part of UiContext (immutable configuration).
+- **One concern per file**: tree operations split across `tree_*.rs`,
+  one builder per panel file, one type per infrastructure file.
+- `mod.rs` is module declarations + re-exports only. No function bodies.
+
+## UI Frame Lifecycle
+
+```
+Build    → Destroy old tree, construct new WidgetTree via builders.
+Layout   → tree.layout(screen_size, &mut measurer). Measure + position.
+Draw     → tree.draw(&mut draw_list, &mut measurer). Z-tier order.
+Input    → ui.input.handle_*(tree, event). Hit-test → UiAction.
+Dispatch → match action { ... }. Exhaustive — no catch-all arm.
+```
+
+No dirty tracking. No retained tree state. No diff-and-patch.
+
+## Adding a New UI Panel/Screen
+
+1. Create `src/ui/new_panel.rs` with info struct + builder function
+2. Add `pub(crate) mod new_panel;` + re-export to `src/ui/mod.rs`
+3. Add `PanelKind::NewPanel` variant to `src/ui/action.rs`
+4. Call the builder in the build phase in `main.rs`
+5. Write tests in `#[cfg(test)] mod tests` at the bottom of the file
+
+## Adding a New Widget Variant
+
+1. Add the variant to `Widget` enum in `src/ui/widget.rs`
+2. Add measure/layout in `tree_layout.rs`, draw in `tree_draw.rs`
+3. Write tests. `cargo build` catches unhandled match arms.
+
+## Adding a New UiAction
+
+1. Add the variant to `UiAction` in `src/ui/action.rs`
+2. Set it on the widget: `tree.set_on_click(id, UiAction::NewAction)`
+3. Handle it in `dispatch_click` in `main.rs` — no `_ =>` arm
+
+## UI What NOT To Do
+
+- Do not add dirty flags or change tracking. The tree rebuilds every frame.
+- Do not add traits between UI modules. Exception: `TextMeasurer` at the
+  hardware boundary.
+- Do not put persistent state on WidgetTree or WidgetNode. Use UiContext.
+- Do not put ad-hoc UI state on App. All persistent UI state → UiContext.
+- Do not add `_ =>` catch-all arms in `dispatch_click`.
+- Do not put multiple builders or multiple tree operations in one file.
+
 ## Testing
 
 Every new system MUST ship with a unit test:
