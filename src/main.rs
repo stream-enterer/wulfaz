@@ -351,12 +351,12 @@ struct App {
     map_origin: (f32, f32),
     map_cell_w: f32,
     map_cell_h: f32,
-    // UI widget system (UI-W02)
-    ui_state: ui::UiState,
+    // UI persistent state (UI-P2: all mutable state in one struct).
+    ui: ui::UiContext,
+    // Ephemeral widget tree — rebuilt every frame.
     ui_tree: ui::WidgetTree,
+    // Immutable theme configuration.
     ui_theme: ui::Theme,
-    // Animation system (UI-W05)
-    animator: ui::Animator,
     last_hover_tile: Option<(i32, i32)>,
     last_selected_entity: Option<components::Entity>,
     // Keyboard shortcut system (UI-I03)
@@ -366,14 +366,6 @@ struct App {
     // Entity inspector (UI-I01d)
     selected_entity: Option<components::Entity>,
     inspector_close_id: Option<ui::WidgetId>,
-    // Modal stack (UI-300)
-    modal_stack: ui::ModalStack,
-    // Panel manager (UI-306)
-    panel_manager: ui::PanelManager,
-    // Sidebar tab system. None = closed, Some(idx) = active tab.
-    sidebar_active_tab: Option<usize>,
-    sidebar_scroll_offset: f32,
-    sidebar_scroll_view_id: Option<ui::WidgetId>,
     // Performance metrics (UI-505) — stores previous frame's metrics.
     ui_perf: ui::UiPerfMetrics,
     // Minimap (UI-407)
@@ -391,18 +383,18 @@ impl App {
     /// Handle a sidebar tab click. Manages open/close/switch transitions.
     fn handle_tab_click(&mut self, tab_idx: usize) {
         let now = Instant::now();
-        let is_closing = self.animator.target("sidebar_slide") == Some(1.0);
-        let current_slide = self.animator.get("sidebar_slide", now).unwrap_or(
-            if self.sidebar_active_tab.is_some() {
+        let is_closing = self.ui.animator.target("sidebar_slide") == Some(1.0);
+        let current_slide = self.ui.animator.get("sidebar_slide", now).unwrap_or(
+            if self.ui.sidebar.active_tab.is_some() {
                 0.0
             } else {
                 1.0
             },
         );
 
-        if self.sidebar_active_tab == Some(tab_idx) && !is_closing {
+        if self.ui.sidebar.active_tab == Some(tab_idx) && !is_closing {
             // Clicking active tab: start close animation.
-            self.animator.start(
+            self.ui.animator.start(
                 "sidebar_slide",
                 ui::Anim {
                     from: current_slide,
@@ -415,10 +407,10 @@ impl App {
             );
         } else {
             // Opening new tab or switching while open.
-            let need_slide = self.sidebar_active_tab.is_none() || is_closing;
-            self.sidebar_active_tab = Some(tab_idx);
+            let need_slide = self.ui.sidebar.active_tab.is_none() || is_closing;
+            self.ui.sidebar.active_tab = Some(tab_idx);
             if need_slide {
-                self.animator.start(
+                self.ui.animator.start(
                     "sidebar_slide",
                     ui::Anim {
                         from: current_slide,
@@ -458,59 +450,71 @@ impl App {
     /// Clean up focus state after popping a modal.
     fn cleanup_after_modal_pop(&mut self) {
         // Clear focus if the focused widget was removed with the modal.
-        if let Some(f) = self.ui_state.focused
+        if let Some(f) = self.ui.input.focused
             && self.ui_tree.get(f).is_none()
         {
-            self.ui_state.focused = None;
+            self.ui.input.focused = None;
         }
         // Reset focus tier to match remaining stack.
-        self.ui_state.focus_min_tier = if self.modal_stack.is_empty() {
+        self.ui.input.focus_min_tier = if self.ui.modals.is_empty() {
             ui::ZTier::Panel
         } else {
             ui::ZTier::Modal
         };
     }
 
-    /// Pop the topmost modal, clean up focus, and dispatch its callback.
+    /// Pop the topmost modal, clean up focus, and dispatch its action.
     fn pop_modal_with(&mut self, use_confirm: bool) {
-        if self.modal_stack.is_empty() {
+        if self.ui.modals.is_empty() {
             return;
         }
-        let pop = self.modal_stack.pop(&mut self.ui_tree);
+        let pop = self.ui.modals.pop(&mut self.ui_tree);
         self.cleanup_after_modal_pop();
         if let Some(p) = pop {
-            let cb = if use_confirm {
+            let action = if use_confirm {
                 p.on_confirm
             } else {
                 p.on_dismiss
             };
-            if let Some(cb) = cb {
-                self.dispatch_click(&cb);
+            if let Some(action) = action {
+                self.dispatch_click(action);
             }
         }
     }
 
-    /// Dispatch a click callback string. Centralizes all on_click handling.
-    fn dispatch_click(&mut self, action: &str) {
+    /// Dispatch a UI click action. Centralizes all on_click handling.
+    fn dispatch_click(&mut self, action: ui::UiAction) {
         match action {
-            "inspector::close" => {
+            ui::UiAction::InspectorClose => {
                 self.selected_entity = None;
             }
-            ui::modal::MODAL_DISMISS | ui::window::DIALOG_CANCEL => {
+            ui::UiAction::ModalDismiss | ui::UiAction::DialogCancel => {
                 self.pop_modal_with(false);
             }
-            ui::window::DIALOG_ACCEPT => {
+            ui::UiAction::DialogAccept => {
                 self.pop_modal_with(true);
             }
-            action if action.starts_with("sidebar::tab::") => {
-                if let Ok(idx) = action["sidebar::tab::".len()..].parse::<usize>() {
-                    self.handle_tab_click(idx);
-                }
+            ui::UiAction::SelectTab(idx) => {
+                self.handle_tab_click(idx);
             }
-            _ => {
-                // Event choice callbacks (event_choice:*) and other game callbacks
-                // will be dispatched here as the systems that consume them are built.
-            }
+            ui::UiAction::MenuNewGame => {}
+            ui::UiAction::MenuContinue => {}
+            ui::UiAction::MenuLoad => {}
+            ui::UiAction::MenuSettings => {}
+            ui::UiAction::MenuQuit => {}
+            ui::UiAction::OutlinerSelectCharacter(_entity) => {}
+            ui::UiAction::OutlinerSelectEvent(_cb) => {}
+            ui::UiAction::FinderSort => {}
+            ui::UiAction::FinderSelect(_entity) => {}
+            ui::UiAction::SettingsUiScale => {}
+            ui::UiAction::SettingsWindowMode => {}
+            ui::UiAction::SaveLoadSave => {}
+            ui::UiAction::SaveLoadLoad => {}
+            ui::UiAction::SaveLoadSelect(_name) => {}
+            ui::UiAction::MapModeChange => {}
+            ui::UiAction::MapModeSpeed => {}
+            ui::UiAction::EventChoice(_cb) => {}
+            ui::UiAction::ContextAction(_action) => {}
         }
     }
 }
@@ -565,7 +569,7 @@ impl ApplicationHandler for App {
                     self.update_minimap_drag(position.x as f32, position.y as f32);
                 }
                 // Route to UI input system.
-                self.ui_state.handle_cursor_moved(
+                self.ui.input.handle_cursor_moved(
                     &mut self.ui_tree,
                     position.x as f32,
                     position.y as f32,
@@ -579,7 +583,7 @@ impl ApplicationHandler for App {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => y,
                     winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 20.0,
                 };
-                if !self.ui_state.handle_scroll(&mut self.ui_tree, dy) {
+                if !self.ui.input.handle_scroll(&mut self.ui_tree, dy) {
                     // Scroll not consumed by UI — zoom-to-cursor (UI-107).
                     // Adjust camera so the tile under cursor stays under cursor after zoom.
                     let zoom_factor = 1.1_f32;
@@ -647,43 +651,44 @@ impl ApplicationHandler for App {
                                     self.sim_speed = speed;
                                 }
                                 ui::Action::ToggleSidebar => {
-                                    let tab = self.sidebar_active_tab.unwrap_or(0);
+                                    let tab = self.ui.sidebar.active_tab.unwrap_or(0);
                                     self.handle_tab_click(tab);
                                 }
                                 ui::Action::ConfirmModal => {
                                     // Enter confirms the topmost modal dialog.
-                                    if !self.modal_stack.is_empty()
-                                        && let Some(cb) =
-                                            self.modal_stack.confirm_callback().map(String::from)
+                                    if !self.ui.modals.is_empty()
+                                        && let Some(action) =
+                                            self.ui.modals.confirm_action().cloned()
                                     {
-                                        let pop = self.modal_stack.pop(&mut self.ui_tree);
+                                        let pop = self.ui.modals.pop(&mut self.ui_tree);
                                         self.cleanup_after_modal_pop();
-                                        self.dispatch_click(&cb);
+                                        self.dispatch_click(action);
                                         drop(pop);
                                     }
                                 }
                                 ui::Action::CloseTopmost => {
                                     // Priority: tooltips → modals → panels → inspector → sidebar → exit.
-                                    if self.ui_state.tooltip_count() > 0 {
-                                        self.ui_state.dismiss_all_tooltips(
+                                    if self.ui.input.tooltip_count() > 0 {
+                                        self.ui.input.dismiss_all_tooltips(
                                             &mut self.ui_tree,
                                             Instant::now(),
                                         );
-                                    } else if !self.modal_stack.is_empty() {
+                                    } else if !self.ui.modals.is_empty() {
                                         self.pop_modal_with(false);
                                     } else if self
-                                        .panel_manager
+                                        .ui
+                                        .panels
                                         .close_topmost(&mut self.ui_tree)
                                         .is_some()
                                     {
                                         // Closed a panel — done.
                                     } else if self.selected_entity.is_some() {
                                         self.selected_entity = None;
-                                    } else if self.sidebar_active_tab.is_some()
-                                        && self.animator.target("sidebar_slide") != Some(1.0)
+                                    } else if self.ui.sidebar.active_tab.is_some()
+                                        && self.ui.animator.target("sidebar_slide") != Some(1.0)
                                     {
                                         // Close active sidebar tab.
-                                        let tab = self.sidebar_active_tab.unwrap_or(0);
+                                        let tab = self.ui.sidebar.active_tab.unwrap_or(0);
                                         self.handle_tab_click(tab);
                                     } else {
                                         event_loop.exit();
@@ -715,21 +720,21 @@ impl ApplicationHandler for App {
                         }
 
                         // 2. Modal focus scoping — restrict Tab to active tier.
-                        self.ui_state.focus_min_tier = if self.modal_stack.is_empty() {
+                        self.ui.input.focus_min_tier = if self.ui.modals.is_empty() {
                             ui::ZTier::Panel
                         } else {
                             ui::ZTier::Modal
                         };
                         // Clear focus if it belongs to a root below the active tier.
-                        if let Some(focused) = self.ui_state.focused
+                        if let Some(focused) = self.ui.input.focused
                             && let Some(tier) = self.ui_tree.z_tier_of_widget(focused)
-                            && tier < self.ui_state.focus_min_tier
+                            && tier < self.ui.input.focus_min_tier
                         {
-                            self.ui_state.focused = None;
+                            self.ui.input.focused = None;
                         }
 
                         // 3. UI widget focus dispatch (Tab, ScrollList nav).
-                        if self.ui_state.handle_key_input(&mut self.ui_tree, kc, true) {
+                        if self.ui.input.handle_key_input(&mut self.ui_tree, kc, true) {
                             return;
                         }
 
@@ -830,16 +835,16 @@ impl ApplicationHandler for App {
                         }
 
                         // UI consumes click — don't pass to game.
-                        if self.ui_state.handle_mouse_input(
+                        if self.ui.input.handle_mouse_input(
                             &mut self.ui_tree,
                             ui_btn,
                             pressed,
                             px,
                             py,
                         ) {
-                            // Dispatch widget click callbacks (UI-305).
-                            if let Some((_widget_id, action)) = self.ui_state.poll_click() {
-                                self.dispatch_click(&action);
+                            // Dispatch widget click actions (UI-305).
+                            if let Some((_widget_id, action)) = self.ui.input.poll_click() {
+                                self.dispatch_click(action);
                             }
                             return;
                         }
@@ -851,7 +856,7 @@ impl ApplicationHandler for App {
                             if vx >= 0.0 && vy >= 0.0 {
                                 let tile_x = self.camera.x + vx as i32;
                                 let tile_y = self.camera.y + vy as i32;
-                                self.ui_state.submit_map_click(tile_x, tile_y, ui_btn);
+                                self.ui.input.submit_map_click(tile_x, tile_y, ui_btn);
                             }
                         }
 
@@ -1034,8 +1039,8 @@ impl ApplicationHandler for App {
                                 .map(|n| n.value.as_str());
                             // Persist sidebar scroll offset before destroying the tree,
                             // since handle_scroll may have modified it during this frame.
-                            if let Some(sv_id) = self.sidebar_scroll_view_id {
-                                self.sidebar_scroll_offset = self.ui_tree.scroll_offset(sv_id);
+                            if let Some(sv_id) = self.ui.sidebar.scroll_view_id {
+                                self.ui.sidebar.scroll_offset = self.ui_tree.scroll_offset(sv_id);
                             }
                             self.ui_tree = ui::WidgetTree::new();
                             self.ui_tree
@@ -1167,7 +1172,7 @@ impl ApplicationHandler for App {
                                     // Start slide-in when entity first selected (UI-W05).
                                     if self.last_selected_entity != Some(entity) {
                                         self.last_selected_entity = Some(entity);
-                                        self.animator.start(
+                                        self.ui.animator.start(
                                             "inspector_slide",
                                             ui::Anim {
                                                 from: 1.0,
@@ -1190,7 +1195,7 @@ impl ApplicationHandler for App {
 
                                     // Apply slide-in offset (UI-W05).
                                     let slide =
-                                        self.animator.get("inspector_slide", now).unwrap_or(0.0);
+                                        self.ui.animator.get("inspector_slide", now).unwrap_or(0.0);
                                     let target_x = screen_w as f32 - 220.0 - padding;
                                     let slide_offset = slide * (220.0 + padding);
                                     self.ui_tree.set_position(
@@ -1200,17 +1205,18 @@ impl ApplicationHandler for App {
                                             y: status_bar_h + padding,
                                         },
                                     );
-                                    self.ui_tree.set_on_click(close_id, "inspector::close");
+                                    self.ui_tree
+                                        .set_on_click(close_id, ui::UiAction::InspectorClose);
                                     self.inspector_close_id = Some(close_id);
                                 } else {
                                     // Entity died or lost position — auto-close.
                                     self.selected_entity = None;
                                     self.last_selected_entity = None;
-                                    self.animator.remove("inspector_slide");
+                                    self.ui.animator.remove("inspector_slide");
                                 }
                             } else {
                                 self.last_selected_entity = None;
-                                self.animator.remove("inspector_slide");
+                                self.ui.animator.remove("inspector_slide");
                             }
 
                             // Build sidebar tab strip (always visible).
@@ -1218,12 +1224,12 @@ impl ApplicationHandler for App {
                                 &mut self.ui_tree,
                                 &self.ui_theme,
                                 screen_size,
-                                self.sidebar_active_tab,
+                                self.ui.sidebar.active_tab,
                             );
 
                             // Build active sidebar main-tab view.
                             let mut sidebar_panel_id = None;
-                            if let Some(tab_idx) = self.sidebar_active_tab {
+                            if let Some(tab_idx) = self.ui.sidebar.active_tab {
                                 match tab_idx {
                                     0 => {
                                         // Widget showcase view.
@@ -1243,10 +1249,10 @@ impl ApplicationHandler for App {
                                             &self.keybindings,
                                             &live,
                                             screen_size,
-                                            self.sidebar_scroll_offset,
+                                            self.ui.sidebar.scroll_offset,
                                         );
                                         sidebar_panel_id = Some(view_id);
-                                        self.sidebar_scroll_view_id = Some(view_sv);
+                                        self.ui.sidebar.scroll_view_id = Some(view_sv);
                                     }
                                     n => {
                                         // Placeholder views for tabs 1+.
@@ -1257,7 +1263,7 @@ impl ApplicationHandler for App {
                                             n,
                                         );
                                         sidebar_panel_id = Some(pid);
-                                        self.sidebar_scroll_view_id = None;
+                                        self.ui.sidebar.scroll_view_id = None;
                                     }
                                 }
                             }
@@ -1302,7 +1308,8 @@ impl ApplicationHandler for App {
 
                             // Apply sidebar slide animation.
                             if let Some(panel_id) = sidebar_panel_id {
-                                let slide = self.animator.get("sidebar_slide", now).unwrap_or(0.0);
+                                let slide =
+                                    self.ui.animator.get("sidebar_slide", now).unwrap_or(0.0);
                                 let base_x = screen_w as f32
                                     - ui::sidebar::MAIN_TAB_WIDTH
                                     - ui::sidebar::SIDEBAR_MARGIN;
@@ -1323,11 +1330,11 @@ impl ApplicationHandler for App {
                                     self.ui_tree.layout(screen_size, font);
                                 }
                                 // Hide animation complete: panel fully off-screen.
-                                if self.animator.target("sidebar_slide") == Some(1.0)
-                                    && !self.animator.is_active("sidebar_slide", now)
+                                if self.ui.animator.target("sidebar_slide") == Some(1.0)
+                                    && !self.ui.animator.is_active("sidebar_slide", now)
                                 {
-                                    self.sidebar_active_tab = None;
-                                    self.animator.remove("sidebar_slide");
+                                    self.ui.sidebar.active_tab = None;
+                                    self.ui.animator.remove("sidebar_slide");
                                     self.ui_tree.remove(panel_id);
                                 }
                             }
@@ -1370,7 +1377,7 @@ impl ApplicationHandler for App {
                                         if self.last_hover_tile != Some(current_tile) {
                                             self.last_hover_tile = Some(current_tile);
                                             if first_hover {
-                                                self.animator.start(
+                                                self.ui.animator.start(
                                                     "hover_tooltip",
                                                     ui::Anim {
                                                         from: 0.0,
@@ -1390,14 +1397,14 @@ impl ApplicationHandler for App {
                             }
                             if hover_tooltip_id.is_none() {
                                 self.last_hover_tile = None;
-                                self.animator.remove("hover_tooltip");
+                                self.ui.animator.remove("hover_tooltip");
                             }
                             if hover_tooltip_id.is_some() {
                                 self.ui_tree.layout(screen_size, font);
                             }
                             if let Some(tooltip_id) = hover_tooltip_id {
                                 let opacity =
-                                    self.animator.get("hover_tooltip", now).unwrap_or(1.0);
+                                    self.ui.animator.get("hover_tooltip", now).unwrap_or(1.0);
                                 if opacity < 1.0 {
                                     self.ui_tree.set_subtree_opacity(tooltip_id, opacity);
                                 }
@@ -1410,10 +1417,10 @@ impl ApplicationHandler for App {
                                     .hit_test(self.cursor_pos.x as f32, self.cursor_pos.y as f32);
                                 let is_hovered = hit == Some(close_id);
                                 let target = if is_hovered { 1.0 } else { 0.0 };
-                                if self.animator.target("btn_hover_close") != Some(target) {
+                                if self.ui.animator.target("btn_hover_close") != Some(target) {
                                     let current =
-                                        self.animator.get("btn_hover_close", now).unwrap_or(0.0);
-                                    self.animator.start(
+                                        self.ui.animator.get("btn_hover_close", now).unwrap_or(0.0);
+                                    self.ui.animator.start(
                                         "btn_hover_close",
                                         ui::Anim {
                                             from: current,
@@ -1428,16 +1435,16 @@ impl ApplicationHandler for App {
                                     );
                                 }
                                 let hover_alpha =
-                                    self.animator.get("btn_hover_close", now).unwrap_or(0.0);
+                                    self.ui.animator.get("btn_hover_close", now).unwrap_or(0.0);
                                 let alpha = self.ui_theme.anim_hover_highlight_alpha * hover_alpha;
                                 self.ui_tree.set_widget_bg_alpha(close_id, alpha);
                             } else {
-                                self.animator.remove("btn_hover_close");
+                                self.ui.animator.remove("btn_hover_close");
                             }
 
                             // Clean up completed animations (UI-W05).
-                            self.animator.gc(now);
-                            self.panel_manager.flush_closed(&mut self.ui_tree, now);
+                            self.ui.animator.gc(now);
+                            self.ui.panels.flush_closed(&mut self.ui_tree, now);
 
                             let map_text = render::render_world_to_string(
                                 &self.world,
@@ -1773,14 +1780,28 @@ fn main() {
         map_origin: (0.0, 0.0),
         map_cell_w: 0.0,
         map_cell_h: 0.0,
-        ui_state: ui::UiState::new(),
+        ui: ui::UiContext {
+            input: ui::UiState::new(),
+            animator: ui::Animator::new(),
+            modals: ui::ModalStack::new(),
+            panels: ui::PanelManager::new(),
+            scroll: std::collections::HashMap::new(),
+            sidebar: ui::SidebarState {
+                active_tab: if std::env::args().any(|a| a == "--sidebar") {
+                    Some(0)
+                } else {
+                    None
+                },
+                scroll_offset: 0.0,
+                scroll_view_id: None,
+            },
+        },
         ui_tree: {
             let mut t = ui::WidgetTree::new();
             t.set_control_border_width(ui_theme.control_border());
             t
         },
         ui_theme,
-        animator: ui::Animator::new(),
         last_hover_tile: None,
         last_selected_entity: None,
         keybindings: ui::KeyBindings::defaults(),
@@ -1788,15 +1809,6 @@ fn main() {
         sim_speed: 1,
         selected_entity: None,
         inspector_close_id: None,
-        modal_stack: ui::ModalStack::new(),
-        panel_manager: ui::PanelManager::new(),
-        sidebar_active_tab: if std::env::args().any(|a| a == "--sidebar") {
-            Some(0)
-        } else {
-            None
-        },
-        sidebar_scroll_offset: 0.0,
-        sidebar_scroll_view_id: None,
         ui_perf: ui::UiPerfMetrics::default(),
         minimap_sprites: None, // created in resumed() when GPU is available
         minimap_texture: Some(minimap_texture),

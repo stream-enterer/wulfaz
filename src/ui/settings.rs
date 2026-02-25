@@ -99,7 +99,7 @@ pub fn build_settings_screen(
             width: 120.0,
         },
     );
-    tree.set_on_click(scale_slider, "settings::ui_scale");
+    tree.set_on_click(scale_slider, super::UiAction::SettingsUiScale);
 
     tree.insert(
         scale_row,
@@ -148,7 +148,7 @@ pub fn build_settings_screen(
             font_size: theme.font_data_size,
         },
     );
-    tree.set_on_click(window_dropdown, "settings::window_mode");
+    tree.set_on_click(window_dropdown, super::UiAction::SettingsWindowMode);
 
     // === Audio tab (child 1) -- placeholder ===
     let audio_col = tree.insert(

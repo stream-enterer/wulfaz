@@ -24,12 +24,8 @@ pub struct MainMenuInfo {
 
 /// Build the main menu (UI-415).
 ///
-/// Returns the panel root ID. Buttons have `on_click` callbacks:
-/// - `"menu::new_game"` — start new game (transitions to Loading)
-/// - `"menu::continue"` — load most recent save
-/// - `"menu::load"` — open save/load screen (UI-412)
-/// - `"menu::settings"` — open settings screen (UI-413)
-/// - `"menu::quit"` — exit application
+/// Returns the panel root ID. Buttons dispatch `UiAction` variants:
+/// `MenuNewGame`, `MenuContinue`, `MenuLoad`, `MenuSettings`, `MenuQuit`.
 pub fn build_main_menu(tree: &mut WidgetTree, theme: &Theme, info: &MainMenuInfo) -> WidgetId {
     // Full-screen background
     let bg = tree.insert_root(Widget::Panel {
@@ -103,11 +99,11 @@ pub fn build_main_menu(tree: &mut WidgetTree, theme: &Theme, info: &MainMenuInfo
 
     // New Game button
     let new_game = make_menu_button(tree, theme, col, "New Game", button_w);
-    tree.set_on_click(new_game, "menu::new_game");
+    tree.set_on_click(new_game, super::UiAction::MenuNewGame);
 
     // Continue button (enabled only if saves exist)
     let continue_btn = make_menu_button(tree, theme, col, "Continue", button_w);
-    tree.set_on_click(continue_btn, "menu::continue");
+    tree.set_on_click(continue_btn, super::UiAction::MenuContinue);
     if !info.has_saves {
         // Visually disable
         if let Some(node) = tree.get_mut(continue_btn)
@@ -124,15 +120,15 @@ pub fn build_main_menu(tree: &mut WidgetTree, theme: &Theme, info: &MainMenuInfo
 
     // Load Game button
     let load = make_menu_button(tree, theme, col, "Load Game", button_w);
-    tree.set_on_click(load, "menu::load");
+    tree.set_on_click(load, super::UiAction::MenuLoad);
 
     // Settings button
     let settings = make_menu_button(tree, theme, col, "Settings", button_w);
-    tree.set_on_click(settings, "menu::settings");
+    tree.set_on_click(settings, super::UiAction::MenuSettings);
 
     // Quit button
     let quit = make_menu_button(tree, theme, col, "Quit", button_w);
-    tree.set_on_click(quit, "menu::quit");
+    tree.set_on_click(quit, super::UiAction::MenuQuit);
 
     bg
 }
@@ -221,7 +217,7 @@ mod tests {
         // Last button should be Quit
         let last_btn_id = col_node.children.last().unwrap();
         let node = tree.get(*last_btn_id).unwrap();
-        assert_eq!(node.on_click.as_deref(), Some("menu::quit"));
+        assert!(matches!(node.on_click, Some(crate::ui::UiAction::MenuQuit)));
     }
 
     #[test]

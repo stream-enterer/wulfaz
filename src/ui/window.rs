@@ -133,10 +133,6 @@ pub fn build_window_frame(
     }
 }
 
-/// Callback keys for confirmation dialog buttons.
-pub const DIALOG_ACCEPT: &str = "dialog::accept";
-pub const DIALOG_CANCEL: &str = "dialog::cancel";
-
 /// Handles returned by `build_confirmation_dialog`.
 pub struct ConfirmationDialog {
     /// Root Panel widget (push this onto ModalStack).
@@ -203,7 +199,7 @@ pub fn build_confirmation_dialog(
             font_family: FontFamily::Serif,
         },
     );
-    tree.set_on_click(cancel_btn, DIALOG_CANCEL);
+    tree.set_on_click(cancel_btn, crate::ui::UiAction::DialogCancel);
     tree.set_padding(cancel_btn, btn_pad);
 
     tree.insert(button_row, Widget::Expand);
@@ -219,7 +215,7 @@ pub fn build_confirmation_dialog(
             font_family: FontFamily::Serif,
         },
     );
-    tree.set_on_click(accept_btn, DIALOG_ACCEPT);
+    tree.set_on_click(accept_btn, crate::ui::UiAction::DialogAccept);
     tree.set_padding(accept_btn, btn_pad);
 
     ConfirmationDialog {
@@ -313,7 +309,10 @@ mod tests {
 
         // Accept button exists and has correct callback
         let accept_node = tree.get(dialog.accept_btn).unwrap();
-        assert_eq!(accept_node.on_click.as_deref(), Some(DIALOG_ACCEPT));
+        assert!(matches!(
+            accept_node.on_click,
+            Some(crate::ui::UiAction::DialogAccept)
+        ));
         if let Widget::Button { text, .. } = &accept_node.widget {
             assert_eq!(text, "Yes");
         } else {
@@ -322,7 +321,10 @@ mod tests {
 
         // Cancel button exists and has correct callback
         let cancel_node = tree.get(dialog.cancel_btn).unwrap();
-        assert_eq!(cancel_node.on_click.as_deref(), Some(DIALOG_CANCEL));
+        assert!(matches!(
+            cancel_node.on_click,
+            Some(crate::ui::UiAction::DialogCancel)
+        ));
         if let Widget::Button { text, .. } = &cancel_node.widget {
             assert_eq!(text, "No");
         } else {

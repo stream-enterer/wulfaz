@@ -126,7 +126,7 @@ pub fn build_character_finder(
             font_size: theme.font_data_size,
         },
     );
-    tree.set_on_click(sort_dropdown, "finder::sort");
+    tree.set_on_click(sort_dropdown, super::UiAction::FinderSort);
 
     // Results count
     tree.insert(
@@ -167,7 +167,10 @@ pub fn build_character_finder(
             },
         );
         tree.set_sizing(row, Sizing::Fixed(row_w), Sizing::Fit);
-        tree.set_on_click(row, format!("finder::select:{}", entry.entity_id));
+        tree.set_on_click(
+            row,
+            super::UiAction::FinderSelect(crate::components::Entity(entry.entity_id)),
+        );
 
         // Icon
         tree.insert(

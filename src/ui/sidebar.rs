@@ -765,7 +765,7 @@ pub fn build_tab_strip(
         let y = y_start + i as f32 * (TAB_HEIGHT + TAB_GAP);
         tree.set_position(tab, Position::Fixed { x, y });
         tree.set_sizing(tab, Sizing::Fixed(tab_w), Sizing::Fixed(TAB_HEIGHT));
-        tree.set_on_click(tab, format!("sidebar::tab::{}", i));
+        tree.set_on_click(tab, super::UiAction::SelectTab(i));
         ids.push(tab);
     }
     ids

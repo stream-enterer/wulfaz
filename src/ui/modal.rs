@@ -1,11 +1,12 @@
+use super::action::UiAction;
 use super::{Position, Sizing, Widget, WidgetId, WidgetTree, ZTier};
 
 /// Options for pushing a modal onto the stack.
 pub struct ModalOptions {
-    /// Callback key fired when the modal is dismissed (ESC, click-outside).
-    pub on_dismiss: Option<String>,
-    /// Callback key fired when the modal is confirmed (Enter).
-    pub on_confirm: Option<String>,
+    /// Action dispatched when the modal is dismissed (ESC, click-outside).
+    pub on_dismiss: Option<UiAction>,
+    /// Action dispatched when the modal is confirmed (Enter).
+    pub on_confirm: Option<UiAction>,
 }
 
 impl ModalOptions {
@@ -19,21 +20,18 @@ impl ModalOptions {
 pub struct ModalPop {
     /// The content root that was removed.
     pub content: WidgetId,
-    /// Dismiss callback from the modal's options.
-    pub on_dismiss: Option<String>,
-    /// Confirm callback from the modal's options.
-    pub on_confirm: Option<String>,
+    /// Dismiss action from the modal's options.
+    pub on_dismiss: Option<UiAction>,
+    /// Confirm action from the modal's options.
+    pub on_confirm: Option<UiAction>,
 }
 
 struct ModalEntry {
     dim: WidgetId,
     content: WidgetId,
-    on_dismiss: Option<String>,
-    on_confirm: Option<String>,
+    on_dismiss: Option<UiAction>,
+    on_confirm: Option<UiAction>,
 }
-
-/// Callback action for dismissing the topmost modal (click-outside-to-dismiss).
-pub const MODAL_DISMISS: &str = "modal::dismiss";
 
 /// Modal dialog stack (UI-300).
 ///
@@ -74,7 +72,7 @@ impl ModalStack {
         );
         tree.set_position(dim, Position::Fixed { x: 0.0, y: 0.0 });
         tree.set_sizing(dim, Sizing::Percent(1.0), Sizing::Percent(1.0));
-        tree.set_on_click(dim, MODAL_DISMISS);
+        tree.set_on_click(dim, super::UiAction::ModalDismiss);
 
         // Promote the content root to Modal tier and center it.
         tree.set_z_tier(content_root, ZTier::Modal);
@@ -102,9 +100,9 @@ impl ModalStack {
         })
     }
 
-    /// Get the confirm callback of the topmost modal (for Enter key dispatch).
-    pub fn confirm_callback(&self) -> Option<&str> {
-        self.modals.last().and_then(|e| e.on_confirm.as_deref())
+    /// Get the confirm action of the topmost modal (for Enter key dispatch).
+    pub fn confirm_action(&self) -> Option<&UiAction> {
+        self.modals.last().and_then(|e| e.on_confirm.as_ref())
     }
 
     /// Number of modals on the stack.
@@ -246,9 +244,8 @@ mod tests {
             .unwrap();
 
         let dim_node = tree.get(*dim_id).unwrap();
-        assert_eq!(
-            dim_node.on_click.as_deref(),
-            Some(MODAL_DISMISS),
+        assert!(
+            matches!(dim_node.on_click, Some(UiAction::ModalDismiss)),
             "dim layer has click-outside-to-dismiss callback"
         );
     }
@@ -303,22 +300,22 @@ mod tests {
             &mut tree,
             modal,
             ModalOptions {
-                on_dismiss: Some("event_choice:refuse".into()),
-                on_confirm: Some("event_choice:accept".into()),
+                on_dismiss: Some(UiAction::EventChoice("refuse".into())),
+                on_confirm: Some(UiAction::EventChoice("accept".into())),
             },
         );
 
         let pop = stack.pop(&mut tree).unwrap();
-        assert_eq!(pop.on_dismiss.as_deref(), Some("event_choice:refuse"));
-        assert_eq!(pop.on_confirm.as_deref(), Some("event_choice:accept"));
+        assert!(matches!(pop.on_dismiss, Some(UiAction::EventChoice(ref s)) if s == "refuse"));
+        assert!(matches!(pop.on_confirm, Some(UiAction::EventChoice(ref s)) if s == "accept"));
     }
 
     #[test]
-    fn confirm_callback_returns_topmost() {
+    fn confirm_action_returns_topmost() {
         let mut tree = WidgetTree::new();
         let mut stack = ModalStack::new();
 
-        assert!(stack.confirm_callback().is_none());
+        assert!(stack.confirm_action().is_none());
 
         let modal_a = make_modal_panel(&mut tree);
         stack.push(
@@ -326,10 +323,13 @@ mod tests {
             modal_a,
             ModalOptions {
                 on_dismiss: None,
-                on_confirm: Some("first".into()),
+                on_confirm: Some(UiAction::DialogAccept),
             },
         );
-        assert_eq!(stack.confirm_callback(), Some("first"));
+        assert!(matches!(
+            stack.confirm_action(),
+            Some(UiAction::DialogAccept)
+        ));
 
         let modal_b = make_modal_panel(&mut tree);
         stack.push(
@@ -337,12 +337,18 @@ mod tests {
             modal_b,
             ModalOptions {
                 on_dismiss: None,
-                on_confirm: Some("second".into()),
+                on_confirm: Some(UiAction::DialogCancel),
             },
         );
-        assert_eq!(stack.confirm_callback(), Some("second"));
+        assert!(matches!(
+            stack.confirm_action(),
+            Some(UiAction::DialogCancel)
+        ));
 
         stack.pop(&mut tree);
-        assert_eq!(stack.confirm_callback(), Some("first"));
+        assert!(matches!(
+            stack.confirm_action(),
+            Some(UiAction::DialogAccept)
+        ));
     }
 }

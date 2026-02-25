@@ -107,7 +107,7 @@ pub fn build_event_popup(
                 font_family: FontFamily::Serif,
             },
         );
-        tree.set_on_click(btn, format!("event_choice:{}", choice.callback));
+        tree.set_on_click(btn, super::UiAction::EventChoice(choice.callback.clone()));
         tree.set_padding(
             btn,
             Edges {
@@ -205,14 +205,14 @@ mod tests {
         let button_row_id = content_node.children[1];
         let button_row_node = tree.get(button_row_id).unwrap();
 
-        let expected_callbacks = [
-            "event_choice:accept",
-            "event_choice:refuse",
-            "event_choice:attack",
-        ];
+        let expected_callbacks = ["accept", "refuse", "attack"];
         for (i, &btn_id) in button_row_node.children.iter().enumerate() {
             let btn_node = tree.get(btn_id).unwrap();
-            assert_eq!(btn_node.on_click.as_deref(), Some(expected_callbacks[i]),);
+            assert!(
+                matches!(&btn_node.on_click, Some(crate::ui::UiAction::EventChoice(s)) if s == expected_callbacks[i]),
+                "button {} should have EventChoice callback",
+                i,
+            );
         }
     }
 

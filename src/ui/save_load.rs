@@ -107,7 +107,7 @@ pub fn build_save_load_screen(
             font_family: FontFamily::Serif,
         },
     );
-    tree.set_on_click(save_btn, "save_load::save");
+    tree.set_on_click(save_btn, super::UiAction::SaveLoadSave);
     tree.set_padding(
         save_btn,
         Edges {
@@ -170,7 +170,7 @@ pub fn build_save_load_screen(
                 Sizing::Fixed(content_w - theme.scrollbar_width - 4.0),
                 Sizing::Fit,
             );
-            tree.set_on_click(row, format!("save_load::select:{}", save.name));
+            tree.set_on_click(row, super::UiAction::SaveLoadSelect(save.name.clone()));
 
             tree.insert(
                 row,
@@ -206,7 +206,7 @@ pub fn build_save_load_screen(
                 font_family: FontFamily::Serif,
             },
         );
-        tree.set_on_click(load_btn, "save_load::load");
+        tree.set_on_click(load_btn, super::UiAction::SaveLoadLoad);
         tree.set_padding(
             load_btn,
             Edges {

@@ -126,7 +126,7 @@ impl ContextMenu {
                 },
             );
             if item.enabled {
-                tree.set_on_click(btn, &item.action);
+                tree.set_on_click(btn, super::UiAction::ContextAction(item.action.clone()));
             }
         }
 
@@ -294,7 +294,9 @@ mod tests {
 
         let attack = tree.get(col_node.children[0]).unwrap();
         assert!(attack.on_click.is_some(), "enabled item has on_click");
-        assert_eq!(attack.on_click.as_deref(), Some("ctx::attack"));
+        assert!(
+            matches!(&attack.on_click, Some(crate::ui::UiAction::ContextAction(s)) if s == "ctx::attack")
+        );
 
         let recruit = tree.get(col_node.children[2]).unwrap();
         assert!(recruit.on_click.is_none(), "disabled item has no on_click");

@@ -107,7 +107,7 @@ pub struct UiState {
     /// Pending map click event (UI-106). Consumed by `poll_map_click()`.
     map_click: Option<MapClick>,
     /// Pending widget click event (UI-305). Consumed by `poll_click()`.
-    click_event: Option<(WidgetId, String)>,
+    click_event: Option<(WidgetId, super::UiAction)>,
 }
 
 impl UiState {
@@ -147,8 +147,8 @@ impl UiState {
     }
 
     /// Poll the most recent widget click event (UI-305), consuming it.
-    /// Returns `(widget_id, callback_key)` if a widget with `on_click` was clicked.
-    pub fn poll_click(&mut self) -> Option<(WidgetId, String)> {
+    /// Returns `(widget_id, action)` if a widget with `on_click` was clicked.
+    pub fn poll_click(&mut self) -> Option<(WidgetId, super::UiAction)> {
         self.click_event.take()
     }
 
@@ -273,11 +273,11 @@ impl UiState {
                 if release_hit == Some(pressed_id)
                     && let Some(_btn) = was_button
                 {
-                    // Store click event if widget has a callback key (UI-305).
+                    // Store click event if widget has a callback action (UI-305).
                     if let Some(node) = tree.get(pressed_id)
-                        && let Some(key) = &node.on_click
+                        && let Some(action) = &node.on_click
                     {
-                        self.click_event = Some((pressed_id, key.clone()));
+                        self.click_event = Some((pressed_id, action.clone()));
                     }
                 }
             }
@@ -1386,7 +1386,7 @@ mod tests {
             font_family: FontFamily::default(),
         });
         tree.set_sizing(btn, Sizing::Fixed(80.0), Sizing::Fixed(30.0));
-        tree.set_on_click(btn, "test::ok");
+        tree.set_on_click(btn, crate::ui::UiAction::DialogAccept);
         tree.layout(
             Size {
                 width: 800.0,
@@ -1408,7 +1408,7 @@ mod tests {
 
         let click = state.poll_click().expect("should have click event");
         assert_eq!(click.0, btn);
-        assert_eq!(click.1, "test::ok");
+        assert!(matches!(click.1, crate::ui::UiAction::DialogAccept));
 
         // Polling consumes the event.
         assert!(state.poll_click().is_none());

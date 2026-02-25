@@ -1,24 +1,22 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use super::action::PanelKind;
 use super::{WidgetId, WidgetTree};
 
-/// Tracks open UI panels by name (UI-306).
+/// Tracks open UI panels by kind (UI-306).
 ///
 /// Multiple panels can be open simultaneously (character panel, outliner,
 /// event log). Panels are drawn in `draw_order` sequence within their
 /// Z-tier. Raising a panel moves it to the end of the draw order (topmost
 /// within the Panel tier). Modals (ZTier::Modal) always draw above all panels.
 pub struct PanelManager {
-    /// Map from panel name to its root WidgetId.
-    panels: HashMap<String, PanelEntry>,
+    /// Map from panel kind to its root WidgetId.
+    panels: HashMap<PanelKind, PanelEntry>,
     /// Draw order — last entry is topmost within the Panel tier.
-    draw_order: Vec<String>,
+    draw_order: Vec<PanelKind>,
     /// Panels waiting for their hide animation to finish before removal.
     closing: Vec<ClosingPanel>,
-    /// Persisted scroll offsets for ScrollLists inside panels.
-    /// Key format: `"panel_name"` (one scroll offset per panel).
-    scroll_offsets: HashMap<String, f32>,
 }
 
 struct PanelEntry {
@@ -27,7 +25,7 @@ struct PanelEntry {
 }
 
 struct ClosingPanel {
-    name: String,
+    kind: PanelKind,
     root: WidgetId,
     deadline: Instant,
 }
@@ -38,52 +36,49 @@ impl PanelManager {
             panels: HashMap::new(),
             draw_order: Vec::new(),
             closing: Vec::new(),
-            scroll_offsets: HashMap::new(),
         }
     }
 
     /// Register an open panel. `root` must already be in the tree.
-    pub fn open(&mut self, name: impl Into<String>, root: WidgetId, closeable: bool) {
-        let name = name.into();
-        // Close existing panel with the same name.
-        if self.panels.contains_key(&name) {
-            self.draw_order.retain(|n| *n != name);
+    pub fn open(&mut self, kind: PanelKind, root: WidgetId, closeable: bool) {
+        // Close existing panel with the same kind.
+        if self.panels.contains_key(&kind) {
+            self.draw_order.retain(|k| *k != kind);
         }
-        self.panels
-            .insert(name.clone(), PanelEntry { root, closeable });
-        self.draw_order.push(name);
+        self.panels.insert(kind, PanelEntry { root, closeable });
+        self.draw_order.push(kind);
     }
 
-    /// Close a panel by name. Removes the widget subtree from the tree.
+    /// Close a panel by kind. Removes the widget subtree from the tree.
     /// Returns the root WidgetId if the panel existed.
-    pub fn close(&mut self, name: &str, tree: &mut WidgetTree) -> Option<WidgetId> {
-        let entry = self.panels.remove(name)?;
-        self.draw_order.retain(|n| n != name);
+    pub fn close(&mut self, kind: PanelKind, tree: &mut WidgetTree) -> Option<WidgetId> {
+        let entry = self.panels.remove(&kind)?;
+        self.draw_order.retain(|k| *k != kind);
         tree.remove(entry.root);
         Some(entry.root)
     }
 
     /// Bring a panel to the front (last in draw order within its Z-tier).
     /// Does NOT change the Z-tier — panels stay at ZTier::Panel.
-    pub fn raise(&mut self, name: &str) {
-        if self.panels.contains_key(name) {
-            self.draw_order.retain(|n| n != name);
-            self.draw_order.push(name.to_string());
+    pub fn raise(&mut self, kind: PanelKind) {
+        if self.panels.contains_key(&kind) {
+            self.draw_order.retain(|k| *k != kind);
+            self.draw_order.push(kind);
         }
     }
 
     /// Close the topmost closeable panel (instant removal).
-    /// Returns the name and root WidgetId if a panel was closed.
-    pub fn close_topmost(&mut self, tree: &mut WidgetTree) -> Option<(String, WidgetId)> {
+    /// Returns the kind and root WidgetId if a panel was closed.
+    pub fn close_topmost(&mut self, tree: &mut WidgetTree) -> Option<(PanelKind, WidgetId)> {
         // Walk draw order in reverse to find the topmost closeable panel.
-        let name = self
+        let kind = self
             .draw_order
             .iter()
             .rev()
-            .find(|n| self.panels.get(n.as_str()).is_some_and(|e| e.closeable))
-            .cloned()?;
-        let root = self.close(&name, tree)?;
-        Some((name, root))
+            .find(|k| self.panels.get(k).is_some_and(|e| e.closeable))
+            .copied()?;
+        let root = self.close(kind, tree)?;
+        Some((kind, root))
     }
 
     /// Close the topmost closeable panel with a hide animation.
@@ -94,15 +89,15 @@ impl PanelManager {
         &mut self,
         duration: Duration,
         now: Instant,
-    ) -> Option<(String, WidgetId)> {
-        let name = self
+    ) -> Option<(PanelKind, WidgetId)> {
+        let kind = self
             .draw_order
             .iter()
             .rev()
-            .find(|n| self.panels.get(n.as_str()).is_some_and(|e| e.closeable))
-            .cloned()?;
-        let root = self.close_animated(&name, duration, now)?;
-        Some((name, root))
+            .find(|k| self.panels.get(k).is_some_and(|e| e.closeable))
+            .copied()?;
+        let root = self.close_animated(kind, duration, now)?;
+        Some((kind, root))
     }
 
     /// Begin an animated close. Moves the panel to the closing list
@@ -113,14 +108,14 @@ impl PanelManager {
     /// Returns the root WidgetId if the panel existed.
     pub fn close_animated(
         &mut self,
-        name: &str,
+        kind: PanelKind,
         duration: Duration,
         now: Instant,
     ) -> Option<WidgetId> {
-        let entry = self.panels.remove(name)?;
-        self.draw_order.retain(|n| n != name);
+        let entry = self.panels.remove(&kind)?;
+        self.draw_order.retain(|k| *k != kind);
         self.closing.push(ClosingPanel {
-            name: name.to_string(),
+            kind,
             root: entry.root,
             deadline: now + duration,
         });
@@ -140,24 +135,24 @@ impl PanelManager {
         });
     }
 
-    /// Whether a panel with the given name is currently open
+    /// Whether a panel with the given kind is currently open
     /// (not counting panels in the closing state).
-    pub fn is_open(&self, name: &str) -> bool {
-        self.panels.contains_key(name)
+    pub fn is_open(&self, kind: PanelKind) -> bool {
+        self.panels.contains_key(&kind)
     }
 
     /// Whether a panel is currently playing its close animation.
-    pub fn is_closing(&self, name: &str) -> bool {
-        self.closing.iter().any(|c| c.name == name)
+    pub fn is_closing(&self, kind: PanelKind) -> bool {
+        self.closing.iter().any(|c| c.kind == kind)
     }
 
-    /// Get the root WidgetId of a panel by name.
-    pub fn root_id(&self, name: &str) -> Option<WidgetId> {
-        self.panels.get(name).map(|e| e.root)
+    /// Get the root WidgetId of a panel by kind.
+    pub fn root_id(&self, kind: PanelKind) -> Option<WidgetId> {
+        self.panels.get(&kind).map(|e| e.root)
     }
 
-    /// Current draw order (front-to-back names).
-    pub fn draw_order(&self) -> &[String] {
+    /// Current draw order (front-to-back panel kinds).
+    pub fn draw_order(&self) -> &[PanelKind] {
         &self.draw_order
     }
 
@@ -170,17 +165,6 @@ impl PanelManager {
     pub fn is_empty(&self) -> bool {
         self.panels.is_empty()
     }
-
-    /// Store the scroll offset for a panel's ScrollList.
-    /// Survives panel close/reopen cycles.
-    pub fn save_scroll_offset(&mut self, name: &str, offset: f32) {
-        self.scroll_offsets.insert(name.to_string(), offset);
-    }
-
-    /// Retrieve the persisted scroll offset for a panel (0.0 if never saved).
-    pub fn scroll_offset(&self, name: &str) -> f32 {
-        self.scroll_offsets.get(name).copied().unwrap_or(0.0)
-    }
 }
 
 #[cfg(test)]
@@ -189,8 +173,7 @@ mod tests {
     use crate::ui::widget::Widget;
     use crate::ui::{Position, Sizing, WidgetTree};
 
-    fn make_panel(tree: &mut WidgetTree, name: &str) -> WidgetId {
-        let _ = name; // used only for identification in tests
+    fn make_panel(tree: &mut WidgetTree) -> WidgetId {
         let panel = tree.insert_root(Widget::Panel {
             bg_color: [0.5; 4],
             border_color: [1.0; 4],
@@ -207,14 +190,14 @@ mod tests {
         let mut tree = WidgetTree::new();
         let mut pm = PanelManager::new();
 
-        let root = make_panel(&mut tree, "character");
-        pm.open("character", root, true);
-        assert!(pm.is_open("character"));
+        let root = make_panel(&mut tree);
+        pm.open(PanelKind::CharacterPanel, root, true);
+        assert!(pm.is_open(PanelKind::CharacterPanel));
         assert_eq!(pm.len(), 1);
-        assert_eq!(pm.root_id("character"), Some(root));
+        assert_eq!(pm.root_id(PanelKind::CharacterPanel), Some(root));
 
-        pm.close("character", &mut tree);
-        assert!(!pm.is_open("character"));
+        pm.close(PanelKind::CharacterPanel, &mut tree);
+        assert!(!pm.is_open(PanelKind::CharacterPanel));
         assert_eq!(pm.len(), 0);
         assert!(tree.get(root).is_none(), "subtree removed");
     }
@@ -224,17 +207,31 @@ mod tests {
         let mut tree = WidgetTree::new();
         let mut pm = PanelManager::new();
 
-        let a = make_panel(&mut tree, "a");
-        pm.open("a", a, true);
-        let b = make_panel(&mut tree, "b");
-        pm.open("b", b, true);
-        let c = make_panel(&mut tree, "c");
-        pm.open("c", c, true);
+        let a = make_panel(&mut tree);
+        pm.open(PanelKind::Sidebar, a, true);
+        let b = make_panel(&mut tree);
+        pm.open(PanelKind::Outliner, b, true);
+        let c = make_panel(&mut tree);
+        pm.open(PanelKind::CharacterPanel, c, true);
 
-        assert_eq!(pm.draw_order(), &["a", "b", "c"]);
+        assert_eq!(
+            pm.draw_order(),
+            &[
+                PanelKind::Sidebar,
+                PanelKind::Outliner,
+                PanelKind::CharacterPanel
+            ]
+        );
 
-        pm.raise("a");
-        assert_eq!(pm.draw_order(), &["b", "c", "a"]);
+        pm.raise(PanelKind::Sidebar);
+        assert_eq!(
+            pm.draw_order(),
+            &[
+                PanelKind::Outliner,
+                PanelKind::CharacterPanel,
+                PanelKind::Sidebar
+            ]
+        );
     }
 
     #[test]
@@ -242,39 +239,42 @@ mod tests {
         let mut tree = WidgetTree::new();
         let mut pm = PanelManager::new();
 
-        let a = make_panel(&mut tree, "a");
-        pm.open("a", a, true);
-        let b = make_panel(&mut tree, "b");
-        pm.open("b", b, false); // not closeable
-        let c = make_panel(&mut tree, "c");
-        pm.open("c", c, true);
+        let a = make_panel(&mut tree);
+        pm.open(PanelKind::Sidebar, a, true);
+        let b = make_panel(&mut tree);
+        pm.open(PanelKind::Outliner, b, false); // not closeable
+        let c = make_panel(&mut tree);
+        pm.open(PanelKind::CharacterPanel, c, true);
 
-        // Topmost closeable is "c".
+        // Topmost closeable is CharacterPanel.
         let closed = pm.close_topmost(&mut tree);
-        assert_eq!(closed.as_ref().map(|(n, _)| n.as_str()), Some("c"));
+        assert_eq!(
+            closed.as_ref().map(|(k, _)| *k),
+            Some(PanelKind::CharacterPanel)
+        );
 
-        // Next topmost closeable is "a" (b is not closeable).
+        // Next topmost closeable is Sidebar (Outliner is not closeable).
         let closed = pm.close_topmost(&mut tree);
-        assert_eq!(closed.as_ref().map(|(n, _)| n.as_str()), Some("a"));
+        assert_eq!(closed.as_ref().map(|(k, _)| *k), Some(PanelKind::Sidebar));
 
-        // Only "b" remains (not closeable).
+        // Only Outliner remains (not closeable).
         assert!(pm.close_topmost(&mut tree).is_none());
         assert_eq!(pm.len(), 1);
     }
 
     #[test]
-    fn reopen_same_name_replaces() {
+    fn reopen_same_kind_replaces() {
         let mut tree = WidgetTree::new();
         let mut pm = PanelManager::new();
 
-        let root1 = make_panel(&mut tree, "x");
-        pm.open("x", root1, true);
-        let root2 = make_panel(&mut tree, "x");
-        pm.open("x", root2, true);
+        let root1 = make_panel(&mut tree);
+        pm.open(PanelKind::CharacterFinder, root1, true);
+        let root2 = make_panel(&mut tree);
+        pm.open(PanelKind::CharacterFinder, root2, true);
 
         assert_eq!(pm.len(), 1);
-        assert_eq!(pm.root_id("x"), Some(root2));
-        // Draw order should have only one entry for "x".
+        assert_eq!(pm.root_id(PanelKind::CharacterFinder), Some(root2));
+        // Draw order should have only one entry.
         assert_eq!(pm.draw_order().len(), 1);
     }
 
@@ -284,13 +284,13 @@ mod tests {
         let mut pm = PanelManager::new();
         let t0 = Instant::now();
 
-        let root = make_panel(&mut tree, "panel");
-        pm.open("panel", root, true);
-        pm.close_animated("panel", Duration::from_millis(200), t0);
+        let root = make_panel(&mut tree);
+        pm.open(PanelKind::Settings, root, true);
+        pm.close_animated(PanelKind::Settings, Duration::from_millis(200), t0);
 
         // Panel is no longer "open" but widget still exists in tree.
-        assert!(!pm.is_open("panel"));
-        assert!(pm.is_closing("panel"));
+        assert!(!pm.is_open(PanelKind::Settings));
+        assert!(pm.is_closing(PanelKind::Settings));
         assert!(
             tree.get(root).is_some(),
             "widget still in tree during animation"
@@ -303,28 +303,18 @@ mod tests {
         let mut pm = PanelManager::new();
         let t0 = Instant::now();
 
-        let root = make_panel(&mut tree, "panel");
-        pm.open("panel", root, true);
-        pm.close_animated("panel", Duration::from_millis(200), t0);
+        let root = make_panel(&mut tree);
+        pm.open(PanelKind::SaveLoad, root, true);
+        pm.close_animated(PanelKind::SaveLoad, Duration::from_millis(200), t0);
 
         // Before deadline: widget survives.
         pm.flush_closed(&mut tree, t0 + Duration::from_millis(100));
         assert!(tree.get(root).is_some());
-        assert!(pm.is_closing("panel"));
+        assert!(pm.is_closing(PanelKind::SaveLoad));
 
         // After deadline: widget removed.
         pm.flush_closed(&mut tree, t0 + Duration::from_millis(200));
         assert!(tree.get(root).is_none());
-        assert!(!pm.is_closing("panel"));
-    }
-
-    #[test]
-    fn scroll_offset_persists_across_close_reopen() {
-        let mut pm = PanelManager::new();
-        pm.save_scroll_offset("finder", 42.0);
-        assert!((pm.scroll_offset("finder") - 42.0).abs() < 0.01);
-
-        // Unknown panel returns 0.
-        assert!(pm.scroll_offset("unknown").abs() < 0.01);
+        assert!(!pm.is_closing(PanelKind::SaveLoad));
     }
 }

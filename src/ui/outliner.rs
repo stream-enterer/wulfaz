@@ -84,7 +84,10 @@ pub fn build_outliner(
             },
         );
         tree.set_sizing(row, Sizing::Fixed(content_w - 16.0), Sizing::Fit);
-        tree.set_on_click(row, format!("outliner::character:{}", ch.entity_id));
+        tree.set_on_click(
+            row,
+            super::UiAction::OutlinerSelectCharacter(crate::components::Entity(ch.entity_id)),
+        );
 
         tree.insert(
             row,
@@ -146,7 +149,10 @@ pub fn build_outliner(
             },
         );
         tree.set_sizing(evt_label, Sizing::Fixed(content_w - 16.0), Sizing::Fit);
-        tree.set_on_click(evt_label, format!("outliner::event:{}", evt.callback));
+        tree.set_on_click(
+            evt_label,
+            super::UiAction::OutlinerSelectEvent(evt.callback.clone()),
+        );
     }
 
     if info.active_events.is_empty() {

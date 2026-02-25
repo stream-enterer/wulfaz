@@ -101,7 +101,7 @@ pub fn build_map_mode_selector(
             font_size: theme.font_data_size,
         },
     );
-    tree.set_on_click(dropdown, "map_mode::change");
+    tree.set_on_click(dropdown, super::UiAction::MapModeChange);
 
     // Speed label
     tree.insert(
@@ -127,7 +127,7 @@ pub fn build_map_mode_selector(
             width: 80.0,
         },
     );
-    tree.set_on_click(slider, "map_mode::speed");
+    tree.set_on_click(slider, super::UiAction::MapModeSpeed);
 
     // Speed value label
     tree.insert(
