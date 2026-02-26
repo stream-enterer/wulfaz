@@ -126,7 +126,6 @@ pub struct World {
     // Entity tracking
     pub alive: HashSet<Entity>,
     pub pending_deaths: HashSet<Entity>,
-    #[allow(dead_code)]
     next_entity_id: u64,
 
     // Sub-struct property tables
@@ -169,7 +168,6 @@ impl World {
         }
     }
 
-    #[allow(dead_code)]
     /// Spawn a new entity. Returns the Entity with a unique ID.
     /// The entity is added to the alive set but has no components yet.
     pub fn spawn(&mut self) -> Entity {

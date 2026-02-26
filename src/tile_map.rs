@@ -53,7 +53,7 @@ impl Terrain {
         }
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used by write_binary serialization path
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -75,7 +75,7 @@ impl Terrain {
 }
 
 /// Chunk coordinate — identifies a 64×64 chunk in the world grid.
-#[allow(dead_code)]
+#[allow(dead_code)] // Used in tests and by upcoming render chunking
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkCoord {
     pub cx: i32,

@@ -1,9 +1,7 @@
 use crate::components::Tick;
 use crate::world::World;
 
-pub fn run_death(world: &mut World, tick: Tick) {
-    let _ = tick; // available for future use
-
+pub fn run_death(world: &mut World, _tick: Tick) {
     let to_despawn: Vec<_> = world.pending_deaths.drain().collect();
     for entity in to_despawn {
         world.despawn(entity);

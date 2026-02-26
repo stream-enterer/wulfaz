@@ -61,7 +61,7 @@ pub struct CombatStats {
 /// Gait tier — determines movement speed. All creatures share the same
 /// slow gaits (Creep/Stroll/Walk); fast gaits differ by body plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
+#[allow(dead_code)] // Only Walk/Sprint used so far; other tiers needed by gait system design
 pub enum Gait {
     Creep,  // 29 ticks/tile — 3.4 tiles/sec
     Stroll, // 19 ticks/tile — 5.3 tiles/sec
@@ -80,7 +80,6 @@ pub struct GaitProfile {
 
 impl GaitProfile {
     /// Get the ticks-per-tile cooldown for a gait.
-    #[allow(dead_code)]
     pub fn cooldown(&self, gait: Gait) -> u32 {
         self.cooldowns[gait as usize]
     }

@@ -12,7 +12,7 @@ pub struct BuildingId(pub u32);
 pub struct BlockId(pub u16);
 
 /// Placeholder for address data, populated by A07.
-#[allow(dead_code)]
+#[allow(dead_code)] // Populated by GIS loading; read by upcoming street/address systems
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Address {
     pub street_name: String,
@@ -20,7 +20,7 @@ pub struct Address {
 }
 
 /// Occupant data from SoDUCo directories, populated by A07.
-#[allow(dead_code)]
+#[allow(dead_code)] // Populated by GIS loading; read by B03 entity spawning + C04 district stats
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Occupant {
     pub name: String,
@@ -28,7 +28,7 @@ pub struct Occupant {
     pub naics: String,
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Fields populated by GIS loading; read by B06 interiors + C04 district stats
 #[derive(Clone, Serialize, Deserialize)]
 pub struct BuildingData {
     pub id: BuildingId,
@@ -86,7 +86,7 @@ impl BuildingData {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Populated by GIS loading; read by C01 district definitions
 #[derive(Clone, Serialize, Deserialize)]
 pub struct BlockData {
     pub id: BlockId,
@@ -131,7 +131,7 @@ impl BuildingRegistry {
         BuildingId(self.buildings.len() as u32 + 1)
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used in tests; needed by B06 + C04
     pub fn get(&self, id: BuildingId) -> Option<&BuildingData> {
         if id.0 == 0 {
             return None;
@@ -139,7 +139,7 @@ impl BuildingRegistry {
         self.buildings.get(id.0 as usize - 1)
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Needed by B06 interior generation
     pub fn get_mut(&mut self, id: BuildingId) -> Option<&mut BuildingData> {
         if id.0 == 0 {
             return None;
@@ -148,7 +148,7 @@ impl BuildingRegistry {
     }
 
     /// Find all buildings sharing a cadastral parcel Identif.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used in tests; needed for multi-building parcel queries
     pub fn get_by_identif(&self, identif: u32) -> &[BuildingId] {
         self.identif_index
             .get(&identif)
@@ -160,7 +160,7 @@ impl BuildingRegistry {
         self.buildings.len()
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Standard container method
     pub fn is_empty(&self) -> bool {
         self.buildings.is_empty()
     }
@@ -182,7 +182,7 @@ impl BlockRegistry {
         self.blocks.insert(data.id, data);
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used in tests; needed by C01 district definitions
     pub fn get(&self, id: BlockId) -> Option<&BlockData> {
         self.blocks.get(&id)
     }
@@ -192,7 +192,7 @@ impl BlockRegistry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StreetId(pub u16);
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Populated by GIS loading; read by upcoming street-based systems
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StreetData {
     pub name: String,
@@ -200,7 +200,7 @@ pub struct StreetData {
 }
 
 /// Street registry, reconstructed from building address data at load time.
-#[allow(dead_code)]
+#[allow(dead_code)] // Populated by GIS loading; fields read by upcoming street-based systems
 #[derive(Default)]
 pub struct StreetRegistry {
     pub streets: HashMap<StreetId, StreetData>,

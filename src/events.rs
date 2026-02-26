@@ -4,7 +4,7 @@ use crate::components::{Entity, Tick};
 /// Fields are structural data stored in the ring buffer — not all are read
 /// in every code path, but all are part of the event record.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[allow(dead_code)] // Variants logged to ring buffer; consumed by upcoming UI-001 entity inspection
 pub enum Event {
     Spawned {
         entity: Entity,

@@ -63,7 +63,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
         .filter_map(|(&e, cs)| {
             let pos = world.body.positions.get(&e)?;
-            let _health = world.body.healths.get(&e)?;
+            world.body.healths.get(&e)?;
             Some((e, pos.x, pos.y, cs.aggression))
         })
         .collect();
