@@ -4,7 +4,7 @@ use crate::world::World;
 pub fn run_death(world: &mut World, tick: Tick) {
     let _ = tick; // available for future use
 
-    let to_despawn: Vec<_> = world.pending_deaths.drain(..).collect();
+    let to_despawn: Vec<_> = world.pending_deaths.drain().collect();
     for entity in to_despawn {
         world.despawn(entity);
     }
@@ -29,7 +29,7 @@ mod tests {
             },
         );
 
-        world.pending_deaths.push(e);
+        world.pending_deaths.insert(e);
         run_death(&mut world, Tick(0));
 
         assert!(!world.alive.contains(&e));
@@ -43,8 +43,8 @@ mod tests {
         let mut world = World::new_with_seed(42);
         let e1 = world.spawn();
         let e2 = world.spawn();
-        world.pending_deaths.push(e1);
-        world.pending_deaths.push(e2);
+        world.pending_deaths.insert(e1);
+        world.pending_deaths.insert(e2);
 
         run_death(&mut world, Tick(0));
 
@@ -58,7 +58,7 @@ mod tests {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
         world.body.positions.insert(e, Position { x: 0, y: 0 });
-        world.pending_deaths.push(e);
+        world.pending_deaths.insert(e);
 
         run_death(&mut world, Tick(0));
         validate_world(&world); // should pass — no zombies

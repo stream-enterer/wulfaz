@@ -250,20 +250,34 @@ enum PlayerAction {
 }
 
 fn run_one_tick(world: &mut World) {
-    world.rebuild_spatial_index();
+    macro_rules! timed {
+        ($label:expr, $body:expr) => {{
+            let _t = std::time::Instant::now();
+            $body;
+            let _us = _t.elapsed().as_micros();
+            if _us > 500 {
+                log::warn!("  tick sys {}: {}us", $label, _us);
+            }
+        }};
+    }
+    // Spatial contract: Phase 2-3 (needs, decisions) see pre-movement positions.
+    // Phase 4 (eating, combat) sees post-movement positions.
+    // Adding a new position-mutating system requires placing a rebuild after it.
+    timed!("spatial1", world.rebuild_spatial_index());
     let tick = world.tick;
-    run_temperature(world, tick);
-    run_hunger(world, tick);
-    run_fatigue(world, tick);
-    run_decisions(world, tick);
-    run_wander(world, tick);
-    // Rebuild spatial index after movement so eating/combat see post-move positions.
-    world.rebuild_spatial_index();
-    run_eating(world, tick);
-    run_combat(world, tick);
-    run_death(world, tick);
+    timed!("temperature", run_temperature(world, tick));
+    timed!("hunger", run_hunger(world, tick));
+    timed!("fatigue", run_fatigue(world, tick));
+    timed!("decisions", run_decisions(world, tick));
+    timed!("wander", run_wander(world, tick));
+    // Spatial contract (rebuild 2 of 2): after wander mutates positions,
+    // eating/combat need post-movement positions for same-tile checks.
+    timed!("spatial2", world.rebuild_spatial_index());
+    timed!("eating", run_eating(world, tick));
+    timed!("combat", run_combat(world, tick));
+    timed!("death", run_death(world, tick));
     #[cfg(debug_assertions)]
-    world::validate_world(world);
+    timed!("validate", world::validate_world(world));
     world.tick = Tick(tick.0 + 1);
 }
 
@@ -931,6 +945,8 @@ impl ApplicationHandler for App {
                     }
                     WindowEvent::RedrawRequested => {
                         // === Tick processing ===
+                        let sim_start = Instant::now();
+                        let mut sim_ticks_this_frame = 0u32;
                         if self.world.player.is_some() {
                             // Roguelike: advance on player action only
                             if let Some(action) = self.pending_player_action.take() {
@@ -965,6 +981,7 @@ impl ApplicationHandler for App {
                                         };
                                         if can_move {
                                             run_one_tick(&mut self.world);
+                                            sim_ticks_this_frame += 1;
                                             let cooldown = self
                                                 .world
                                                 .body
@@ -974,6 +991,7 @@ impl ApplicationHandler for App {
                                                 .unwrap_or(0);
                                             for _ in 0..cooldown {
                                                 run_one_tick(&mut self.world);
+                                                sim_ticks_this_frame += 1;
                                             }
                                         }
                                     }
@@ -998,6 +1016,7 @@ impl ApplicationHandler for App {
                                         );
                                         for _ in 0..base {
                                             run_one_tick(&mut self.world);
+                                            sim_ticks_this_frame += 1;
                                         }
                                     }
                                 }
@@ -1009,18 +1028,18 @@ impl ApplicationHandler for App {
                             self.last_frame_time = now;
                             self.tick_accumulator += dt * self.sim_speed as f64;
 
-                            let mut ticks_this_frame = 0u32;
                             while self.tick_accumulator >= SIM_TICK_INTERVAL
-                                && ticks_this_frame < MAX_TICKS_PER_FRAME
+                                && sim_ticks_this_frame < MAX_TICKS_PER_FRAME
                             {
                                 run_one_tick(&mut self.world);
                                 self.tick_accumulator -= SIM_TICK_INTERVAL;
-                                ticks_this_frame += 1;
+                                sim_ticks_this_frame += 1;
                             }
                         } else {
                             // Paused: keep frame time current to avoid tick burst on unpause.
                             self.last_frame_time = Instant::now();
                         }
+                        let sim_us = sim_start.elapsed().as_micros() as u64;
 
                         // === Render ===
                         if let (Some(font), Some(panel)) = (self.font.as_mut(), self.panel.as_mut())
@@ -1692,6 +1711,8 @@ impl ApplicationHandler for App {
 
                             // Capture perf metrics (UI-505) — one-frame lag.
                             self.ui_perf = ui::UiPerfMetrics {
+                                sim_us,
+                                sim_ticks: sim_ticks_this_frame,
                                 build_us,
                                 layout_us,
                                 draw_us,
@@ -1702,7 +1723,14 @@ impl ApplicationHandler for App {
                                 sprite_cmds: draw_list.sprites.len(),
                             };
 
-                            // Warn when any UI phase exceeds 2ms (UI-505).
+                            // Warn when any phase exceeds 2ms (UI-505).
+                            if sim_us > 2000 {
+                                log::warn!(
+                                    "Sim phase slow: {}us ({} ticks)",
+                                    sim_us,
+                                    sim_ticks_this_frame,
+                                );
+                            }
                             if build_us > 2000 {
                                 log::warn!("UI build phase slow: {}us", build_us);
                             }

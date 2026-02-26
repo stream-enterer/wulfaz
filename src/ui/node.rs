@@ -10,6 +10,10 @@ use super::widget::{self, Widget};
 /// Per-frame UI performance metrics. Stored on App, displayed one frame late.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UiPerfMetrics {
+    /// Time spent in simulation ticks this frame (microseconds).
+    pub sim_us: u64,
+    /// Number of simulation ticks run this frame.
+    pub sim_ticks: u32,
     /// Time spent in build phase (microseconds).
     pub build_us: u64,
     /// Time spent in layout phase (microseconds).

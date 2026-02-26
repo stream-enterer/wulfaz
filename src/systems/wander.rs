@@ -304,7 +304,7 @@ mod tests {
         let e = world.spawn();
         world.body.positions.insert(e, Position { x: 5, y: 5 });
         world.body.gait_profiles.insert(e, GaitProfile::biped());
-        world.pending_deaths.push(e);
+        world.pending_deaths.insert(e);
         run_wander(&mut world, Tick(0));
         assert_eq!(world.body.positions[&e].x, 5);
         assert_eq!(world.body.positions[&e].y, 5);

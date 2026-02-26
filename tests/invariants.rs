@@ -267,7 +267,7 @@ fn dead_entities_removed_from_all_tables() {
 
     // Kill half of them manually
     for &e in &entities[..5] {
-        world.pending_deaths.push(e);
+        world.pending_deaths.insert(e);
     }
 
     run_death(&mut world, Tick(0));

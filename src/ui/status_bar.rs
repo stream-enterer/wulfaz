@@ -120,7 +120,9 @@ pub fn build_status_bar(tree: &mut WidgetTree, theme: &Theme, info: &StatusBarIn
         spans.push(sep());
         spans.push(TextSpan {
             text: format!(
-                "UI: build {:.1}ms | layout {:.1}ms | draw {:.1}ms | render {:.1}ms | {}w",
+                "sim {:.1}ms/{}t | build {:.1} | layout {:.1} | draw {:.1} | render {:.1}ms | {}w",
+                perf.sim_us as f64 / 1000.0,
+                perf.sim_ticks,
                 perf.build_us as f64 / 1000.0,
                 perf.layout_us as f64 / 1000.0,
                 perf.draw_us as f64 / 1000.0,
@@ -181,6 +183,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         let kb = KeyBindings::defaults();
         let perf = UiPerfMetrics {
+            sim_us: 500,
+            sim_ticks: 2,
             build_us: 300,
             layout_us: 100,
             draw_us: 200,
@@ -209,8 +213,9 @@ mod tests {
             // With perf: 5 normal + sep + perf = 7 spans.
             assert_eq!(spans.len(), 7);
             let perf_span = &spans[6];
-            assert!(perf_span.text.contains("build 0.3ms"));
-            assert!(perf_span.text.contains("layout 0.1ms"));
+            assert!(perf_span.text.contains("sim 0.5ms/2t"));
+            assert!(perf_span.text.contains("build 0.3"));
+            assert!(perf_span.text.contains("layout 0.1"));
             assert!(perf_span.text.contains("42w"));
         } else {
             panic!("expected RichText");

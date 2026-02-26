@@ -46,8 +46,6 @@ pub fn run_eating(world: &mut World, tick: Tick) {
         // Fallback: first food at same position via spatial index
         let mut candidates: Vec<(Entity, f32)> = world
             .entities_at(*ex, *ey)
-            .iter()
-            .copied()
             .filter(|e| !consumed.contains(e))
             .filter(|e| !world.pending_deaths.contains(e))
             .filter_map(|e| {
@@ -80,7 +78,7 @@ pub fn run_eating(world: &mut World, tick: Tick) {
             tick,
         });
         world.events.push(Event::Died { entity: food, tick });
-        world.pending_deaths.push(food);
+        world.pending_deaths.insert(food);
     }
 }
 
@@ -155,7 +153,7 @@ mod tests {
                 max: 100.0,
             },
         );
-        world.pending_deaths.push(eater);
+        world.pending_deaths.insert(eater);
 
         let food = world.spawn();
         world.body.positions.insert(food, Position { x: 5, y: 5 });

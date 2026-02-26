@@ -277,10 +277,34 @@ pub fn run_decisions(world: &mut World, _tick: Tick) {
             let mut product: f32 = 1.0;
             let n = action_def.considerations.len() as f32;
 
+            let mut pruned = false;
             for consideration in &action_def.considerations {
                 let input = read_input(&consideration.input, world, entity);
                 let score = evaluate_curve(&consideration.curve, input);
                 product *= score;
+
+                // Zero product → geo_mean will be 0 regardless of remaining
+                if product == 0.0 {
+                    pruned = true;
+                    break;
+                }
+
+                // Max possible score if all remaining considerations score 1.0
+                let max_geo_mean = product.powf(1.0 / n);
+                let max_score = max_geo_mean * action_def.weight
+                    + if Some(action_id) == current_action {
+                        action_def.inertia_bonus
+                    } else {
+                        0.0
+                    };
+                if max_score <= best_score {
+                    pruned = true;
+                    break;
+                }
+            }
+
+            if pruned {
+                continue;
             }
 
             // Geometric mean
@@ -835,7 +859,7 @@ mod tests {
         assert!(world.mind.intentions.contains_key(&e));
 
         // Kill entity
-        world.pending_deaths.push(e);
+        world.pending_deaths.insert(e);
         run_decisions(&mut world, Tick(1));
         // Intentions should be cleared (dead entity skipped)
         assert!(!world.mind.intentions.contains_key(&e));

@@ -57,7 +57,7 @@ pub fn run_fatigue(world: &mut World, tick: Tick) {
                 health.current = (health.current - total_damage).max(0.0);
                 if health.current <= 0.0 {
                     world.events.push(Event::Died { entity: e, tick });
-                    world.pending_deaths.push(e);
+                    world.pending_deaths.insert(e);
                 }
             }
         }
@@ -159,7 +159,7 @@ mod tests {
         let mut world = World::new_with_seed(42);
         let e = world.spawn();
         world.body.fatigues.insert(e, Fatigue { current: 50.0 });
-        world.pending_deaths.push(e);
+        world.pending_deaths.insert(e);
 
         run_fatigue(&mut world, Tick(0));
         assert_eq!(world.body.fatigues[&e].current, 50.0);

@@ -79,7 +79,7 @@ mod tests {
                 max: 100.0,
             },
         );
-        world.pending_deaths.push(e);
+        world.pending_deaths.insert(e);
         run_hunger(&mut world, Tick(0));
         assert_eq!(world.mind.hungers[&e].current, 50.0); // unchanged
     }

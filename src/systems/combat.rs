@@ -121,8 +121,6 @@ pub fn run_combat(world: &mut World, tick: Tick) {
             // Spatial index lookup: find first valid combatant at same tile
             let mut candidates: Vec<Entity> = world
                 .entities_at(ax, ay)
-                .iter()
-                .copied()
                 .filter(|&e| e != attacker)
                 .filter(|e| !world.pending_deaths.contains(e))
                 .filter(|e| world.body.combat_stats.contains_key(e))
@@ -161,7 +159,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
                     entity: defender,
                     tick,
                 });
-                world.pending_deaths.push(defender);
+                world.pending_deaths.insert(defender);
             }
         }
     }
@@ -355,7 +353,7 @@ mod tests {
                 aggression: 1.0,
             },
         );
-        world.pending_deaths.push(attacker); // already dying
+        world.pending_deaths.insert(attacker); // already dying
 
         let defender = world.spawn();
         world

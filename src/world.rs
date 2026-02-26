@@ -1,9 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
 use rand::rngs::StdRng;
-use smallvec::SmallVec;
 
 use crate::components::*;
+
+/// Spatial index cell size in tiles (meters). Power of 2 for bit-shift.
+const SPATIAL_CELL_SHIFT: i32 = 4; // 2^4 = 16m cells
+
+/// Coarse spatial grid: cell coords → list of (entity, x, y) in that cell.
+pub(crate) type SpatialGrid = HashMap<(i32, i32), Vec<(Entity, i32, i32)>>;
+
 use crate::events::EventLog;
 use crate::registry::{BlockRegistry, BuildingRegistry, StreetRegistry};
 use crate::rng::create_rng;
@@ -119,7 +125,7 @@ impl GisTables {
 pub struct World {
     // Entity tracking
     pub alive: HashSet<Entity>,
-    pub pending_deaths: Vec<Entity>,
+    pub pending_deaths: HashSet<Entity>,
     #[allow(dead_code)]
     next_entity_id: u64,
 
@@ -129,8 +135,8 @@ pub struct World {
     pub gis: GisTables,
 
     // Spatial acceleration
-    /// Tile-based spatial index, rebuilt from positions each tick.
-    pub spatial_index: HashMap<(i32, i32), SmallVec<[Entity; 4]>>,
+    /// Coarse spatial index, rebuilt from positions each tick.
+    pub spatial_index: SpatialGrid,
 
     // Infrastructure
     pub tiles: TileMap,
@@ -148,7 +154,7 @@ impl World {
     pub fn new_with_seed(seed: u64) -> Self {
         Self {
             alive: HashSet::new(),
-            pending_deaths: Vec::new(),
+            pending_deaths: HashSet::new(),
             next_entity_id: 1, // 0 is reserved/unused
 
             body: BodyTables::new(),
@@ -182,32 +188,47 @@ impl World {
         self.spatial_index.clear();
         for (&entity, pos) in &self.body.positions {
             if self.alive.contains(&entity) {
+                let key = (pos.x >> SPATIAL_CELL_SHIFT, pos.y >> SPATIAL_CELL_SHIFT);
                 self.spatial_index
-                    .entry((pos.x, pos.y))
+                    .entry(key)
                     .or_default()
-                    .push(entity);
+                    .push((entity, pos.x, pos.y));
             }
         }
     }
 
     /// Return all entities at a given tile coordinate.
-    pub fn entities_at(&self, x: i32, y: i32) -> &[Entity] {
+    pub fn entities_at(&self, x: i32, y: i32) -> impl Iterator<Item = Entity> + '_ {
+        let key = (x >> SPATIAL_CELL_SHIFT, y >> SPATIAL_CELL_SHIFT);
         self.spatial_index
-            .get(&(x, y))
-            .map(SmallVec::as_slice)
-            .unwrap_or(&[])
+            .get(&key)
+            .into_iter()
+            .flat_map(|v| v.iter())
+            .filter(move |(_, ex, ey)| *ex == x && *ey == y)
+            .map(|(e, _, _)| *e)
     }
 
     /// Return all entities within Chebyshev distance `range` of (cx, cy).
-    /// Uses the spatial index for O(range²) tile lookups instead of full entity scan.
+    /// Scans coarse grid cells, filters by exact Chebyshev distance.
     pub fn entities_in_range(
         &self,
         cx: i32,
         cy: i32,
         range: i32,
     ) -> impl Iterator<Item = Entity> + '_ {
-        (-range..=range).flat_map(move |dy| {
-            (-range..=range).flat_map(move |dx| self.entities_at(cx + dx, cy + dy).iter().copied())
+        let min_x = (cx - range) >> SPATIAL_CELL_SHIFT;
+        let max_x = (cx + range) >> SPATIAL_CELL_SHIFT;
+        let min_y = (cy - range) >> SPATIAL_CELL_SHIFT;
+        let max_y = (cy + range) >> SPATIAL_CELL_SHIFT;
+        (min_y..=max_y).flat_map(move |cell_y| {
+            (min_x..=max_x).flat_map(move |cell_x| {
+                self.spatial_index
+                    .get(&(cell_x, cell_y))
+                    .into_iter()
+                    .flat_map(|v| v.iter())
+                    .filter(move |(_, ex, ey)| (*ex - cx).abs().max((*ey - cy).abs()) <= range)
+                    .map(|(e, _, _)| *e)
+            })
         })
     }
 
@@ -543,17 +564,17 @@ mod tests {
 
         world.rebuild_spatial_index();
 
-        let at_5_10 = world.entities_at(5, 10);
+        let at_5_10: Vec<Entity> = world.entities_at(5, 10).collect();
         assert_eq!(at_5_10.len(), 2);
         assert!(at_5_10.contains(&e1));
         assert!(at_5_10.contains(&e2));
 
-        let at_3_7 = world.entities_at(3, 7);
+        let at_3_7: Vec<Entity> = world.entities_at(3, 7).collect();
         assert_eq!(at_3_7.len(), 1);
         assert!(at_3_7.contains(&e3));
 
-        // Empty tile returns empty slice.
-        assert!(world.entities_at(0, 0).is_empty());
+        // Empty tile returns empty iterator.
+        assert_eq!(world.entities_at(0, 0).count(), 0);
     }
 
     #[test]
@@ -569,7 +590,7 @@ mod tests {
 
         world.rebuild_spatial_index();
 
-        let at_1_1 = world.entities_at(1, 1);
+        let at_1_1: Vec<Entity> = world.entities_at(1, 1).collect();
         assert_eq!(at_1_1.len(), 1);
         assert!(at_1_1.contains(&alive));
         assert!(!at_1_1.contains(&dead));
@@ -600,15 +621,15 @@ mod tests {
         world.body.positions.insert(e, Position { x: 2, y: 3 });
 
         world.rebuild_spatial_index();
-        assert_eq!(world.entities_at(2, 3).len(), 1);
+        assert_eq!(world.entities_at(2, 3).count(), 1);
 
         // Move entity to new position and rebuild.
         world.body.positions.insert(e, Position { x: 8, y: 9 });
         world.rebuild_spatial_index();
 
         // Old position is now empty, new position has the entity.
-        assert!(world.entities_at(2, 3).is_empty());
-        assert_eq!(world.entities_at(8, 9).len(), 1);
-        assert!(world.entities_at(8, 9).contains(&e));
+        assert_eq!(world.entities_at(2, 3).count(), 0);
+        assert_eq!(world.entities_at(8, 9).count(), 1);
+        assert!(world.entities_at(8, 9).any(|x| x == e));
     }
 }
