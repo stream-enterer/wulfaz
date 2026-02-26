@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::BinaryHeap;
 use std::fmt;
 use std::io::{self, Read, Write};
 
@@ -633,8 +633,10 @@ impl TileMap {
             return Some(Vec::new());
         }
 
-        let map_w = self.width as i32;
-        let map_h = self.height as i32;
+        let w = self.width;
+        let h = self.height;
+        let map_w = w as i32;
+        let map_h = h as i32;
 
         // Bounds check
         if start.0 < 0 || start.0 >= map_w || start.1 < 0 || start.1 >= map_h {
@@ -659,6 +661,14 @@ impl TileMap {
             (-1, -1),
         ];
 
+        let total = w * h;
+
+        // Flat index from (x, y) coordinates
+        let idx = |x: i32, y: i32| -> usize { y as usize * w + x as usize };
+
+        // Convert flat index back to (x, y) coordinates
+        let to_xy = |i: u32| -> (i32, i32) { ((i as usize % w) as i32, (i as usize / w) as i32) };
+
         // Octile distance heuristic (consistent for 8-dir with √2 diagonal cost)
         let heuristic = |a: (i32, i32), b: (i32, i32)| -> u32 {
             let dx = (a.0 - b.0).unsigned_abs();
@@ -668,58 +678,67 @@ impl TileMap {
             diag * DIAGONAL_COST + card * CARDINAL_COST
         };
 
+        // Flat arrays replacing HashMap/HashSet — indexed by y * width + x
+        let mut g_score = vec![u32::MAX; total];
+        let mut came_from = vec![u32::MAX; total]; // u32::MAX = no parent sentinel
+        let mut closed = vec![false; total];
+
         // Open set: min-heap of (f_score, x, y)
         let mut open: BinaryHeap<Reverse<(u32, i32, i32)>> = BinaryHeap::new();
-        let mut came_from: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
-        let mut g_score: HashMap<(i32, i32), u32> = HashMap::new();
-        let mut closed: HashSet<(i32, i32)> = HashSet::new();
 
-        g_score.insert(start, 0);
+        let start_idx = idx(start.0, start.1);
+        g_score[start_idx] = 0;
         open.push(Reverse((heuristic(start, goal), start.0, start.1)));
 
         let mut expanded = 0;
 
         while let Some(Reverse((_, cx, cy))) = open.pop() {
-            let current = (cx, cy);
+            let ci = idx(cx, cy);
 
-            if current == goal {
-                // Reconstruct path
+            if (cx, cy) == goal {
+                // Reconstruct path from flat came_from indices
                 let mut path = Vec::new();
-                let mut node = goal;
-                while node != start {
-                    path.push(node);
-                    node = came_from[&node];
+                let mut ni = ci;
+                let goal_idx = idx(goal.0, goal.1);
+                // Walk back from goal to start
+                debug_assert_eq!(ni, goal_idx);
+                while ni != start_idx {
+                    let (px, py) = to_xy(ni as u32);
+                    path.push((px, py));
+                    ni = came_from[ni] as usize;
                 }
                 path.reverse();
                 return Some(path);
             }
 
-            if !closed.insert(current) {
+            if closed[ci] {
                 continue;
             }
+            closed[ci] = true;
 
             expanded += 1;
             if expanded > MAX_EXPANDED {
                 return None;
             }
 
-            let current_g = g_score[&current];
+            let current_g = g_score[ci];
 
             for (dx, dy) in DIRS {
                 let nx = cx + dx;
                 let ny = cy + dy;
-                let neighbor = (nx, ny);
 
                 if nx < 0 || nx >= map_w || ny < 0 || ny >= map_h {
                     continue;
                 }
 
                 // Goal is always reachable (entity/item is already there)
-                if neighbor != goal && !self.is_walkable(nx as usize, ny as usize) {
+                if (nx, ny) != goal && !self.is_walkable(nx as usize, ny as usize) {
                     continue;
                 }
 
-                if closed.contains(&neighbor) {
+                let ni = idx(nx, ny);
+
+                if closed[ni] {
                     continue;
                 }
 
@@ -731,10 +750,10 @@ impl TileMap {
                 };
                 let new_g = current_g + step_cost;
 
-                if new_g < *g_score.get(&neighbor).unwrap_or(&u32::MAX) {
-                    g_score.insert(neighbor, new_g);
-                    came_from.insert(neighbor, current);
-                    let f = new_g + heuristic(neighbor, goal);
+                if new_g < g_score[ni] {
+                    g_score[ni] = new_g;
+                    came_from[ni] = ci as u32;
+                    let f = new_g + heuristic((nx, ny), goal);
                     open.push(Reverse((f, nx, ny)));
                 }
             }
