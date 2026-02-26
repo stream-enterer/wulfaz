@@ -146,65 +146,6 @@ Skip any step and you will create zombie entity bugs.
 3. For lethal events: push AFTER the decision, BEFORE `pending_deaths.push()`
 4. For non-lethal events: push immediately after the state change
 
-## UI Architecture
-
-The UI layer mirrors the simulation layer's principles. `WidgetTree` is
-the UI's `World`. Builders are the UI's systems. Operations (layout, draw,
-hit-test) are the UI's phases.
-
-- **UiContext** is a struct of pub sub-fields for all persistent UI state.
-  Sub-fields are pub for Rust's field-level split borrowing. All persistent
-  UI state goes here — do not put ad-hoc UI state on App.
-- **WidgetTree** is ephemeral — destroyed and rebuilt from scratch every
-  frame. It is NOT persistent state.
-- **Builders** are free functions: `fn build_*(tree: &mut WidgetTree, ...) -> WidgetId`.
-  One builder per file in `src/ui/`.
-- **Widget** is a closed enum. Exhaustive match in layout and draw.
-  No trait objects.
-- **UiAction** enum for callbacks.
-- **PanelKind** enum for panel identity. No string names.
-- **Theme** is a flat struct, const-constructible. Passed by `&Theme`.
-  Not part of UiContext (immutable configuration).
-- **One concern per file**: tree operations split across `tree_*.rs`,
-  one type per infrastructure file.
-- `mod.rs` is module declarations + re-exports only. No function bodies.
-- No traits between UI modules. Exception: `TextMeasurer` at the
-  hardware boundary.
-
-## UI Frame Lifecycle
-
-```
-Build    → Destroy old tree, construct new WidgetTree via builders.
-Layout   → tree.layout(screen_size, &mut measurer). Measure + position.
-Draw     → tree.draw(&mut draw_list, &mut measurer). Z-tier order.
-Input    → ui.input.handle_*(tree, event). Hit-test → UiAction.
-Dispatch → match action { ... }. Mutate UiContext/World state.
-```
-
-No dirty tracking. No retained tree state. No diff-and-patch.
-
-## Adding a New UI Panel/Screen
-
-1. Create `src/ui/new_panel.rs` with `NewPanelInfo` struct (pub fields),
-   `collect_new_panel_info()` data-gather function, and `build_new_panel()`
-   builder. Builders receive `&Info`, never `&World` directly.
-2. Add `pub(crate) mod new_panel;` + re-export to `src/ui/mod.rs`
-3. Add `PanelKind::NewPanel` variant to `src/ui/action.rs`
-4. Call the builder in the build phase in `main.rs`
-5. Write tests in `#[cfg(test)] mod tests` at the bottom of the file
-
-## Adding a New Widget Variant
-
-1. Add the variant to `Widget` enum in `src/ui/widget.rs`
-2. Add measure/layout in `tree_layout.rs`, draw in `tree_draw.rs`
-3. Write tests. `cargo build` catches unhandled match arms.
-
-## Adding a New UiAction
-
-1. Add the variant to `UiAction` in `src/ui/action.rs`
-2. Set it on the widget: `tree.set_on_click(id, UiAction::NewAction)`
-3. Handle it in `dispatch_click` in `main.rs` — no `_ =>` arm
-
 ## Testing
 
 Every new system MUST ship with a unit test. Construct a minimal World
