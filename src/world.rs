@@ -8,7 +8,7 @@ use crate::components::*;
 const SPATIAL_CELL_SHIFT: i32 = 4; // 2^4 = 16m cells
 
 /// Coarse spatial grid: cell coords → list of (entity, x, y) in that cell.
-pub(crate) type SpatialGrid = HashMap<(i32, i32), Vec<(Entity, i32, i32)>>;
+pub type SpatialGrid = HashMap<(i32, i32), Vec<(Entity, i32, i32)>>;
 
 use crate::events::EventLog;
 use crate::registry::{BlockRegistry, BuildingRegistry, StreetRegistry};

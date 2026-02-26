@@ -7,29 +7,23 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{Window, WindowId};
 
-mod components;
-mod events;
-mod font;
-mod loading;
-mod loading_gis;
-mod panel;
-mod registry;
-mod render;
-mod rng;
-mod systems;
-mod tile_map;
-mod world;
-
-use components::Tick;
-use systems::combat::run_combat;
-use systems::death::run_death;
-use systems::decisions::run_decisions;
-use systems::eating::run_eating;
-use systems::fatigue::run_fatigue;
-use systems::hunger::run_hunger;
-use systems::temperature::run_temperature;
-use systems::wander::run_wander;
-use world::World;
+use wulfaz::components;
+use wulfaz::components::Tick;
+use wulfaz::font;
+use wulfaz::loading;
+use wulfaz::loading_gis;
+use wulfaz::panel;
+use wulfaz::render;
+use wulfaz::systems::combat::run_combat;
+use wulfaz::systems::death::run_death;
+use wulfaz::systems::decisions::run_decisions;
+use wulfaz::systems::eating::run_eating;
+use wulfaz::systems::fatigue::run_fatigue;
+use wulfaz::systems::hunger::run_hunger;
+use wulfaz::systems::temperature::run_temperature;
+use wulfaz::systems::wander::run_wander;
+use wulfaz::world;
+use wulfaz::world::World;
 
 /// Convert sRGB component (0-1) to linear for use as wgpu clear color.
 fn srgb_to_linear(s: f64) -> f64 {
