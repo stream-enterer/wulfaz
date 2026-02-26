@@ -289,7 +289,7 @@ impl ApplicationHandler for App {
             &gpu.device,
             &gpu.queue,
             gpu.surface_format(),
-            9.0,
+            10.0,
             window.scale_factor(),
         );
 
@@ -423,7 +423,7 @@ impl ApplicationHandler for App {
                             &gpu.device,
                             &gpu.queue,
                             gpu.surface_format(),
-                            9.0,
+                            10.0,
                             scale_factor,
                         ));
                         self.panel =
