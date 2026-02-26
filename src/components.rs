@@ -148,6 +148,14 @@ pub struct WanderTarget {
     pub goal_y: i32,
 }
 
+/// Cached A* path: remaining steps toward a goal.
+/// Avoids recomputing A* every move tick for the same destination.
+#[derive(Debug, Clone)]
+pub struct CachedPath {
+    pub steps: Vec<(i32, i32)>,
+    pub goal: (i32, i32),
+}
+
 /// The building where this entity lives.
 #[allow(dead_code)] // Wired into loading → despawn → validate_world; SIM systems will read
 pub struct HomeBuilding(pub BuildingId);

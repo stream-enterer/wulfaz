@@ -62,6 +62,7 @@ pub struct MindTables {
     pub intentions: HashMap<Entity, Intention>,
     pub action_states: HashMap<Entity, ActionState>,
     pub wander_targets: HashMap<Entity, WanderTarget>,
+    pub cached_paths: HashMap<Entity, CachedPath>,
     pub occupations: HashMap<Entity, Occupation>,
     pub utility_config: UtilityConfig,
 }
@@ -74,6 +75,7 @@ impl MindTables {
             intentions: HashMap::new(),
             action_states: HashMap::new(),
             wander_targets: HashMap::new(),
+            cached_paths: HashMap::new(),
             occupations: HashMap::new(),
             utility_config: UtilityConfig::default(),
         }
@@ -85,6 +87,7 @@ impl MindTables {
         self.intentions.remove(entity);
         self.action_states.remove(entity);
         self.wander_targets.remove(entity);
+        self.cached_paths.remove(entity);
         self.occupations.remove(entity);
     }
 }
@@ -359,6 +362,14 @@ pub fn validate_world(world: &World) {
         );
     }
 
+    for entity in world.mind.cached_paths.keys() {
+        assert!(
+            world.alive.contains(entity),
+            "zombie entity {:?} in cached_paths but not in alive",
+            entity
+        );
+    }
+
     for entity in world.mind.occupations.keys() {
         assert!(
             world.alive.contains(entity),
@@ -466,6 +477,13 @@ mod tests {
                 goal_y: 7,
             },
         );
+        world.mind.cached_paths.insert(
+            e,
+            CachedPath {
+                steps: vec![(4, 7), (5, 7)],
+                goal: (5, 7),
+            },
+        );
         world.mind.occupations.insert(
             e,
             Occupation {
@@ -499,6 +517,7 @@ mod tests {
         assert!(!world.mind.intentions.contains_key(&e));
         assert!(!world.mind.action_states.contains_key(&e));
         assert!(!world.mind.wander_targets.contains_key(&e));
+        assert!(!world.mind.cached_paths.contains_key(&e));
         assert!(!world.mind.occupations.contains_key(&e));
         assert!(!world.gis.home_buildings.contains_key(&e));
         assert!(!world.gis.workplaces.contains_key(&e));

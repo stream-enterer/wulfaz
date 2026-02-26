@@ -1,4 +1,6 @@
-use crate::components::{ActionId, Entity, Gait, MoveCooldown, Position, Tick, WanderTarget};
+use crate::components::{
+    ActionId, CachedPath, Entity, Gait, MoveCooldown, Position, Tick, WanderTarget,
+};
 use crate::events::Event;
 use crate::tile_map::is_diagonal_step;
 use crate::world::World;
@@ -38,6 +40,7 @@ pub fn run_wander(world: &mut World, tick: Tick) {
     let mut moves: Vec<(Entity, Position)> = Vec::new();
     let mut cooldown_updates: Vec<(Entity, u32)> = Vec::new();
     let mut wander_target_updates: Vec<(Entity, Option<WanderTarget>)> = Vec::new();
+    let mut cached_path_updates: Vec<(Entity, Option<CachedPath>)> = Vec::new();
 
     for e in candidates {
         let remaining = world
@@ -76,61 +79,144 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             continue;
         }
 
+        let is_tracking = action == Some(ActionId::Eat) || action == Some(ActionId::Attack);
+
         // Determine goal position
-        let goal: Option<(i32, i32)> = match action {
-            Some(ActionId::Eat) | Some(ActionId::Attack) => {
-                // Pathfind to target entity's position
-                intention
-                    .and_then(|i| i.target)
-                    .and_then(|t| world.body.positions.get(&t))
-                    .map(|p| (p.x, p.y))
-            }
-            _ => {
-                // Wander or no intention: use cached wander target or pick new
-                let at_goal = world
+        let goal: Option<(i32, i32)> = if is_tracking {
+            // Pathfind to target entity's position (moving target)
+            intention
+                .and_then(|i| i.target)
+                .and_then(|t| world.body.positions.get(&t))
+                .map(|p| (p.x, p.y))
+        } else {
+            // Wander or no intention: use cached wander target or pick new
+            let at_goal = world
+                .mind
+                .wander_targets
+                .get(&e)
+                .is_some_and(|wt| wt.goal_x == pos.x && wt.goal_y == pos.y);
+
+            if !at_goal {
+                world
                     .mind
                     .wander_targets
                     .get(&e)
-                    .is_some_and(|wt| wt.goal_x == pos.x && wt.goal_y == pos.y);
-
-                if !at_goal {
-                    world
-                        .mind
-                        .wander_targets
-                        .get(&e)
-                        .map(|wt| (wt.goal_x, wt.goal_y))
-                } else {
-                    None
-                }
-                .or_else(|| {
-                    // Pick new random walkable destination
-                    for _ in 0..5 {
-                        let dx = world.rng.random_range(-WANDER_RANGE..=WANDER_RANGE);
-                        let dy = world.rng.random_range(-WANDER_RANGE..=WANDER_RANGE);
-                        if dx == 0 && dy == 0 {
-                            continue;
-                        }
-                        let gx = (pos.x + dx).clamp(0, (map_w - 1).max(0));
-                        let gy = (pos.y + dy).clamp(0, (map_h - 1).max(0));
-                        if gx == pos.x && gy == pos.y {
-                            continue;
-                        }
-                        if world.tiles.is_walkable(gx as usize, gy as usize) {
-                            return Some((gx, gy));
-                        }
-                    }
-                    None
-                })
+                    .map(|wt| (wt.goal_x, wt.goal_y))
+            } else {
+                None
             }
+            .or_else(|| {
+                // Pick new random walkable destination
+                for _ in 0..5 {
+                    let dx = world.rng.random_range(-WANDER_RANGE..=WANDER_RANGE);
+                    let dy = world.rng.random_range(-WANDER_RANGE..=WANDER_RANGE);
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let gx = (pos.x + dx).clamp(0, (map_w - 1).max(0));
+                    let gy = (pos.y + dy).clamp(0, (map_h - 1).max(0));
+                    if gx == pos.x && gy == pos.y {
+                        continue;
+                    }
+                    if world.tiles.is_walkable(gx as usize, gy as usize) {
+                        return Some((gx, gy));
+                    }
+                }
+                None
+            })
         };
 
-        // Try A* pathfinding
-        if let Some((gx, gy)) = goal
-            && let Some(path) = world.tiles.find_path((pos.x, pos.y), (gx, gy))
-        {
-            let step_count = 1.min(path.len());
-            if step_count > 0 {
-                let dest = path[step_count - 1];
+        let Some((gx, gy)) = goal else {
+            // No goal — fallback random step
+            let direction = world.rng.random_range(0..8);
+            let (dx, dy) = match direction {
+                0 => (0, -1),  // N
+                1 => (1, -1),  // NE
+                2 => (1, 0),   // E
+                3 => (1, 1),   // SE
+                4 => (0, 1),   // S
+                5 => (-1, 1),  // SW
+                6 => (-1, 0),  // W
+                _ => (-1, -1), // NW
+            };
+            let x = (pos.x + dx).clamp(0, (map_w - 1).max(0));
+            let y = (pos.y + dy).clamp(0, (map_h - 1).max(0));
+            let is_diag = is_diagonal_step((pos.x, pos.y), (x, y));
+            let reset = if is_diag {
+                base_cooldown * DIAGONAL_FACTOR / 100
+            } else {
+                base_cooldown
+            };
+            moves.push((e, Position { x, y }));
+            cooldown_updates.push((e, reset));
+            wander_target_updates.push((e, None));
+            cached_path_updates.push((e, None));
+            continue;
+        };
+
+        // For tracking intentions (Eat/Attack), always invalidate cached path
+        // since the target may have moved. For wander, try to reuse cached path.
+        let cached_step = if !is_tracking {
+            world
+                .mind
+                .cached_paths
+                .get(&e)
+                .filter(|cp| cp.goal == (gx, gy))
+                .and_then(|cp| cp.steps.first().copied())
+        } else {
+            None
+        };
+
+        if let Some(dest) = cached_step {
+            // Use cached path: pop the first step
+            let is_diag = is_diagonal_step((pos.x, pos.y), dest);
+            let reset = if is_diag {
+                base_cooldown * DIAGONAL_FACTOR / 100
+            } else {
+                base_cooldown
+            };
+            moves.push((
+                e,
+                Position {
+                    x: dest.0,
+                    y: dest.1,
+                },
+            ));
+            cooldown_updates.push((e, reset));
+
+            // Advance cached path (remove consumed step)
+            let remaining_steps: Vec<(i32, i32)> = world.mind.cached_paths[&e].steps[1..].to_vec();
+            if remaining_steps.is_empty() {
+                // Path exhausted — clear target and cached path
+                wander_target_updates.push((e, None));
+                cached_path_updates.push((e, None));
+            } else {
+                wander_target_updates.push((
+                    e,
+                    Some(WanderTarget {
+                        goal_x: gx,
+                        goal_y: gy,
+                    }),
+                ));
+                cached_path_updates.push((
+                    e,
+                    Some(CachedPath {
+                        steps: remaining_steps,
+                        goal: (gx, gy),
+                    }),
+                ));
+            }
+        } else if let Some(path) = world.tiles.find_path((pos.x, pos.y), (gx, gy)) {
+            // Compute fresh A* path
+            if path.is_empty() {
+                // Already at goal
+                cooldown_updates.push((e, base_cooldown));
+                if !is_tracking {
+                    wander_target_updates.push((e, None));
+                }
+                cached_path_updates.push((e, None));
+            } else {
+                let dest = path[0];
                 let is_diag = is_diagonal_step((pos.x, pos.y), dest);
                 let reset = if is_diag {
                     base_cooldown * DIAGONAL_FACTOR / 100
@@ -145,52 +231,60 @@ pub fn run_wander(world: &mut World, tick: Tick) {
                     },
                 ));
                 cooldown_updates.push((e, reset));
-            } else {
-                cooldown_updates.push((e, base_cooldown));
-            }
 
-            // Update wander target for Wander/no-intention entities
-            if action != Some(ActionId::Eat) && action != Some(ActionId::Attack) {
-                if step_count >= path.len() {
-                    // Arrived (or will arrive) — clear target
-                    wander_target_updates.push((e, None));
+                if !is_tracking {
+                    if path.len() <= 1 {
+                        // Will arrive this step — clear target
+                        wander_target_updates.push((e, None));
+                        cached_path_updates.push((e, None));
+                    } else {
+                        wander_target_updates.push((
+                            e,
+                            Some(WanderTarget {
+                                goal_x: gx,
+                                goal_y: gy,
+                            }),
+                        ));
+                        // Cache remaining steps (skip the one we just consumed)
+                        cached_path_updates.push((
+                            e,
+                            Some(CachedPath {
+                                steps: path[1..].to_vec(),
+                                goal: (gx, gy),
+                            }),
+                        ));
+                    }
                 } else {
-                    wander_target_updates.push((
-                        e,
-                        Some(WanderTarget {
-                            goal_x: gx,
-                            goal_y: gy,
-                        }),
-                    ));
+                    // Tracking: don't cache (target moves), invalidate any stale cache
+                    cached_path_updates.push((e, None));
                 }
             }
-            continue;
-        }
-
-        // Fallback: single random 8-directional step
-        let direction = world.rng.random_range(0..8);
-        let (dx, dy) = match direction {
-            0 => (0, -1),  // N
-            1 => (1, -1),  // NE
-            2 => (1, 0),   // E
-            3 => (1, 1),   // SE
-            4 => (0, 1),   // S
-            5 => (-1, 1),  // SW
-            6 => (-1, 0),  // W
-            _ => (-1, -1), // NW
-        };
-        // Clamp to tilemap bounds
-        let x = (pos.x + dx).clamp(0, (map_w - 1).max(0));
-        let y = (pos.y + dy).clamp(0, (map_h - 1).max(0));
-        let is_diag = is_diagonal_step((pos.x, pos.y), (x, y));
-        let reset = if is_diag {
-            base_cooldown * DIAGONAL_FACTOR / 100
         } else {
-            base_cooldown
-        };
-        moves.push((e, Position { x, y }));
-        cooldown_updates.push((e, reset));
-        wander_target_updates.push((e, None));
+            // A* failed — fallback random step
+            let direction = world.rng.random_range(0..8);
+            let (dx, dy) = match direction {
+                0 => (0, -1),  // N
+                1 => (1, -1),  // NE
+                2 => (1, 0),   // E
+                3 => (1, 1),   // SE
+                4 => (0, 1),   // S
+                5 => (-1, 1),  // SW
+                6 => (-1, 0),  // W
+                _ => (-1, -1), // NW
+            };
+            let x = (pos.x + dx).clamp(0, (map_w - 1).max(0));
+            let y = (pos.y + dy).clamp(0, (map_h - 1).max(0));
+            let is_diag = is_diagonal_step((pos.x, pos.y), (x, y));
+            let reset = if is_diag {
+                base_cooldown * DIAGONAL_FACTOR / 100
+            } else {
+                base_cooldown
+            };
+            moves.push((e, Position { x, y }));
+            cooldown_updates.push((e, reset));
+            wander_target_updates.push((e, None));
+            cached_path_updates.push((e, None));
+        }
     }
 
     // Apply cooldown updates
@@ -207,6 +301,15 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             world.mind.wander_targets.insert(e, wt);
         } else {
             world.mind.wander_targets.remove(&e);
+        }
+    }
+
+    // Apply cached path updates
+    for (e, cached) in cached_path_updates {
+        if let Some(cp) = cached {
+            world.mind.cached_paths.insert(e, cp);
+        } else {
+            world.mind.cached_paths.remove(&e);
         }
     }
 
