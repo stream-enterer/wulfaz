@@ -96,6 +96,7 @@ pub struct FontRenderer {
     ft_faces: HashMap<cosmic_text::fontdb::ID, freetype::Face>,
     ft_load_flags: LoadFlag,
     dpi: u32, // stored for set_char_size calls at different sizes
+    mono_font_id: Option<cosmic_text::fontdb::ID>, // for on-demand codepoint rasterization
 
     // Atlas management for dynamic glyph addition
     atlas_texture: wgpu::Texture,
@@ -418,6 +419,7 @@ impl FontRenderer {
             ft_faces,
             ft_load_flags,
             dpi,
+            mono_font_id,
             atlas_texture,
             atlas_data,
             atlas_width,
@@ -841,6 +843,132 @@ impl FontRenderer {
         Some(info)
     }
 
+    /// Rasterize a codepoint on demand for the mono face (map/grid text).
+    /// Inserts into both `self.glyphs` (codepoint-keyed) and `self.shaped_glyphs`.
+    fn rasterize_codepoint_on_demand(&mut self, cp: u32) -> Option<GlyphInfo> {
+        if let Some(info) = self.glyphs.get(&cp) {
+            return Some(*info);
+        }
+
+        let mono_id = self.mono_font_id?;
+        let ft_face = self.ft_faces.get(&mono_id)?;
+
+        // Ensure mono face is set to base size
+        let size_26_6 = (self.font_size_px * 64.0 / (self.dpi as f32 / 72.0)).ceil() as isize;
+        if ft_face
+            .set_char_size(0, size_26_6, self.dpi, self.dpi)
+            .is_err()
+        {
+            return None;
+        }
+
+        // Check if the font has this codepoint
+        let glyph_index = ft_face.get_char_index(cp as usize);
+        if glyph_index.is_none() || glyph_index == Some(0) {
+            return None;
+        }
+
+        if ft_face.load_char(cp as usize, self.ft_load_flags).is_err() {
+            return None;
+        }
+
+        let glyph_slot = ft_face.glyph();
+        let bitmap = glyph_slot.bitmap();
+        let w = bitmap.width() as u32;
+        let h = bitmap.rows() as u32;
+
+        if w == 0 || h == 0 {
+            let info = GlyphInfo {
+                width: 0,
+                height: 0,
+                bearing_x: 0,
+                bearing_y: 0,
+                u0: 0.0,
+                v0: 0.0,
+                u1: 0.0,
+                v1: 0.0,
+            };
+            self.glyphs.insert(cp, info);
+            return Some(info);
+        }
+
+        let padding: u32 = 1;
+
+        if self.atlas_shelf_x + w + padding > self.atlas_width {
+            self.atlas_shelf_y += self.atlas_shelf_height + padding;
+            self.atlas_shelf_x = 0;
+            self.atlas_shelf_height = 0;
+        }
+
+        if self.atlas_shelf_y + h > self.atlas_height {
+            log::warn!("glyph atlas full, cannot add codepoint U+{:04X}", cp);
+            return None;
+        }
+
+        let pos_x = self.atlas_shelf_x;
+        let pos_y = self.atlas_shelf_y;
+        self.atlas_shelf_height = self.atlas_shelf_height.max(h);
+        self.atlas_shelf_x += w + padding;
+
+        let pitch = bitmap.pitch();
+        let buf = bitmap.buffer();
+        let abs_pitch = pitch.unsigned_abs() as usize;
+        let mut pixels = Vec::with_capacity((w * h) as usize);
+        for row in 0..h {
+            let src_row = if pitch >= 0 {
+                row as usize
+            } else {
+                (h - 1 - row) as usize
+            };
+            let start = src_row * abs_pitch;
+            let end = start + w as usize;
+            pixels.extend_from_slice(&buf[start..end]);
+        }
+
+        for row in 0..h {
+            let src_start = (row * w) as usize;
+            let dst_start = ((pos_y + row) * self.atlas_width + pos_x) as usize;
+            self.atlas_data[dst_start..dst_start + w as usize]
+                .copy_from_slice(&pixels[src_start..src_start + w as usize]);
+        }
+
+        self.pending_atlas_uploads.push(PendingGlyphUpload {
+            x: pos_x,
+            y: pos_y,
+            width: w,
+            height: h,
+            pixels,
+        });
+
+        let aw = self.atlas_width as f32;
+        let ah = self.atlas_height as f32;
+        let info = GlyphInfo {
+            width: w,
+            height: h,
+            bearing_x: glyph_slot.bitmap_left(),
+            bearing_y: glyph_slot.bitmap_top(),
+            u0: pos_x as f32 / aw,
+            v0: pos_y as f32 / ah,
+            u1: (pos_x + w) as f32 / aw,
+            v1: (pos_y + h) as f32 / ah,
+        };
+        self.glyphs.insert(cp, info);
+
+        // Also insert into shaped_glyphs for consistency
+        if let Some(gid) = glyph_index {
+            self.shaped_glyphs.insert(
+                GlyphCacheKey {
+                    font_id: mono_id,
+                    font_size_bits: self.font_size_px.to_bits(),
+                    glyph_id: gid as u16,
+                },
+                info,
+            );
+        }
+
+        Some(info)
+    }
+
     /// Layout and shape text using cosmic-text, then build vertices.
     /// Supports any font loaded into the fontdb and any pixel size.
     fn prepare_text_shaped(
@@ -980,12 +1108,15 @@ impl FontRenderer {
             let cp = ch as u32;
             let glyph = match self.glyphs.get(&cp) {
                 Some(g) => *g,
-                None => match question {
+                None => match self.rasterize_codepoint_on_demand(cp) {
                     Some(g) => g,
-                    None => {
-                        pen_x += grid.h_advance;
-                        continue;
-                    }
+                    None => match question {
+                        Some(g) => g,
+                        None => {
+                            pen_x += grid.h_advance;
+                            continue;
+                        }
+                    },
                 },
             };
 

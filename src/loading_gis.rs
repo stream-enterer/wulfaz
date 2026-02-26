@@ -1875,7 +1875,7 @@ pub fn spawn_gis_entities(world: &mut World, target_quartier: &str) {
                         value: name.to_string(),
                     },
                 );
-                world.body.icons.insert(e, Icon { ch: '☻' });
+                world.body.icons.insert(e, Icon { ch: '☺' });
                 world.body.positions.insert(e, Position { x, y });
                 world.body.healths.insert(
                     e,
@@ -5322,8 +5322,8 @@ mod tests {
             assert!((5..8).contains(&pos.x), "x={} out of range", pos.x);
             assert!((5..8).contains(&pos.y), "y={} out of range", pos.y);
 
-            // Icon is ☻.
-            assert_eq!(world.body.icons.get(e).unwrap().ch, '☻');
+            // Icon is ☺.
+            assert_eq!(world.body.icons.get(e).unwrap().ch, '☺');
 
             // Has HomeBuilding and Workplace pointing to building 1.
             assert_eq!(world.gis.home_buildings.get(e).unwrap().0, bid);

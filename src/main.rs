@@ -1781,14 +1781,29 @@ fn main() {
 
     loading_gis::spawn_gis_entities(&mut world, "Arcis");
 
-    // Start camera overlooking the Seine near Ile de la Cité / Notre-Dame
-    let start_camera = Camera {
-        x: 3750,
-        y: 3450,
-        target_x: 3750.0,
-        target_y: 3450.0,
-        zoom: 1.0,
-        target_zoom: 1.0,
+    // Center camera on the Arcis quartier (centroid of spawned entity positions).
+    let start_camera = {
+        let (mut sum_x, mut sum_y, mut count) = (0i64, 0i64, 0u32);
+        for &e in &world.alive {
+            if let Some(pos) = world.body.positions.get(&e) {
+                sum_x += pos.x as i64;
+                sum_y += pos.y as i64;
+                count += 1;
+            }
+        }
+        let (cx, cy) = if count > 0 {
+            ((sum_x / count as i64) as i32, (sum_y / count as i64) as i32)
+        } else {
+            (3750, 3450) // fallback: Seine near Île de la Cité
+        };
+        Camera {
+            x: cx,
+            y: cy,
+            target_x: cx as f32,
+            target_y: cy as f32,
+            zoom: 1.0,
+            target_zoom: 1.0,
+        }
     };
 
     // Minimap texture (UI-407): blank base, viewport indicator stamped per-frame.
