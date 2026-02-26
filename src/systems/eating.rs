@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::components::{ActionId, Entity, Tick};
 use crate::events::Event;
 use crate::world::World;
@@ -26,7 +28,7 @@ pub fn run_eating(world: &mut World, tick: Tick) {
 
     // Find food items at same positions using spatial index
     let mut eat_actions: Vec<(Entity, Entity, f32)> = Vec::new(); // (eater, food, nutrition)
-    let mut consumed: Vec<Entity> = Vec::new();
+    let mut consumed: HashSet<Entity> = HashSet::new();
 
     for (eater, ex, ey, _) in &hungry {
         // Prefer intention target if set and valid (same tile, has nutrition)
@@ -40,7 +42,7 @@ pub fn run_eating(world: &mut World, tick: Tick) {
             && n.value > 0.0
         {
             eat_actions.push((*eater, target, n.value));
-            consumed.push(target);
+            consumed.insert(target);
             continue;
         }
         // Fallback: first food at same position via spatial index
@@ -61,7 +63,7 @@ pub fn run_eating(world: &mut World, tick: Tick) {
 
         if let Some(&(food_entity, nutrition_value)) = candidates.first() {
             eat_actions.push((*eater, food_entity, nutrition_value));
-            consumed.push(food_entity);
+            consumed.insert(food_entity);
         }
     }
 
