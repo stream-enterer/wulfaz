@@ -88,23 +88,6 @@ impl EventLog {
         })
     }
 
-    /// Return the most recent n events (newest last).
-    pub fn recent(&self, n: usize) -> Vec<&Event> {
-        let n = n.min(self.count);
-        let start = if self.count < self.capacity {
-            self.count.saturating_sub(n)
-        } else {
-            (self.write_pos + self.capacity - n) % self.capacity
-        };
-
-        (0..n)
-            .filter_map(|i| {
-                let idx = (start + i) % self.capacity;
-                self.buffer[idx].as_ref()
-            })
-            .collect()
-    }
-
     /// Total number of events currently stored.
     #[allow(dead_code)] // Used via lib crate in integration tests
     pub fn len(&self) -> usize {
@@ -168,42 +151,6 @@ mod tests {
     }
 
     #[test]
-    fn recent_returns_correct_events() {
-        let mut log = EventLog::new(10);
-        for i in 0..5 {
-            log.push(make_spawned(i, i));
-        }
-
-        let recent = log.recent(3);
-        let ticks: Vec<u64> = recent.iter().map(|e| event_tick(e)).collect();
-        assert_eq!(ticks, vec![2, 3, 4]);
-    }
-
-    #[test]
-    fn recent_after_wrap() {
-        let mut log = EventLog::new(3);
-        for i in 0..7 {
-            log.push(make_spawned(i, i));
-        }
-
-        let recent = log.recent(2);
-        let ticks: Vec<u64> = recent.iter().map(|e| event_tick(e)).collect();
-        assert_eq!(ticks, vec![5, 6]);
-    }
-
-    #[test]
-    fn recent_more_than_available() {
-        let mut log = EventLog::new(10);
-        log.push(make_spawned(1, 0));
-        log.push(make_spawned(2, 1));
-
-        let recent = log.recent(100);
-        assert_eq!(recent.len(), 2);
-        let ticks: Vec<u64> = recent.iter().map(|e| event_tick(e)).collect();
-        assert_eq!(ticks, vec![0, 1]);
-    }
-
-    #[test]
     fn default_capacity_is_10000() {
         let log = EventLog::default_capacity();
         assert_eq!(log.capacity, 10_000);
@@ -216,7 +163,6 @@ mod tests {
         assert!(log.is_empty());
         assert_eq!(log.len(), 0);
         assert_eq!(log.iter().count(), 0);
-        assert!(log.recent(10).is_empty());
     }
 
     #[test]
