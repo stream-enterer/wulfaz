@@ -118,6 +118,86 @@ All creatures default to Walk gait at spawn. Fast gaits are used situationally
 (fleeing, charging) — not as permanent speed. `gaits` field in KDL selects
 the profile: `"biped"` or `"quadruped"`.
 
+## Performance Rules
+
+Hard budget: **10,000μs per tick** at 100 ticks/sec. LOD (Phase C) caps active
+entities at ~4K; entity-count costs are bounded by the active zone.
+
+### Iteration
+
+- **One driving table per system.** All other data access via point lookup
+  (`HashMap::get`). Iterate the smallest table that captures needed entities.
+- **Filter ordering: cheapest rejection first.** Chain `.filter()` calls from
+  cheapest (pending_deaths check) to most expensive (spatial query).
+- **Cooldown = early exit.** Systems with cooldown mechanics must test the timer
+  first and skip in O(1) — no secondary lookups or allocation for entities
+  still on cooldown.
+- **No nested O(n) entity loops.** Inner loop must be bounded by a spatial
+  query, fixed-size collection, or constant.
+
+### Data Structures
+
+- **Direct lookup over spatial query.** If you have an `Entity` ID, use
+  `positions.get(&entity)` not a spatial scan.
+- **Flat array for tile-indexed data.** `Vec` indexed by `y * width + x`, never
+  `HashMap<(i32, i32), T>`.
+- **HashSet for membership testing.** Never `Vec::contains()` inside a loop.
+
+### Spatial Queries
+
+- **Minimum range.** Every `entities_in_range` call uses the minimum range for
+  the system's design, defined as a named const with real-world justification.
+- **Pre-filter before querying.** O(1) checks before spatial queries. Never
+  call spatial queries for all n entities unconditionally.
+
+### Pathfinding
+
+- **Cache paths.** Never call `find_path` per entity per tick. Check
+  `cached_paths` first; reuse until invalidated by goal change, blockage, or
+  exhaustion.
+- **Pool A* workspace.** Pooled buffers with generation-counter clearing, not
+  fresh allocations per call. Flat arrays on the 6309×4753 production map cost
+  ~270MB per call.
+- **Terrain invalidation.** When terrain walkability changes, invalidate cached
+  paths through affected tiles. Cache must store assumptions (goal, terrain
+  generation). Never invalidate by tick count alone.
+- **Moving-target hysteresis.** Re-path only when target has moved >K tiles
+  from cached goal, not every tick.
+
+### Phase Budgets
+
+Extends the phase classification above with performance constraints:
+
+- **Phase 1:** Chunk-level dirty flags. O(active_chunks), not O(total_tiles).
+- **Phase 2:** O(n), at most one secondary lookup per entity. No spatial
+  queries, no pathfinding. Events only on state transitions, not every tick.
+- **Phase 3:** Every spatial query needs a result cap or staggering mechanism.
+- **Phase 4:** Spatial index is stale between movement and rebuild — a system
+  inserted between `run_wander` and `rebuild_spatial_index` sees inconsistent
+  state.
+- **Phase 5:** Iterate only the affected set (pending_deaths, event triggers).
+  Never the full entity population.
+
+### Scaling Awareness
+
+Production map: 6,309 × 4,753 tiles (~30M tiles), ~1M population. LOD caps
+active entities at ~4K; the rest are district aggregate models.
+
+Geometry concerns unaffected by LOD:
+- **A* workspace** on full map costs ~270MB per call. Path caching remains
+  critical until HPA* (SCALE-D03).
+- **Terrain topology** (doorways, bridges, winding streets) forces 2–5× more
+  A* node expansion than open terrain.
+
+LOD-specific costs:
+- **Hydration** (D01/D02) batch-spawns ~100 entities/tick — allocation-heavy
+  across all tables.
+- **District model** (C04) must stay O(district_count), not
+  O(statistical_population).
+
+Each new property table increases despawn and hydration cost. Each new system
+adds sort + lookup cost proportional to active entity count.
+
 ## Adding a New System
 
 1. Create `src/systems/new_system.rs`
