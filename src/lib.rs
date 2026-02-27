@@ -7,6 +7,7 @@ pub mod panel;
 pub mod registry;
 pub mod render;
 pub mod rng;
+pub mod settings;
 pub mod systems;
 pub mod tile_map;
 pub mod world;

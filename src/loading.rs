@@ -8,7 +8,7 @@ use crate::tile_map::Terrain;
 use crate::world::World;
 
 /// Parse a KDL file and return the document. Logs a warning and returns None on failure.
-fn parse_kdl_file(path: &str) -> Option<kdl::KdlDocument> {
+pub fn parse_kdl_file(path: &str) -> Option<kdl::KdlDocument> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => {
@@ -22,6 +22,17 @@ fn parse_kdl_file(path: &str) -> Option<kdl::KdlDocument> {
             log::warn!("failed to parse KDL {}: {}", path, e);
             None
         }
+    }
+}
+
+/// Write a KDL file. Debug-asserts that the content is valid KDL before writing.
+pub fn write_kdl_file(path: &str, content: &str) {
+    debug_assert!(
+        content.parse::<kdl::KdlDocument>().is_ok(),
+        "write_kdl_file: produced invalid KDL for {path}:\n{content}",
+    );
+    if let Err(e) = std::fs::write(path, content) {
+        log::warn!("failed to write {}: {}", path, e);
     }
 }
 

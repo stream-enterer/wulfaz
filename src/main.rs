@@ -15,6 +15,7 @@ use wulfaz::loading;
 use wulfaz::loading_gis;
 use wulfaz::panel;
 use wulfaz::render;
+use wulfaz::settings::Settings;
 use wulfaz::systems::combat::run_combat;
 use wulfaz::systems::death::run_death;
 use wulfaz::systems::decisions::run_decisions;
@@ -53,9 +54,7 @@ struct GpuState {
 }
 
 impl GpuState {
-    fn new(window: Arc<Window>) -> Self {
-        let size = window.inner_size();
-
+    fn new(window: Arc<Window>, size: winit::dpi::PhysicalSize<u32>) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
@@ -248,6 +247,7 @@ struct App {
     gpu: Option<GpuState>,
     font: Option<font::FontRenderer>,
     panel: Option<panel::PanelRenderer>,
+    settings: Settings,
     world: World,
     camera: Camera,
     last_frame_time: Instant,
@@ -266,6 +266,20 @@ struct App {
     viewport_rows: usize,
 }
 
+impl App {
+    fn save_window_state(&mut self) {
+        if let Some(gpu) = &self.gpu {
+            let physical = winit::dpi::PhysicalSize::new(gpu.config.width, gpu.config.height);
+            let logical: winit::dpi::LogicalSize<f64> =
+                physical.to_logical(gpu.window.scale_factor());
+            self.settings.window_width = logical.width;
+            self.settings.window_height = logical.height;
+            self.settings.window_maximized = gpu.window.is_maximized();
+            self.settings.save();
+        }
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.gpu.is_some() {
@@ -275,10 +289,24 @@ impl ApplicationHandler for App {
         let attrs = Window::default_attributes()
             .with_title("Wulfaz")
             .with_name("wulfaz", "wulfaz")
-            .with_inner_size(winit::dpi::LogicalSize::new(800.0, 600.0));
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                self.settings.window_width,
+                self.settings.window_height,
+            ))
+            .with_maximized(self.settings.window_maximized);
 
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
-        let gpu = GpuState::new(window.clone());
+        let initial_size = if !self.settings.window_maximized {
+            window
+                .request_inner_size(winit::dpi::LogicalSize::new(
+                    self.settings.window_width,
+                    self.settings.window_height,
+                ))
+                .unwrap_or_else(|| window.inner_size())
+        } else {
+            window.inner_size()
+        };
+        let gpu = GpuState::new(window.clone(), initial_size);
 
         let font_renderer = font::FontRenderer::new(
             &gpu.device,
@@ -331,7 +359,10 @@ impl ApplicationHandler for App {
                 }
                 self.camera.target_zoom = new_zoom;
             }
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.save_window_state();
+                event_loop.exit();
+            }
             // Everything below requires GPU
             other => {
                 let Some(gpu) = self.gpu.as_mut() else {
@@ -363,6 +394,7 @@ impl ApplicationHandler for App {
                                 if self.selected_entity.is_some() {
                                     self.selected_entity = None;
                                 } else {
+                                    self.save_window_state();
                                     event_loop.exit();
                                 }
                             }
@@ -834,11 +866,14 @@ fn main() {
         }
     };
 
+    let settings = Settings::load();
+
     let event_loop = EventLoop::new().expect("create event loop");
     let mut app = App {
         gpu: None,
         font: None,
         panel: None,
+        settings,
         world,
         camera: start_camera,
         last_frame_time: Instant::now(),

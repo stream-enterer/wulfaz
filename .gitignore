@@ -11,6 +11,9 @@ data/paris.meta.ron
 data/paris.ron.zst
 data/.preprocess.stamp
 
+# User settings (generated at runtime)
+settings.kdl
+
 # IDE
 .idea
 .vscode
