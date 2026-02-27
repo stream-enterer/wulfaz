@@ -25,11 +25,13 @@ pub fn run_wander(world: &mut World, tick: Tick) {
     let map_w = world.tiles.width() as i32;
     let map_h = world.tiles.height() as i32;
 
-    // Collect entities that have both position and gait profile, sorted for determinism
+    // Collect entities that have both position and gait profile, sorted for determinism.
+    // Skip the player entity — player movement is handled directly in main.rs.
     let mut candidates: Vec<Entity> = world
         .body
         .positions
         .keys()
+        .filter(|e| world.player != Some(**e))
         .filter(|e| world.body.gait_profiles.contains_key(e))
         .filter(|e| !world.pending_deaths.contains(e))
         .copied()

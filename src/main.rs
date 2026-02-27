@@ -492,10 +492,36 @@ impl ApplicationHandler for App {
                                 candidates.sort_by_key(|e| e.0);
                                 if let Some(e) = candidates.first().copied() {
                                     if self.world.player == Some(e) {
+                                        // Deselect: restore AI state on released entity
+                                        let walk_cd = self
+                                            .world
+                                            .body
+                                            .gait_profiles
+                                            .get(&e)
+                                            .map(|p| p.cooldown(components::Gait::Walk))
+                                            .unwrap_or(9);
+                                        self.world.body.move_cooldowns.insert(
+                                            e,
+                                            components::MoveCooldown { remaining: walk_cd },
+                                        );
                                         self.world.player = None;
                                         self.last_frame_time = Instant::now();
                                         self.tick_accumulator = 0.0;
                                     } else {
+                                        // Switch: release old player first
+                                        if let Some(old) = self.world.player {
+                                            let walk_cd = self
+                                                .world
+                                                .body
+                                                .gait_profiles
+                                                .get(&old)
+                                                .map(|p| p.cooldown(components::Gait::Walk))
+                                                .unwrap_or(9);
+                                            self.world.body.move_cooldowns.insert(
+                                                old,
+                                                components::MoveCooldown { remaining: walk_cd },
+                                            );
+                                        }
                                         self.world.player = Some(e);
                                         self.world.body.move_cooldowns.remove(&e);
                                         self.world.mind.wander_targets.remove(&e);
@@ -542,7 +568,7 @@ impl ApplicationHandler for App {
                                 let player = self.world.player.expect("player entity");
                                 match action {
                                     PlayerAction::Move(dx, dy) => {
-                                        let can_move = if let Some(pos) =
+                                        let cooldown = if let Some(pos) =
                                             self.world.body.positions.get(&player)
                                         {
                                             let mw = self.world.tiles.width() as i32;
@@ -553,36 +579,60 @@ impl ApplicationHandler for App {
                                                 .world
                                                 .tiles
                                                 .is_walkable(tx as usize, ty as usize);
-                                            let diag_ok = !(dx != 0 && dy != 0)
+                                            let is_diag = dx != 0 && dy != 0;
+                                            let diag_ok = !is_diag
                                                 || self
                                                     .world
                                                     .tiles
                                                     .diagonal_clear(pos.x, pos.y, tx, ty);
                                             if walkable && diag_ok {
-                                                self.world.mind.wander_targets.insert(
+                                                // Compute cooldown from gait profile
+                                                let gait = self
+                                                    .world
+                                                    .body
+                                                    .current_gaits
+                                                    .get(&player)
+                                                    .copied()
+                                                    .unwrap_or(components::Gait::Walk);
+                                                let base = self
+                                                    .world
+                                                    .body
+                                                    .gait_profiles
+                                                    .get(&player)
+                                                    .map(|p| p.cooldown(gait))
+                                                    .unwrap_or(9);
+                                                let cd = if is_diag {
+                                                    base * 141 / 100 // √2 fixed-point
+                                                } else {
+                                                    base
+                                                };
+                                                // Move directly
+                                                let tick = self.world.tick;
+                                                self.world.body.positions.insert(
                                                     player,
-                                                    components::WanderTarget {
-                                                        goal_x: tx,
-                                                        goal_y: ty,
+                                                    components::Position { x: tx, y: ty },
+                                                );
+                                                self.world.events.push(
+                                                    wulfaz::events::Event::Moved {
+                                                        entity: player,
+                                                        x: tx,
+                                                        y: ty,
+                                                        tick,
                                                     },
                                                 );
-                                                true
+                                                // Clear stale AI state
+                                                self.world.mind.wander_targets.remove(&player);
+                                                self.world.mind.cached_paths.remove(&player);
+                                                Some(cd)
                                             } else {
-                                                false
+                                                None
                                             }
                                         } else {
-                                            false
+                                            None
                                         };
-                                        if can_move {
-                                            run_one_tick(&mut self.world);
-                                            let cooldown = self
-                                                .world
-                                                .body
-                                                .move_cooldowns
-                                                .get(&player)
-                                                .map(|cd| cd.remaining)
-                                                .unwrap_or(0);
-                                            for _ in 0..cooldown {
+                                        if let Some(cd) = cooldown {
+                                            // 1 action tick + cooldown wait ticks
+                                            for _ in 0..1 + cd {
                                                 run_one_tick(&mut self.world);
                                             }
                                         }
