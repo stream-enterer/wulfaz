@@ -4,15 +4,9 @@ This project includes or depends on the following third-party software:
 
 --------------------------------------------------------------------------------
 
-New Heterodox Mono (bundled font)
+Libertinus fonts (bundled)
 License: SIL Open Font License 1.1
-https://github.com/hckiang/font-new-heterodox-mono
-
-Copyright (C) 2006-2008 Alexey Kryukov <alexios@thessalonica.org.ru>
-Copyright (C) 2019 Hao Chi Kiang <hello@hckiang.com>
-
-Adapted from Alexey Kryukov's Old Standard TT. Bundled under the OFL 1.1;
-full license text in fonts/NewHeterodoxMono/OFL.txt.
+https://github.com/alerque/libertinus
 
 --------------------------------------------------------------------------------
 
@@ -81,14 +75,3 @@ kitty's approach to FreeType hinting flag selection, glyph atlas construction,
 monospace cell grid computation, and sRGB-aware contrast adjustment informed
 our implementation.
 
---------------------------------------------------------------------------------
-
-Crusader Kings III (design reference)
-Paradox Interactive / Paradox Development Studio
-https://www.crusaderkings.com
-
-The UI system in this project draws design inspiration from Crusader Kings III.
-CK3's publicly exposed GUI layer (game/gui/*.gui) was studied as a reference
-for UI layout patterns, window hierarchy, widget composition, HUD structure,
-and interaction flows. No Paradox assets, textures, code, or data files are
-included in this project. All implementation is original.
