@@ -628,144 +628,237 @@ impl TileMap {
     /// A* pathfinding from start to goal on the tile grid (8-directional, √2 diagonal cost).
     /// Returns the path as positions from start (exclusive) to goal (inclusive).
     /// Returns None if no path exists within the search limit.
+    ///
+    /// Convenience wrapper that allocates a temporary workspace. For hot paths
+    /// (production simulation), use the free function `find_path()` with a
+    /// reusable `PathWorkspace` instead.
     pub fn find_path(&self, start: (i32, i32), goal: (i32, i32)) -> Option<Vec<(i32, i32)>> {
-        if start == goal {
-            return Some(Vec::new());
-        }
-
-        let w = self.width;
-        let h = self.height;
-        let map_w = w as i32;
-        let map_h = h as i32;
-
-        // Bounds check
-        if start.0 < 0 || start.0 >= map_w || start.1 < 0 || start.1 >= map_h {
-            return None;
-        }
-        if goal.0 < 0 || goal.0 >= map_w || goal.1 < 0 || goal.1 >= map_h {
-            return None;
-        }
-
-        const CARDINAL_COST: u32 = 100;
-        const DIAGONAL_COST: u32 = 141; // √2 × 100, truncated
-
-        const MAX_EXPANDED: usize = 32_768;
-        const DIRS: [(i32, i32); 8] = [
-            (0, -1),
-            (1, -1),
-            (1, 0),
-            (1, 1),
-            (0, 1),
-            (-1, 1),
-            (-1, 0),
-            (-1, -1),
-        ];
-
-        let total = w * h;
-
-        // Flat index from (x, y) coordinates
-        let idx = |x: i32, y: i32| -> usize { y as usize * w + x as usize };
-
-        // Convert flat index back to (x, y) coordinates
-        let to_xy = |i: u32| -> (i32, i32) { ((i as usize % w) as i32, (i as usize / w) as i32) };
-
-        // Octile distance heuristic (consistent for 8-dir with √2 diagonal cost)
-        let heuristic = |a: (i32, i32), b: (i32, i32)| -> u32 {
-            let dx = (a.0 - b.0).unsigned_abs();
-            let dy = (a.1 - b.1).unsigned_abs();
-            let diag = dx.min(dy);
-            let card = dx.max(dy) - diag;
-            diag * DIAGONAL_COST + card * CARDINAL_COST
-        };
-
-        // Flat arrays replacing HashMap/HashSet — indexed by y * width + x
-        let mut g_score = vec![u32::MAX; total];
-        let mut came_from = vec![u32::MAX; total]; // u32::MAX = no parent sentinel
-        let mut closed = vec![false; total];
-
-        // Open set: min-heap of (f_score, x, y)
-        let mut open: BinaryHeap<Reverse<(u32, i32, i32)>> = BinaryHeap::new();
-
-        let start_idx = idx(start.0, start.1);
-        g_score[start_idx] = 0;
-        open.push(Reverse((heuristic(start, goal), start.0, start.1)));
-
-        let mut expanded = 0;
-
-        while let Some(Reverse((_, cx, cy))) = open.pop() {
-            let ci = idx(cx, cy);
-
-            if (cx, cy) == goal {
-                // Reconstruct path from flat came_from indices
-                let mut path = Vec::new();
-                let mut ni = ci;
-                let goal_idx = idx(goal.0, goal.1);
-                // Walk back from goal to start
-                debug_assert_eq!(ni, goal_idx);
-                while ni != start_idx {
-                    let (px, py) = to_xy(ni as u32);
-                    path.push((px, py));
-                    ni = came_from[ni] as usize;
-                }
-                path.reverse();
-                return Some(path);
-            }
-
-            if closed[ci] {
-                continue;
-            }
-            closed[ci] = true;
-
-            expanded += 1;
-            if expanded > MAX_EXPANDED {
-                return None;
-            }
-
-            let current_g = g_score[ci];
-
-            for (dx, dy) in DIRS {
-                let nx = cx + dx;
-                let ny = cy + dy;
-
-                if nx < 0 || nx >= map_w || ny < 0 || ny >= map_h {
-                    continue;
-                }
-
-                // Goal is always reachable (entity/item is already there)
-                if (nx, ny) != goal && !self.is_walkable(nx as usize, ny as usize) {
-                    continue;
-                }
-
-                let ni = idx(nx, ny);
-
-                if closed[ni] {
-                    continue;
-                }
-
-                let is_diagonal = dx != 0 && dy != 0;
-                let step_cost = if is_diagonal {
-                    DIAGONAL_COST
-                } else {
-                    CARDINAL_COST
-                };
-                let new_g = current_g + step_cost;
-
-                if new_g < g_score[ni] {
-                    g_score[ni] = new_g;
-                    came_from[ni] = ci as u32;
-                    let f = new_g + heuristic((nx, ny), goal);
-                    open.push(Reverse((f, nx, ny)));
-                }
-            }
-        }
-
-        None
+        let mut ws = PathWorkspace::new();
+        find_path(self, start, goal, &mut ws)
     }
 }
 
 /// Returns true if the step from `a` to `b` is diagonal (both axes change).
 pub fn is_diagonal_step(a: (i32, i32), b: (i32, i32)) -> bool {
     a.0 != b.0 && a.1 != b.1
+}
+
+/// Reusable A* workspace. Allocates flat arrays once, reuses across calls with
+/// generation-counter clearing: bumping `generation` each call makes all cells
+/// "unvisited" in O(1) instead of zeroing 30M entries.
+pub struct PathWorkspace {
+    g_score: Vec<u32>,
+    came_from: Vec<u32>,
+    closed: Vec<bool>,
+    generations: Vec<u64>,
+    generation: u64,
+    size: usize,
+}
+
+impl Default for PathWorkspace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PathWorkspace {
+    /// Create an empty workspace. Lazily allocates on first `find_path` call.
+    pub fn new() -> Self {
+        Self {
+            g_score: Vec::new(),
+            came_from: Vec::new(),
+            closed: Vec::new(),
+            generations: Vec::new(),
+            generation: 0,
+            size: 0,
+        }
+    }
+
+    /// Ensure workspace is sized for `total` cells. Reallocates only if map
+    /// size changed (should happen at most once after loading).
+    fn ensure_size(&mut self, total: usize) {
+        if self.size != total {
+            self.g_score = vec![u32::MAX; total];
+            self.came_from = vec![u32::MAX; total];
+            self.closed = vec![false; total];
+            self.generations = vec![0; total];
+            self.generation = 0;
+            self.size = total;
+        }
+    }
+
+    /// Bump generation counter, logically clearing all cells in O(1).
+    fn reset(&mut self) {
+        self.generation += 1;
+    }
+
+    #[inline]
+    fn is_visited(&self, i: usize) -> bool {
+        self.generations[i] == self.generation
+    }
+
+    #[inline]
+    fn get_g(&self, i: usize) -> u32 {
+        if self.generations[i] == self.generation {
+            self.g_score[i]
+        } else {
+            u32::MAX
+        }
+    }
+
+    #[inline]
+    fn set_g(&mut self, i: usize, val: u32) {
+        self.g_score[i] = val;
+        self.generations[i] = self.generation;
+    }
+
+    #[inline]
+    fn get_came_from(&self, i: usize) -> u32 {
+        self.came_from[i]
+    }
+
+    #[inline]
+    fn set_came_from(&mut self, i: usize, val: u32) {
+        self.came_from[i] = val;
+    }
+
+    #[inline]
+    fn is_closed(&self, i: usize) -> bool {
+        self.is_visited(i) && self.closed[i]
+    }
+
+    #[inline]
+    fn set_closed(&mut self, i: usize) {
+        self.closed[i] = true;
+        self.generations[i] = self.generation;
+    }
+}
+
+/// A* pathfinding on a TileMap using a reusable workspace (8-directional, √2 diagonal cost).
+/// Returns the path as positions from start (exclusive) to goal (inclusive).
+/// Returns None if no path exists within the search limit.
+pub fn find_path(
+    map: &TileMap,
+    start: (i32, i32),
+    goal: (i32, i32),
+    ws: &mut PathWorkspace,
+) -> Option<Vec<(i32, i32)>> {
+    if start == goal {
+        return Some(Vec::new());
+    }
+
+    let w = map.width;
+    let h = map.height;
+    let map_w = w as i32;
+    let map_h = h as i32;
+
+    if start.0 < 0 || start.0 >= map_w || start.1 < 0 || start.1 >= map_h {
+        return None;
+    }
+    if goal.0 < 0 || goal.0 >= map_w || goal.1 < 0 || goal.1 >= map_h {
+        return None;
+    }
+
+    const CARDINAL_COST: u32 = 100;
+    const DIAGONAL_COST: u32 = 141;
+    const MAX_EXPANDED: usize = 32_768;
+    const DIRS: [(i32, i32); 8] = [
+        (0, -1),
+        (1, -1),
+        (1, 0),
+        (1, 1),
+        (0, 1),
+        (-1, 1),
+        (-1, 0),
+        (-1, -1),
+    ];
+
+    let total = w * h;
+    let idx = |x: i32, y: i32| -> usize { y as usize * w + x as usize };
+    let to_xy = |i: u32| -> (i32, i32) { ((i as usize % w) as i32, (i as usize / w) as i32) };
+
+    let heuristic = |a: (i32, i32), b: (i32, i32)| -> u32 {
+        let dx = (a.0 - b.0).unsigned_abs();
+        let dy = (a.1 - b.1).unsigned_abs();
+        let diag = dx.min(dy);
+        let card = dx.max(dy) - diag;
+        diag * DIAGONAL_COST + card * CARDINAL_COST
+    };
+
+    ws.ensure_size(total);
+    ws.reset();
+
+    let mut open: BinaryHeap<Reverse<(u32, i32, i32)>> = BinaryHeap::new();
+
+    let start_idx = idx(start.0, start.1);
+    ws.set_g(start_idx, 0);
+    open.push(Reverse((heuristic(start, goal), start.0, start.1)));
+
+    let mut expanded = 0;
+
+    while let Some(Reverse((_, cx, cy))) = open.pop() {
+        let ci = idx(cx, cy);
+
+        if (cx, cy) == goal {
+            let mut path = Vec::new();
+            let mut ni = ci;
+            while ni != start_idx {
+                let (px, py) = to_xy(ni as u32);
+                path.push((px, py));
+                ni = ws.get_came_from(ni) as usize;
+            }
+            path.reverse();
+            return Some(path);
+        }
+
+        if ws.is_closed(ci) {
+            continue;
+        }
+        ws.set_closed(ci);
+
+        expanded += 1;
+        if expanded > MAX_EXPANDED {
+            return None;
+        }
+
+        let current_g = ws.get_g(ci);
+
+        for (dx, dy) in DIRS {
+            let nx = cx + dx;
+            let ny = cy + dy;
+
+            if nx < 0 || nx >= map_w || ny < 0 || ny >= map_h {
+                continue;
+            }
+
+            if (nx, ny) != goal && !map.is_walkable(nx as usize, ny as usize) {
+                continue;
+            }
+
+            let ni = idx(nx, ny);
+
+            if ws.is_closed(ni) {
+                continue;
+            }
+
+            let is_diagonal = dx != 0 && dy != 0;
+            let step_cost = if is_diagonal {
+                DIAGONAL_COST
+            } else {
+                CARDINAL_COST
+            };
+            let new_g = current_g + step_cost;
+
+            if new_g < ws.get_g(ni) {
+                ws.set_g(ni, new_g);
+                ws.set_came_from(ni, ci as u32);
+                let f = new_g + heuristic((nx, ny), goal);
+                open.push(Reverse((f, nx, ny)));
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

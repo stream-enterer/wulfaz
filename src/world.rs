@@ -14,7 +14,7 @@ use crate::events::EventLog;
 use crate::registry::{BlockRegistry, BuildingRegistry, StreetRegistry};
 use crate::rng::create_rng;
 use crate::systems::decisions::UtilityConfig;
-use crate::tile_map::TileMap;
+use crate::tile_map::{PathWorkspace, TileMap};
 
 pub struct BodyTables {
     pub positions: HashMap<Entity, Position>,
@@ -142,6 +142,7 @@ pub struct World {
 
     // Infrastructure
     pub tiles: TileMap,
+    pub path_workspace: PathWorkspace,
     pub events: EventLog,
     pub rng: StdRng,
     pub tick: Tick,
@@ -164,6 +165,7 @@ impl World {
             spatial_index: HashMap::new(),
 
             tiles: TileMap::new(64, 64), // 64m × 64m
+            path_workspace: PathWorkspace::new(),
             events: EventLog::default_capacity(),
             rng: create_rng(seed),
             tick: Tick(0),
@@ -482,6 +484,7 @@ mod tests {
             CachedPath {
                 steps: vec![(4, 7), (5, 7)],
                 goal: (5, 7),
+                next_step: 0,
             },
         );
         world.mind.occupations.insert(

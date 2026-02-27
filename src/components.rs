@@ -150,10 +150,13 @@ pub struct WanderTarget {
 
 /// Cached A* path: remaining steps toward a goal.
 /// Avoids recomputing A* every move tick for the same destination.
+/// Uses `next_step` index for O(1) consumption instead of Vec slicing.
 #[derive(Debug, Clone)]
 pub struct CachedPath {
     pub steps: Vec<(i32, i32)>,
     pub goal: (i32, i32),
+    /// Index of the next step to consume. Exhausted when `next_step >= steps.len()`.
+    pub next_step: usize,
 }
 
 /// The building where this entity lives.

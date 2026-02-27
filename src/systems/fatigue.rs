@@ -19,7 +19,7 @@ const HP_DAMAGE_THRESHOLD: f32 = 200.0;
 /// with remainder having a (remainder*2)% chance of +1 more. Skips pending deaths.
 pub fn run_fatigue(world: &mut World, tick: Tick) {
     // Collect recovery updates (can't borrow world.rng while iterating fatigues)
-    let updates: Vec<(Entity, f32)> = world
+    let mut updates: Vec<(Entity, f32)> = world
         .body
         .fatigues
         .iter()
@@ -34,6 +34,8 @@ pub fn run_fatigue(world: &mut World, tick: Tick) {
             (e, new_fatigue)
         })
         .collect();
+    // Sort by entity ID for deterministic RNG consumption in the apply loop
+    updates.sort_by_key(|(e, _)| e.0);
 
     // Apply recovery and check for HP damage from excess fatigue
     for (e, new_fatigue) in updates {
