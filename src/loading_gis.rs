@@ -1800,7 +1800,11 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
 ///
 /// For each known occupant in the target quartier, creates an entity with full
 /// component set, positioned on a floor tile of their building.
-pub fn spawn_gis_entities(world: &mut World, target_quartier: &str) {
+pub fn spawn_gis_entities(
+    world: &mut World,
+    target_quartier: &str,
+    archetype: &crate::loading::Archetype,
+) {
     use crate::components::*;
     use rand::RngExt;
 
@@ -1875,25 +1879,28 @@ pub fn spawn_gis_entities(world: &mut World, target_quartier: &str) {
                         value: name.to_string(),
                     },
                 );
-                world.body.icons.insert(e, Icon { ch: '☻' });
+                world.body.icons.insert(e, Icon { ch: archetype.icon });
                 world.body.positions.insert(e, Position { x, y });
                 world.body.healths.insert(
                     e,
                     Health {
-                        current: 100.0,
-                        max: 100.0,
+                        current: archetype.health,
+                        max: archetype.health,
                     },
                 );
                 world.body.fatigues.insert(e, Fatigue { current: 0.0 });
                 world.body.combat_stats.insert(
                     e,
                     CombatStats {
-                        attack: 10.0,
-                        defense: 5.0,
-                        aggression: 0.0,
+                        attack: archetype.attack,
+                        defense: archetype.defense,
+                        aggression: archetype.aggression,
                     },
                 );
-                world.body.gait_profiles.insert(e, GaitProfile::biped());
+                world
+                    .body
+                    .gait_profiles
+                    .insert(e, archetype.gait_profile.clone());
                 world.body.current_gaits.insert(e, Gait::Walk);
                 world
                     .body
@@ -1905,7 +1912,7 @@ pub fn spawn_gis_entities(world: &mut World, target_quartier: &str) {
                     e,
                     Hunger {
                         current: 0.0,
-                        max: 100.0,
+                        max: archetype.max_hunger,
                     },
                 );
                 world.mind.action_states.insert(
@@ -5310,7 +5317,9 @@ mod tests {
         // active_year should already be 1845 from GisTables::new().
         assert_eq!(world.gis.active_year, 1845);
 
-        spawn_gis_entities(&mut world, "TestQ");
+        let archetypes = crate::loading::load_archetypes("data/archetypes.kdl");
+        let archetype = &archetypes["person"];
+        spawn_gis_entities(&mut world, "TestQ", archetype);
 
         // "Dupont" → 1, "Lefèvre, Martin" → 2 (comma split), "" → 0 (skipped)
         assert_eq!(world.alive.len(), 3);
@@ -5397,7 +5406,7 @@ mod tests {
         };
         world2.gis.buildings.insert(building2);
 
-        spawn_gis_entities(&mut world2, "TestQ");
+        spawn_gis_entities(&mut world2, "TestQ", archetype);
 
         // Same entity positions as world1.
         let mut positions1: Vec<(i32, i32)> =
@@ -5415,7 +5424,8 @@ mod tests {
         world.tiles = TileMap::new(10, 10);
 
         // No buildings at all — should produce 0 entities.
-        spawn_gis_entities(&mut world, "Nonexistent");
+        let archetype = crate::loading::Archetype::default();
+        spawn_gis_entities(&mut world, "Nonexistent", &archetype);
         assert!(world.alive.is_empty());
         crate::world::validate_world(&world);
     }

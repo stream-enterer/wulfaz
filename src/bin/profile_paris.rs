@@ -112,7 +112,11 @@ fn main() {
 
     world.tiles.initialize_temperatures();
     loading::load_utility_config(&mut world, "data/utility.ron");
-    loading_gis::spawn_gis_entities(&mut world, "Arcis");
+    let archetypes = loading::load_archetypes("data/archetypes.kdl");
+    let person = archetypes
+        .get("person")
+        .expect("data/archetypes.kdl must define a 'person' archetype");
+    loading_gis::spawn_gis_entities(&mut world, "Arcis", person);
 
     let entity_count = world.alive.len();
     let map_w = world.tiles.width();

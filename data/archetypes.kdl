@@ -1,0 +1,9 @@
+archetype "person" {
+    icon "☻"
+    health 100.0
+    max_hunger 100.0
+    attack 10.0
+    defense 5.0
+    aggression 0.0
+    gaits "biped"
+}

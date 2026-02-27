@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use rand::RngExt;
 
 use crate::components::*;
-use crate::events::Event;
 use crate::systems::decisions::UtilityConfig;
 use crate::tile_map::Terrain;
 use crate::world::World;
@@ -27,18 +26,95 @@ fn parse_kdl_file(path: &str) -> Option<kdl::KdlDocument> {
 }
 
 /// Helper to get a string value from a child node's first argument.
-#[allow(dead_code)] // Used by KDL test-map loading path, not GIS path
 fn child_str<'a>(children: &'a kdl::KdlDocument, key: &str) -> Option<&'a str> {
     children.get_arg(key)?.as_string()
 }
 
 /// Helper to get an f64 value from a child node's first argument.
 /// Accepts both float and integer values.
-#[allow(dead_code)] // Used by KDL test-map loading path, not GIS path
 fn child_f64(children: &kdl::KdlDocument, key: &str) -> Option<f64> {
     let val = children.get_arg(key)?;
     val.as_float()
         .or_else(|| val.as_integer().map(|i| i as f64))
+}
+
+/// Default body/mind stats for spawning entities. Named archetypes live in
+/// `data/archetypes.kdl`; the GIS spawn path looks up the relevant one by name.
+pub struct Archetype {
+    pub icon: char,
+    pub health: f32,
+    pub max_hunger: f32,
+    pub attack: f32,
+    pub defense: f32,
+    pub aggression: f32,
+    pub gait_profile: GaitProfile,
+}
+
+impl Default for Archetype {
+    fn default() -> Self {
+        Self {
+            icon: '?',
+            health: 100.0,
+            max_hunger: 100.0,
+            attack: 10.0,
+            defense: 5.0,
+            aggression: 0.0,
+            gait_profile: GaitProfile::biped(),
+        }
+    }
+}
+
+/// Load all named archetypes from a KDL file.
+/// Returns a map from archetype name to its stats.
+pub fn load_archetypes(path: &str) -> HashMap<String, Archetype> {
+    let mut map = HashMap::new();
+
+    let Some(doc) = parse_kdl_file(path) else {
+        return map;
+    };
+
+    for node in doc.nodes() {
+        if node.name().to_string() != "archetype" {
+            continue;
+        }
+
+        let Some(name) = node.get(0).and_then(|v| v.as_string()) else {
+            continue;
+        };
+
+        let Some(children) = node.children() else {
+            map.insert(name.to_string(), Archetype::default());
+            continue;
+        };
+
+        let icon_str = child_str(children, "icon").unwrap_or("?");
+        let icon = icon_str.chars().next().unwrap_or('?');
+        let health = child_f64(children, "health").unwrap_or(100.0) as f32;
+        let max_hunger = child_f64(children, "max_hunger").unwrap_or(100.0) as f32;
+        let attack = child_f64(children, "attack").unwrap_or(10.0) as f32;
+        let defense = child_f64(children, "defense").unwrap_or(5.0) as f32;
+        let aggression = child_f64(children, "aggression").unwrap_or(0.0) as f32;
+        let gaits_str = child_str(children, "gaits").unwrap_or("biped");
+        let gait_profile = match gaits_str {
+            "quadruped" => GaitProfile::quadruped(),
+            _ => GaitProfile::biped(),
+        };
+
+        map.insert(
+            name.to_string(),
+            Archetype {
+                icon,
+                health,
+                max_hunger,
+                attack,
+                defense,
+                aggression,
+                gait_profile,
+            },
+        );
+    }
+
+    map
 }
 
 /// Load utility scorer config from a RON file.
@@ -55,155 +131,6 @@ pub fn load_utility_config(world: &mut World, path: &str) {
         Err(e) => {
             log::warn!("failed to parse RON {}: {}, using default config", path, e);
         }
-    }
-}
-
-#[allow(dead_code)] // KDL test-map loading; GIS path uses loading_gis instead
-/// Load creatures from a KDL file and spawn them into the world.
-pub fn load_creatures(world: &mut World, path: &str) {
-    let Some(doc) = parse_kdl_file(path) else {
-        return;
-    };
-
-    let map_w = world.tiles.width() as i32;
-    let map_h = world.tiles.height() as i32;
-
-    for node in doc.nodes() {
-        if node.name().to_string() != "creature" {
-            continue;
-        }
-
-        // First argument is the creature name, e.g. creature "Goblin"
-        let name = match node.get(0).and_then(|v| v.as_string()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-
-        let Some(children) = node.children() else {
-            continue;
-        };
-
-        let icon_str = child_str(children, "icon").unwrap_or("?");
-        let icon_ch = icon_str.chars().next().unwrap_or('?');
-        let max_hunger = child_f64(children, "max_hunger").unwrap_or(100.0) as f32;
-        let aggression = child_f64(children, "aggression").unwrap_or(0.0) as f32;
-        let gaits_str = child_str(children, "gaits").unwrap_or("biped");
-
-        let e = world.spawn();
-
-        // Random position within the map
-        let x = if map_w > 0 {
-            world.rng.random_range(0..map_w)
-        } else {
-            0
-        };
-        let y = if map_h > 0 {
-            world.rng.random_range(0..map_h)
-        } else {
-            0
-        };
-
-        world.body.names.insert(e, Name { value: name });
-        world.body.icons.insert(e, Icon { ch: icon_ch });
-        world.body.positions.insert(e, Position { x, y });
-        world.mind.hungers.insert(
-            e,
-            Hunger {
-                current: 0.0,
-                max: max_hunger,
-            },
-        );
-        world.body.healths.insert(
-            e,
-            Health {
-                current: 100.0,
-                max: 100.0,
-            },
-        );
-        world.body.fatigues.insert(e, Fatigue { current: 0.0 });
-        world.body.combat_stats.insert(
-            e,
-            CombatStats {
-                attack: 10.0,
-                defense: 5.0,
-                aggression,
-            },
-        );
-        let profile = match gaits_str {
-            "quadruped" => GaitProfile::quadruped(),
-            _ => GaitProfile::biped(),
-        };
-        world.body.gait_profiles.insert(e, profile);
-        world.body.current_gaits.insert(e, Gait::Walk);
-        world.mind.action_states.insert(
-            e,
-            ActionState {
-                current_action: None,
-                ticks_in_action: 0,
-                cooldowns: HashMap::new(),
-            },
-        );
-
-        world.events.push(Event::Spawned {
-            entity: e,
-            tick: world.tick,
-        });
-    }
-}
-
-#[allow(dead_code)] // KDL test-map loading; GIS path uses loading_gis instead
-/// Load items from a KDL file and spawn them into the world.
-pub fn load_items(world: &mut World, path: &str) {
-    let Some(doc) = parse_kdl_file(path) else {
-        return;
-    };
-
-    let map_w = world.tiles.width() as i32;
-    let map_h = world.tiles.height() as i32;
-
-    for node in doc.nodes() {
-        if node.name().to_string() != "item" {
-            continue;
-        }
-
-        let name = match node.get(0).and_then(|v| v.as_string()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-
-        let Some(children) = node.children() else {
-            continue;
-        };
-
-        let icon_str = child_str(children, "icon").unwrap_or("?");
-        let icon_ch = icon_str.chars().next().unwrap_or('?');
-        let nutrition = child_f64(children, "nutrition").unwrap_or(0.0) as f32;
-
-        let e = world.spawn();
-
-        let x = if map_w > 0 {
-            world.rng.random_range(0..map_w)
-        } else {
-            0
-        };
-        let y = if map_h > 0 {
-            world.rng.random_range(0..map_h)
-        } else {
-            0
-        };
-
-        world.body.names.insert(e, Name { value: name });
-        world.body.icons.insert(e, Icon { ch: icon_ch });
-        world.body.positions.insert(e, Position { x, y });
-        world
-            .mind
-            .nutritions
-            .insert(e, Nutrition { value: nutrition });
-
-        world.events.push(Event::Spawned {
-            entity: e,
-            tick: world.tick,
-        });
     }
 }
 
@@ -252,36 +179,28 @@ mod tests {
     use crate::world::World;
 
     #[test]
-    fn test_load_creatures_from_file() {
-        let mut world = World::new_with_seed(42);
-        load_creatures(&mut world, "data/creatures.kdl");
-        // 4 creatures in the file
-        assert_eq!(world.alive.len(), 4);
-        // All should have positions, icons, hungers, healths, combat_stats, gait_profiles, names
-        assert_eq!(world.body.positions.len(), 4);
-        assert_eq!(world.body.icons.len(), 4);
-        assert_eq!(world.mind.hungers.len(), 4);
-        assert_eq!(world.body.healths.len(), 4);
-        assert_eq!(world.body.combat_stats.len(), 4);
-        assert_eq!(world.body.gait_profiles.len(), 4);
-        assert_eq!(world.body.names.len(), 4);
+    fn test_load_archetypes_from_file() {
+        let map = load_archetypes("data/archetypes.kdl");
+        assert!(map.contains_key("person"), "missing 'person' archetype");
+        let person = &map["person"];
+        assert_eq!(person.icon, '☻');
+        assert_eq!(person.health, 100.0);
+        assert_eq!(person.max_hunger, 100.0);
+        assert_eq!(person.attack, 10.0);
+        assert_eq!(person.defense, 5.0);
+        assert_eq!(person.aggression, 0.0);
     }
 
     #[test]
-    fn test_load_items_from_file() {
-        let mut world = World::new_with_seed(42);
-        load_items(&mut world, "data/items.kdl");
-        // 4 items in the file
-        assert_eq!(world.alive.len(), 4);
-        assert_eq!(world.mind.nutritions.len(), 4);
-        assert_eq!(world.body.icons.len(), 4);
+    fn test_load_archetypes_missing_file() {
+        let map = load_archetypes("nonexistent.kdl");
+        assert!(map.is_empty());
     }
 
     #[test]
     fn test_load_terrain_scatters_variety() {
         let mut world = World::new_with_seed(42);
         load_terrain(&mut world, "data/terrain.kdl");
-        // Check that not all tiles are Road anymore
         let w = world.tiles.width();
         let h = world.tiles.height();
         let mut non_road = 0;
@@ -293,41 +212,5 @@ mod tests {
             }
         }
         assert!(non_road > 0);
-    }
-
-    #[test]
-    fn test_load_missing_file_no_panic() {
-        let mut world = World::new_with_seed(42);
-        load_creatures(&mut world, "nonexistent.kdl");
-        assert_eq!(world.alive.len(), 0);
-    }
-
-    #[test]
-    fn test_creature_properties_correct() {
-        let mut world = World::new_with_seed(42);
-        load_creatures(&mut world, "data/creatures.kdl");
-
-        // Find the goblin by name
-        let goblin = world
-            .body
-            .names
-            .iter()
-            .find(|(_, n)| n.value == "Goblin")
-            .map(|(&e, _)| e);
-
-        if let Some(e) = goblin {
-            if let Some(icon) = world.body.icons.get(&e) {
-                assert_eq!(icon.ch, 'g');
-            }
-            if let Some(hunger) = world.mind.hungers.get(&e) {
-                assert_eq!(hunger.max, 100.0);
-                assert_eq!(hunger.current, 0.0);
-            }
-            if let Some(cs) = world.body.combat_stats.get(&e) {
-                assert!((cs.aggression - 0.8).abs() < f32::EPSILON);
-            }
-            assert!(world.body.gait_profiles.contains_key(&e));
-            assert_eq!(world.body.current_gaits.get(&e), Some(&Gait::Walk));
-        }
     }
 }
