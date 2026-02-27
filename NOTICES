@@ -1,77 +1,108 @@
 THIRD-PARTY NOTICES
 
-This project includes or depends on the following third-party software:
+This project includes or depends on the following third-party software.
+Full license texts are in the licenses/ directory.
 
---------------------------------------------------------------------------------
+================================================================================
+BUNDLED ASSETS
+================================================================================
 
-Libertinus fonts (bundled)
+Libertinus fonts
 License: SIL Open Font License 1.1
 https://github.com/alerque/libertinus
 
---------------------------------------------------------------------------------
+================================================================================
+COMPILED DEPENDENCIES (Rust crates linked into binary)
+================================================================================
 
-freetype-rs
+bincode
 License: MIT
-https://github.com/nicokoch/freetype-rs
-
---------------------------------------------------------------------------------
-
-wgpu
-License: MIT OR Apache-2.0
-https://github.com/gfx-rs/wgpu
-
---------------------------------------------------------------------------------
-
-winit
-License: Apache-2.0
-https://github.com/rust-windowing/winit
-
---------------------------------------------------------------------------------
+https://github.com/servo/bincode
 
 bytemuck
 License: Zlib OR Apache-2.0 OR MIT
 https://github.com/Lokathor/bytemuck
 
---------------------------------------------------------------------------------
-
-pollster
-License: MIT OR Apache-2.0
-https://github.com/zesterer/pollster
-
---------------------------------------------------------------------------------
-
 env_logger
 License: MIT OR Apache-2.0
 https://github.com/rust-cli/env_logger
 
---------------------------------------------------------------------------------
+freetype-rs
+License: MIT
+https://github.com/PistonDevelopers/freetype-rs
+
+kdl
+License: Apache-2.0
+https://github.com/kdl-org/kdl-rs
 
 log
 License: MIT OR Apache-2.0
 https://github.com/rust-lang/log
 
---------------------------------------------------------------------------------
+pollster
+License: MIT OR Apache-2.0
+https://github.com/zesterer/pollster
 
-FreeType (system library, linked via freetype-rs)
+rand
+License: MIT OR Apache-2.0
+https://github.com/rust-random/rand
+
+ron
+License: MIT OR Apache-2.0
+https://github.com/ron-rs/ron
+
+rusqlite
+License: MIT
+https://github.com/rusqlite/rusqlite
+
+Note: rusqlite is built with the "bundled" feature, which statically links
+SQLite (https://sqlite.org). SQLite is public domain.
+
+serde
+License: MIT OR Apache-2.0
+https://github.com/serde-rs/serde
+
+shapefile
+License: MIT
+https://github.com/tmontaigu/shapefile-rs
+
+wgpu
+License: MIT OR Apache-2.0
+https://github.com/gfx-rs/wgpu
+
+winit
+License: Apache-2.0
+https://github.com/rust-windowing/winit
+
+zstd
+License: MIT
+https://github.com/gyscos/zstd-rs
+
+Note: zstd-rs wraps the C library libzstd (https://github.com/facebook/zstd),
+which is dual-licensed BSD OR GPL-2.0.
+
+================================================================================
+SYSTEM LIBRARIES (dynamically linked, not bundled)
+================================================================================
+
+FreeType
 License: FreeType License (FTL) OR GPL-2.0-or-later
 https://freetype.org
 
---------------------------------------------------------------------------------
-
-Fontconfig (system library, linked via FFI)
+Fontconfig
 License: MIT
 https://www.freedesktop.org/wiki/Software/fontconfig/
 
---------------------------------------------------------------------------------
+================================================================================
+REFERENCE IMPLEMENTATIONS (no code copied)
+================================================================================
 
-kitty (reference implementation)
+kitty
 License: GPL-3.0
 https://github.com/kovidgoyal/kitty
 
-The font rendering pipeline in this project (src/font.rs, src/text.wgsl) was
-independently implemented using kitty's source code as a reference for
-technique and correctness. No kitty source code was copied. Specifically,
-kitty's approach to FreeType hinting flag selection, glyph atlas construction,
-monospace cell grid computation, and sRGB-aware contrast adjustment informed
-our implementation.
-
+The font rendering pipeline (src/font.rs, src/text.wgsl) was independently
+implemented using kitty's source as a reference for technique and correctness.
+No kitty source code was copied. Specifically, kitty's approach to FreeType
+hinting flag selection, glyph atlas construction, monospace cell grid
+computation, and sRGB-aware contrast adjustment informed our implementation.
