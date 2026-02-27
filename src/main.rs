@@ -5,6 +5,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::{Window, WindowId};
 
 use wulfaz::components;
@@ -273,6 +274,7 @@ impl ApplicationHandler for App {
 
         let attrs = Window::default_attributes()
             .with_title("Wulfaz")
+            .with_name("wulfaz", "wulfaz")
             .with_inner_size(winit::dpi::LogicalSize::new(800.0, 600.0));
 
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
