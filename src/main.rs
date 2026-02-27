@@ -515,11 +515,16 @@ impl ApplicationHandler for App {
                                             let mh = self.world.tiles.height() as i32;
                                             let tx = (pos.x + dx).clamp(0, (mw - 1).max(0));
                                             let ty = (pos.y + dy).clamp(0, (mh - 1).max(0));
-                                            if self
+                                            let walkable = self
                                                 .world
                                                 .tiles
-                                                .is_walkable(tx as usize, ty as usize)
-                                            {
+                                                .is_walkable(tx as usize, ty as usize);
+                                            let diag_ok = !(dx != 0 && dy != 0)
+                                                || self
+                                                    .world
+                                                    .tiles
+                                                    .diagonal_clear(pos.x, pos.y, tx, ty);
+                                            if walkable && diag_ok {
                                                 self.world.mind.wander_targets.insert(
                                                     player,
                                                     components::WanderTarget {

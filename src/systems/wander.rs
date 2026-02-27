@@ -147,7 +147,15 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             };
             let x = (pos.x + dx).clamp(0, (map_w - 1).max(0));
             let y = (pos.y + dy).clamp(0, (map_h - 1).max(0));
+            if !world.tiles.is_walkable(x as usize, y as usize) {
+                cooldown_updates.push((e, base_cooldown));
+                continue;
+            }
             let is_diag = is_diagonal_step((pos.x, pos.y), (x, y));
+            if is_diag && !world.tiles.diagonal_clear(pos.x, pos.y, x, y) {
+                cooldown_updates.push((e, base_cooldown));
+                continue;
+            }
             let reset = if is_diag {
                 base_cooldown * DIAGONAL_FACTOR / 100
             } else {
@@ -174,8 +182,15 @@ pub fn run_wander(world: &mut World, tick: Tick) {
         };
 
         if let Some(dest) = cached_step {
-            // Use cached path: advance index
+            // Validate cached step: reject if it crosses a diagonal wall seam.
             let is_diag = is_diagonal_step((pos.x, pos.y), dest);
+            if is_diag && !world.tiles.diagonal_clear(pos.x, pos.y, dest.0, dest.1) {
+                // Stale cache contains illegal diagonal — invalidate and re-path next tick.
+                cooldown_updates.push((e, base_cooldown));
+                cached_path_updates.push((e, PathUpdate::Remove));
+                continue;
+            }
+            // Use cached path: advance index
             let reset = if is_diag {
                 base_cooldown * DIAGONAL_FACTOR / 100
             } else {
@@ -280,7 +295,19 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             };
             let x = (pos.x + dx).clamp(0, (map_w - 1).max(0));
             let y = (pos.y + dy).clamp(0, (map_h - 1).max(0));
+            if !world.tiles.is_walkable(x as usize, y as usize) {
+                cooldown_updates.push((e, base_cooldown));
+                wander_target_updates.push((e, None));
+                cached_path_updates.push((e, PathUpdate::Remove));
+                continue;
+            }
             let is_diag = is_diagonal_step((pos.x, pos.y), (x, y));
+            if is_diag && !world.tiles.diagonal_clear(pos.x, pos.y, x, y) {
+                cooldown_updates.push((e, base_cooldown));
+                wander_target_updates.push((e, None));
+                cached_path_updates.push((e, PathUpdate::Remove));
+                continue;
+            }
             let reset = if is_diag {
                 base_cooldown * DIAGONAL_FACTOR / 100
             } else {
@@ -650,6 +677,141 @@ mod tests {
             (pos.x, pos.y),
             (7, 5),
             "entity should arrive at food position"
+        );
+    }
+
+    #[test]
+    fn test_random_fallback_blocks_wall_cardinal() {
+        use crate::tile_map::Terrain;
+
+        // Surround entity with walls on all 8 sides — it must not move.
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(5, 5);
+        for dx in -1..=1_i32 {
+            for dy in -1..=1_i32 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                world
+                    .tiles
+                    .set_terrain((2 + dx) as usize, (2 + dy) as usize, Terrain::Wall);
+            }
+        }
+        let e = world.spawn();
+        world.body.positions.insert(e, Position { x: 2, y: 2 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
+
+        // Run many ticks — entity must stay put.
+        for t in 0..50 {
+            run_wander(&mut world, Tick(t));
+            let pos = &world.body.positions[&e];
+            assert_eq!(
+                (pos.x, pos.y),
+                (2, 2),
+                "entity moved into a wall on tick {t}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_random_fallback_blocks_diagonal_wall_seam() {
+        use crate::tile_map::Terrain;
+
+        // Create a diagonal wall seam that only blocks diagonal movement.
+        // . # .
+        // . E .
+        // . # .
+        // Entity at (1,1). Walls at (1,0) and (1,2) block N and S.
+        // Now also block diagonals via seam:
+        //   # . .
+        //   . E .
+        //   . . #
+        // Walls at (0,0) and (2,2). Diagonal NW and SE are seam-blocked.
+        // Also wall at (2,0) blocks E of row 0, making NE shoulder blocked.
+        // And wall at (0,2) blocks W of row 2, making SW shoulder blocked.
+        // This leaves only E and W as valid moves.
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(5, 5);
+        world.tiles.set_terrain(0, 0, Terrain::Wall);
+        world.tiles.set_terrain(1, 0, Terrain::Wall);
+        world.tiles.set_terrain(2, 0, Terrain::Wall);
+        world.tiles.set_terrain(0, 2, Terrain::Wall);
+        world.tiles.set_terrain(1, 2, Terrain::Wall);
+        world.tiles.set_terrain(2, 2, Terrain::Wall);
+
+        let e = world.spawn();
+        world.body.positions.insert(e, Position { x: 1, y: 1 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
+
+        // Run many ticks. Entity should never end up on a wall tile.
+        for t in 0..100 {
+            run_wander(&mut world, Tick(t));
+            let pos = &world.body.positions[&e];
+            assert!(
+                world.tiles.is_walkable(pos.x as usize, pos.y as usize),
+                "entity at ({},{}) is on non-walkable tile on tick {t}",
+                pos.x,
+                pos.y,
+            );
+        }
+    }
+
+    #[test]
+    fn test_cached_path_diagonal_seam_invalidated() {
+        use crate::components::{CachedPath, Intention, WanderTarget};
+        use crate::tile_map::Terrain;
+
+        // Inject a stale cached path that includes a diagonal wall squeeze.
+        let mut world = World::new_with_seed(42);
+        world.tiles = crate::tile_map::TileMap::new(10, 10);
+        // Wall seam at (3,3) and (4,4)
+        world.tiles.set_terrain(3, 3, Terrain::Wall);
+        world.tiles.set_terrain(4, 4, Terrain::Wall);
+
+        let e = world.spawn();
+        world.body.positions.insert(e, Position { x: 3, y: 4 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
+
+        // Intent: wander to (5,3)
+        world.mind.intentions.insert(
+            e,
+            Intention {
+                action: ActionId::Wander,
+                target: None,
+            },
+        );
+        world.mind.wander_targets.insert(
+            e,
+            WanderTarget {
+                goal_x: 5,
+                goal_y: 3,
+            },
+        );
+
+        // Inject stale cache with illegal diagonal step (3,4)->(4,3)
+        // Shoulder tiles: (4,4)=Wall and (3,3)=Wall — blocked.
+        world.mind.cached_paths.insert(
+            e,
+            CachedPath {
+                steps: vec![(4, 3), (5, 3)],
+                goal: (5, 3),
+                next_step: 0,
+            },
+        );
+
+        run_wander(&mut world, Tick(0));
+
+        let pos = &world.body.positions[&e];
+        // Entity must NOT have moved to (4,3) through the wall seam.
+        assert_ne!(
+            (pos.x, pos.y),
+            (4, 3),
+            "entity squeezed through diagonal wall seam via stale cache"
+        );
+        // The stale cache should have been invalidated.
+        assert!(
+            !world.mind.cached_paths.contains_key(&e),
+            "stale cached path should have been removed"
         );
     }
 }

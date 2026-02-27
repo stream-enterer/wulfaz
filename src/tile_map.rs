@@ -390,6 +390,23 @@ impl TileMap {
         self.get_terrain(x, y).is_some_and(|t| t.is_walkable())
     }
 
+    /// Check if a diagonal step from `(x1,y1)` to `(x2,y2)` is passable.
+    ///
+    /// A diagonal is blocked when either orthogonal "shoulder" tile is
+    /// non-walkable, preventing corner-cutting through diagonal wall seams.
+    /// Out-of-bounds or negative coordinates are treated as non-walkable.
+    ///
+    /// Any system that performs diagonal movement or ray-casting MUST call
+    /// this method. See also: `find_path` neighbor loop, `run_wander`
+    /// random fallback, player movement validation.
+    pub fn diagonal_clear(&self, x1: i32, y1: i32, x2: i32, y2: i32) -> bool {
+        // Negative coordinates are out-of-bounds (non-walkable).
+        if x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0 {
+            return false;
+        }
+        self.is_walkable(x2 as usize, y1 as usize) && self.is_walkable(x1 as usize, y2 as usize)
+    }
+
     /// Get an immutable reference to a chunk by coordinate.
     #[allow(dead_code)]
     pub fn get_chunk(&self, coord: ChunkCoord) -> Option<&Chunk> {
@@ -842,6 +859,9 @@ pub fn find_path(
             }
 
             let is_diagonal = dx != 0 && dy != 0;
+            if is_diagonal && !map.diagonal_clear(cx, cy, nx, ny) {
+                continue;
+            }
             let step_cost = if is_diagonal {
                 DIAGONAL_COST
             } else {
@@ -1292,6 +1312,115 @@ mod tests {
         assert!(is_diagonal_step((3, 3), (2, 4)));
         assert!(is_diagonal_step((5, 5), (4, 4)));
         assert!(is_diagonal_step((0, 0), (1, -1)));
+    }
+
+    // --- diagonal_clear ---
+
+    #[test]
+    fn test_diagonal_clear_both_shoulders_open() {
+        // All Road (walkable) — diagonal is allowed
+        let map = TileMap::new(5, 5);
+        assert!(map.diagonal_clear(1, 1, 2, 2));
+        assert!(map.diagonal_clear(2, 2, 1, 1));
+        assert!(map.diagonal_clear(1, 2, 2, 1));
+        assert!(map.diagonal_clear(2, 1, 1, 2));
+    }
+
+    #[test]
+    fn test_diagonal_clear_one_shoulder_walled() {
+        //  . #     moving (0,1) -> (1,0): shoulder (1,1) is Wall
+        //  . .
+        let mut map = TileMap::new(5, 5);
+        map.set_terrain(1, 0, Terrain::Wall);
+        // (0,1) -> (1,0): shoulders are (1,1)=Road and (0,0)=Road... wait
+        // Actually shoulder tiles for (x1,y1)->(x2,y2) are (x2,y1) and (x1,y2)
+        // For (0,1)->(1,0): shoulders = (1,1) and (0,0) — both walkable
+        assert!(map.diagonal_clear(0, 1, 1, 0));
+
+        // Place wall at (1,1): now (0,0)->(1,1) has shoulder (1,0)=Wall
+        map.set_terrain(1, 1, Terrain::Wall);
+        // (0,0)->(1,1) is blocked because dest is a wall, but diagonal_clear
+        // checks shoulders: (1,0)=Wall → blocked
+        assert!(!map.diagonal_clear(0, 0, 1, 1));
+    }
+
+    #[test]
+    fn test_diagonal_clear_wall_seam() {
+        // The classic diagonal wall seam:
+        //  # .
+        //  . #
+        // Entity at (0,1) moving to (1,0) should be blocked.
+        let mut map = TileMap::new(5, 5);
+        map.set_terrain(0, 0, Terrain::Wall); // top-left
+        map.set_terrain(1, 1, Terrain::Wall); // bottom-right
+        // (0,1) -> (1,0): shoulders = (1,1)=Wall, (0,0)=Wall — blocked
+        assert!(!map.diagonal_clear(0, 1, 1, 0));
+        // Reverse: (1,0) -> (0,1): shoulders = (0,0)=Wall, (1,1)=Wall — blocked
+        assert!(!map.diagonal_clear(1, 0, 0, 1));
+    }
+
+    #[test]
+    fn test_diagonal_clear_both_shoulders_blocked() {
+        let mut map = TileMap::new(5, 5);
+        map.set_terrain(2, 1, Terrain::Wall);
+        map.set_terrain(1, 2, Terrain::Water);
+        // (1,1) -> (2,2): shoulders = (2,1)=Wall, (1,2)=Water — both blocked
+        assert!(!map.diagonal_clear(1, 1, 2, 2));
+    }
+
+    #[test]
+    fn test_diagonal_clear_negative_coords() {
+        let map = TileMap::new(5, 5);
+        // Negative coordinates are out-of-bounds — should return false
+        assert!(!map.diagonal_clear(-1, 0, 0, 1));
+        assert!(!map.diagonal_clear(0, -1, 1, 0));
+    }
+
+    #[test]
+    fn test_find_path_no_diagonal_wall_squeeze() {
+        // Classic diagonal wall seam: A* must NOT path through it.
+        //  . . . .
+        //  . # . .
+        //  . . # .
+        //  . . . .
+        // Start (0,1), Goal (3,2): direct diagonal path crosses the seam.
+        let mut map = TileMap::new(5, 5);
+        map.set_terrain(1, 1, Terrain::Wall);
+        map.set_terrain(2, 2, Terrain::Wall);
+
+        let path = map.find_path((0, 1), (3, 2)).unwrap();
+        // No step should squeeze through the diagonal seam
+        for pair in path.windows(2) {
+            let (ax, ay) = pair[0];
+            let (bx, by) = pair[1];
+            let is_diag = ax != bx && ay != by;
+            if is_diag {
+                assert!(
+                    map.diagonal_clear(ax, ay, bx, by),
+                    "path contains illegal diagonal step ({ax},{ay})->({bx},{by})"
+                );
+            }
+        }
+        // Also check first step from start
+        if !path.is_empty() {
+            let (bx, by) = path[0];
+            let is_diag = 0 != bx && 1 != by;
+            if is_diag {
+                assert!(
+                    map.diagonal_clear(0, 1, bx, by),
+                    "first step from start is illegal diagonal"
+                );
+            }
+        }
+        assert_eq!(*path.last().unwrap(), (3, 2));
+    }
+
+    #[test]
+    fn test_find_path_allows_open_diagonal() {
+        // No walls — diagonal path should still work
+        let map = TileMap::new(10, 10);
+        let path = map.find_path((0, 0), (3, 3)).unwrap();
+        assert_eq!(path.len(), 3); // 3 diagonal steps
     }
 
     // --- target_temperature ---
