@@ -392,9 +392,11 @@ impl TileMap {
 
     /// Check if a diagonal step from `(x1,y1)` to `(x2,y2)` is passable.
     ///
-    /// A diagonal is blocked when either orthogonal "shoulder" tile is
-    /// non-walkable, preventing corner-cutting through diagonal wall seams.
-    /// Out-of-bounds or negative coordinates are treated as non-walkable.
+    /// A diagonal is blocked when both orthogonal "shoulder" tiles are
+    /// non-walkable (a wall seam). A single non-walkable shoulder is
+    /// allowed — the entity walks around the corner, matching DF/NetHack
+    /// convention. Out-of-bounds or negative coordinates count as
+    /// non-walkable.
     ///
     /// Any system that performs diagonal movement or ray-casting MUST call
     /// this method. See also: `find_path` neighbor loop, `run_wander`
@@ -404,7 +406,7 @@ impl TileMap {
         if x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0 {
             return false;
         }
-        self.is_walkable(x2 as usize, y1 as usize) && self.is_walkable(x1 as usize, y2 as usize)
+        self.is_walkable(x2 as usize, y1 as usize) || self.is_walkable(x1 as usize, y2 as usize)
     }
 
     /// Get an immutable reference to a chunk by coordinate.
@@ -1328,19 +1330,19 @@ mod tests {
 
     #[test]
     fn test_diagonal_clear_one_shoulder_walled() {
-        //  . #     moving (0,1) -> (1,0): shoulder (1,1) is Wall
-        //  . .
+        // One wall shoulder, one open — diagonal is allowed (DF/NetHack rule).
         let mut map = TileMap::new(5, 5);
         map.set_terrain(1, 0, Terrain::Wall);
-        // (0,1) -> (1,0): shoulders are (1,1)=Road and (0,0)=Road... wait
-        // Actually shoulder tiles for (x1,y1)->(x2,y2) are (x2,y1) and (x1,y2)
-        // For (0,1)->(1,0): shoulders = (1,1) and (0,0) — both walkable
+        // (0,1) -> (1,0): shoulders = (1,1)=Road, (0,0)=Road — both open
         assert!(map.diagonal_clear(0, 1, 1, 0));
 
         // Place wall at (1,1): now (0,0)->(1,1) has shoulder (1,0)=Wall
+        // but shoulder (0,1)=Road is still open — allowed under OR rule.
         map.set_terrain(1, 1, Terrain::Wall);
-        // (0,0)->(1,1) is blocked because dest is a wall, but diagonal_clear
-        // checks shoulders: (1,0)=Wall → blocked
+        assert!(map.diagonal_clear(0, 0, 1, 1));
+
+        // Both shoulders walled — blocked (wall seam).
+        map.set_terrain(0, 1, Terrain::Wall);
         assert!(!map.diagonal_clear(0, 0, 1, 1));
     }
 
