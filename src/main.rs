@@ -22,7 +22,6 @@ use wulfaz::systems::fatigue::run_fatigue;
 use wulfaz::systems::hunger::run_hunger;
 use wulfaz::systems::temperature::run_temperature;
 use wulfaz::systems::wander::run_wander;
-use wulfaz::world;
 use wulfaz::world::World;
 
 /// Convert sRGB component (0-1) to linear for use as wgpu clear color.
@@ -240,7 +239,7 @@ fn run_one_tick(world: &mut World) {
     timed!("combat", run_combat(world, tick));
     timed!("death", run_death(world, tick));
     #[cfg(debug_assertions)]
-    timed!("validate", world::validate_world(world));
+    timed!("validate", wulfaz::world::validate_world(world));
     world.tick = Tick(tick.0 + 1);
 }
 

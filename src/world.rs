@@ -246,7 +246,7 @@ impl World {
 
 /// Validate world invariants. Run every tick in debug builds.
 /// Checks that no entity exists in any property table without being in alive.
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 pub fn validate_world(world: &World) {
     // Body tables
     for entity in world.body.positions.keys() {
