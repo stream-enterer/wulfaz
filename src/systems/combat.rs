@@ -61,6 +61,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
         .combat_stats
         .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
+        .filter(|&(&e, _)| world.player != Some(e))
         .filter_map(|(&e, cs)| {
             let pos = world.body.positions.get(&e)?;
             world.body.healths.get(&e)?;
@@ -73,12 +74,15 @@ pub fn run_combat(world: &mut World, tick: Tick) {
     let mut attacks: Vec<(Entity, Entity, f32)> = Vec::new(); // (attacker, defender, damage)
 
     for &(attacker, ax, ay, aggression) in &combatants {
-        // Gate on intention if present, else legacy fallback
-        if let Some(intention) = world.mind.intentions.get(&attacker) {
-            if intention.action != ActionId::Attack {
-                continue;
-            }
-        } else if aggression <= 0.5 {
+        // Require Attack intention — no legacy fallback
+        let dominated = match world.mind.intentions.get(&attacker) {
+            Some(intention) => match intention.action {
+                ActionId::Attack => false,
+                ActionId::Idle | ActionId::Wander | ActionId::Eat => true,
+            },
+            None => true,
+        };
+        if dominated {
             continue;
         }
 
@@ -171,6 +175,17 @@ mod tests {
     use crate::components::*;
     use crate::world::World;
 
+    /// Set Attack intention on an entity targeting a defender.
+    fn set_attack_intention(world: &mut World, attacker: Entity, defender: Entity) {
+        world.mind.intentions.insert(
+            attacker,
+            Intention {
+                action: ActionId::Attack,
+                target: Some(defender),
+            },
+        );
+    }
+
     #[test]
     fn test_combat_damages_defender() {
         let mut world = World::new_with_seed(42);
@@ -217,6 +232,7 @@ mod tests {
             },
         );
 
+        set_attack_intention(&mut world, attacker, defender);
         world.rebuild_spatial_index();
         run_combat(&mut world, Tick(0));
 
@@ -270,6 +286,7 @@ mod tests {
             },
         );
 
+        set_attack_intention(&mut world, attacker, defender);
         world.rebuild_spatial_index();
         run_combat(&mut world, Tick(0));
 
@@ -322,6 +339,7 @@ mod tests {
             },
         );
 
+        set_attack_intention(&mut world, attacker, defender);
         world.rebuild_spatial_index();
         run_combat(&mut world, Tick(0));
 
@@ -353,7 +371,6 @@ mod tests {
                 aggression: 1.0,
             },
         );
-        world.pending_deaths.insert(attacker); // already dying
 
         let defender = world.spawn();
         world
@@ -376,6 +393,62 @@ mod tests {
             },
         );
 
+        set_attack_intention(&mut world, attacker, defender);
+        world.pending_deaths.insert(attacker); // already dying
+
+        run_combat(&mut world, Tick(0));
+
+        assert_eq!(world.body.healths[&defender].current, 100.0); // undamaged
+    }
+
+    #[test]
+    fn test_no_attack_intention_no_fight() {
+        let mut world = World::new_with_seed(42);
+
+        let attacker = world.spawn();
+        world
+            .body
+            .positions
+            .insert(attacker, Position { x: 5, y: 5 });
+        world.body.healths.insert(
+            attacker,
+            Health {
+                current: 100.0,
+                max: 100.0,
+            },
+        );
+        world.body.combat_stats.insert(
+            attacker,
+            CombatStats {
+                attack: 15.0,
+                defense: 5.0,
+                aggression: 1.0,
+            },
+        );
+
+        let defender = world.spawn();
+        world
+            .body
+            .positions
+            .insert(defender, Position { x: 5, y: 5 });
+        world.body.healths.insert(
+            defender,
+            Health {
+                current: 100.0,
+                max: 100.0,
+            },
+        );
+        world.body.combat_stats.insert(
+            defender,
+            CombatStats {
+                attack: 5.0,
+                defense: 3.0,
+                aggression: 0.0,
+            },
+        );
+
+        // No intention — attacker should not fight
+        world.rebuild_spatial_index();
         run_combat(&mut world, Tick(0));
 
         assert_eq!(world.body.healths[&defender].current, 100.0); // undamaged
@@ -427,6 +500,7 @@ mod tests {
             },
         );
 
+        set_attack_intention(&mut world, attacker, defender);
         run_combat(&mut world, Tick(0));
 
         assert_eq!(world.body.healths[&defender].current, 100.0); // undamaged

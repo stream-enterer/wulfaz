@@ -81,6 +81,12 @@ Goal: Camera movement smoothly activates/deactivates zones.
 - **SCALE-D03** — HPA* pathfinding. Chunk-level nav graph, border nodes, precomputed intra-chunk paths. Replaces B04. Needs: A02 (done).
 - **SCALE-D04** — Profile and tune. Zone radii, hydration batch size, tick budget per zone, entity count limits.
 
+## Architecture — DA-1/DA-2 Dialectic Results
+
+Source: `.workflow/dialectic-da1-da2/99-results-summary.md`
+
+All ARCH items implemented. ARCH-001 through ARCH-007 completed and deleted from backlog.
+
 ## Simulation Features (parallel or post-Phase B)
 
 Developable on test map or integrated after Phase B.

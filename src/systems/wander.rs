@@ -81,13 +81,20 @@ pub fn run_wander(world: &mut World, tick: Tick) {
         let intention = world.mind.intentions.get(&e);
         let action = intention.map(|i| i.action);
 
-        // Idle: skip movement but set cooldown (walk rate, no actual movement)
-        if action == Some(ActionId::Idle) {
-            cooldown_updates.push((e, base_cooldown));
-            continue;
-        }
-
-        let is_tracking = action == Some(ActionId::Eat) || action == Some(ActionId::Attack);
+        // Exhaustive match on ActionId to determine movement mode.
+        // Idle: stop and reassess — clear stale movement state.
+        // Eat/Attack: track target entity position.
+        // Wander/None: pathfind to random destination.
+        let is_tracking = match action {
+            Some(ActionId::Idle) => {
+                cooldown_updates.push((e, base_cooldown));
+                wander_target_updates.push((e, None));
+                cached_path_updates.push((e, PathUpdate::Remove));
+                continue;
+            }
+            Some(ActionId::Eat) | Some(ActionId::Attack) => true,
+            Some(ActionId::Wander) | None => false,
+        };
 
         // Determine goal position
         let goal: Option<(i32, i32)> = if is_tracking {
@@ -638,6 +645,56 @@ mod tests {
         run_wander(&mut world, Tick(0));
         assert_eq!(world.body.positions[&e].x, 5);
         assert_eq!(world.body.positions[&e].y, 5);
+    }
+
+    #[test]
+    fn test_idle_clears_cached_movement_state() {
+        use crate::components::{CachedPath, Intention, WanderTarget};
+
+        let mut world = World::new_with_seed(42);
+        let e = world.spawn();
+        world.body.positions.insert(e, Position { x: 5, y: 5 });
+        world.body.gait_profiles.insert(e, GaitProfile::biped());
+
+        // Pre-populate stale movement state
+        world.mind.wander_targets.insert(
+            e,
+            WanderTarget {
+                goal_x: 10,
+                goal_y: 10,
+            },
+        );
+        world.mind.cached_paths.insert(
+            e,
+            CachedPath {
+                steps: vec![(6, 5), (7, 5)],
+                goal: (10, 10),
+                next_step: 0,
+            },
+        );
+
+        world.mind.intentions.insert(
+            e,
+            Intention {
+                action: ActionId::Idle,
+                target: None,
+            },
+        );
+
+        run_wander(&mut world, Tick(0));
+
+        // Position unchanged
+        assert_eq!(world.body.positions[&e].x, 5);
+        assert_eq!(world.body.positions[&e].y, 5);
+        // Stale movement state cleared
+        assert!(
+            !world.mind.wander_targets.contains_key(&e),
+            "wander_targets should be cleared on Idle"
+        );
+        assert!(
+            !world.mind.cached_paths.contains_key(&e),
+            "cached_paths should be cleared on Idle"
+        );
     }
 
     #[test]

@@ -196,6 +196,9 @@ fn select_attack_target(world: &World, entity: Entity) -> Option<Entity> {
 // Scorer system
 // ---------------------------------------------------------------------------
 
+// Single-writer invariant: only `run_decisions` writes `intentions` and
+// `action_states` per tick. Phase 4 systems read intentions but never modify
+// them. Spawn may initialize `ActionState`; no other system mutates it.
 pub fn run_decisions(world: &mut World, _tick: Tick) {
     // Wipe stale intentions
     world.mind.intentions.clear();

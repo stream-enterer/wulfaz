@@ -78,6 +78,18 @@ Debug:   #[cfg(debug_assertions)] validate_world(&world);
 Every check is a `panic!` with a descriptive message. No
 `eprintln!`-and-continue.
 
+## Intention Lifecycle
+
+Phase 3 (`run_decisions`) clears all intentions, writes one
+`Intention{action, target}` per scored entity, and updates `ActionState`.
+Phase 4 never modifies intentions. `run_death` removes via `despawn()`.
+
+Only `run_decisions` writes `intentions` and `action_states` per tick.
+Always together. Spawn may initialize `ActionState`.
+
+Intentions have no multi-tick persistence — `ActionState` does (cooldowns,
+inertia). Multi-tick behavior uses a separate component, not Intention.
+
 ## Code Rules
 
 - Missing table entry = skip that entity silently (`if let Some`). Never
@@ -109,6 +121,17 @@ Every check is a `panic!` with a descriptive message. No
 - **Incoherent state** — entity present in the driving table but
   associated data violates an invariant — `debug_assert!` and skip.
   Example: `current_gait` present but no `GaitProfile`.
+- **Bundling decision:** default is one `HashMap<Entity, T>` per property.
+  Merge into an existing struct only when ALL hold: identical population
+  (no entity has one without the other), same lifecycle, co-accessed by
+  driving system, no independent driving use, no heap-allocating fields.
+  Always separate: transient tables (presence = signal), binary flags
+  (HashSet), different-sparsity properties. Driving-table granularity
+  changes break deterministic replay; require a migration plan.
+- **Phase 4 action dispatch:** use `match intention.action` (exhaustive)
+  in each Phase 4 consumer system, not `==` comparisons. This ensures
+  the compiler catches unhandled variants when `ActionId` gains new
+  entries.
 - **KDL loading:** missing field = hard error at load time. Panic with
   a message naming the file, node, and missing field. All KDL fields
   are required; there are no optional fields.

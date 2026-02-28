@@ -12,11 +12,14 @@ pub fn run_eating(world: &mut World, tick: Tick) {
         .hungers
         .iter()
         .filter(|&(&e, _)| !world.pending_deaths.contains(&e))
-        .filter(|&(&e, h)| {
-            if let Some(intention) = world.mind.intentions.get(&e) {
-                intention.action == ActionId::Eat
-            } else {
-                h.current > h.max * 0.5 // legacy fallback
+        .filter(|&(&e, _)| world.player != Some(e))
+        .filter(|&(&e, _)| {
+            let Some(intention) = world.mind.intentions.get(&e) else {
+                return false;
+            };
+            match intention.action {
+                ActionId::Eat => true,
+                ActionId::Idle | ActionId::Wander | ActionId::Attack => false,
             }
         })
         .filter_map(|(&e, _)| {
@@ -110,6 +113,14 @@ mod tests {
             .nutritions
             .insert(food, Nutrition { value: 30.0 });
 
+        world.mind.intentions.insert(
+            eater,
+            Intention {
+                action: ActionId::Eat,
+                target: Some(food),
+            },
+        );
+
         world.rebuild_spatial_index();
         run_eating(&mut world, Tick(0));
 
@@ -118,17 +129,17 @@ mod tests {
     }
 
     #[test]
-    fn test_not_hungry_enough_doesnt_eat() {
+    fn test_no_eat_intention_doesnt_eat() {
         let mut world = World::new_with_seed(42);
         let eater = world.spawn();
         world.body.positions.insert(eater, Position { x: 5, y: 5 });
         world.mind.hungers.insert(
             eater,
             Hunger {
-                current: 30.0,
+                current: 80.0,
                 max: 100.0,
             },
-        ); // not hungry enough
+        );
 
         let food = world.spawn();
         world.body.positions.insert(food, Position { x: 5, y: 5 });
@@ -137,9 +148,10 @@ mod tests {
             .nutritions
             .insert(food, Nutrition { value: 30.0 });
 
+        // No intention — entity should not eat
         run_eating(&mut world, Tick(0));
 
-        assert_eq!(world.mind.hungers[&eater].current, 30.0); // unchanged
+        assert_eq!(world.mind.hungers[&eater].current, 80.0); // unchanged
         assert!(!world.pending_deaths.contains(&food));
     }
 
@@ -153,6 +165,13 @@ mod tests {
             Hunger {
                 current: 80.0,
                 max: 100.0,
+            },
+        );
+        world.mind.intentions.insert(
+            eater,
+            Intention {
+                action: ActionId::Eat,
+                target: None,
             },
         );
         world.pending_deaths.insert(eater);
@@ -188,6 +207,14 @@ mod tests {
             .mind
             .nutritions
             .insert(food, Nutrition { value: 30.0 });
+
+        world.mind.intentions.insert(
+            eater,
+            Intention {
+                action: ActionId::Eat,
+                target: Some(food),
+            },
+        );
 
         run_eating(&mut world, Tick(0));
 
