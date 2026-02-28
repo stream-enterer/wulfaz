@@ -58,6 +58,9 @@ pub(crate) struct WidgetNode {
     pub clip_rect: Option<Rect>,
     /// Callback action dispatched on click (UI-305). Builder sets this.
     pub on_click: Option<UiAction>,
+    /// When true, this node and its children are invisible to hit-testing
+    /// but still render normally. Used for decorative overlays (e.g. pause dim).
+    pub hit_transparent: bool,
 }
 
 // ---------------------------------------------------------------------------

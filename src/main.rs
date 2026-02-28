@@ -381,6 +381,10 @@ struct App {
     // Cached viewport dimensions for minimap click centering.
     viewport_cols: usize,
     viewport_rows: usize,
+    /// Screen-pixel origin of a map drag-select (None = no active drag).
+    map_drag_origin: Option<(f32, f32)>,
+    /// Whether the current map press has exceeded the drag threshold.
+    map_selecting: bool,
 }
 
 impl App {
@@ -605,6 +609,16 @@ impl ApplicationHandler for App {
                     position.x as f32,
                     position.y as f32,
                 );
+                // Drag-select threshold check.
+                if let Some(origin) = self.map_drag_origin
+                    && !self.map_selecting
+                {
+                    let dx = position.x as f32 - origin.0;
+                    let dy = position.y as f32 - origin.1;
+                    if (dx * dx + dy * dy).sqrt() >= 4.0 {
+                        self.map_selecting = true;
+                    }
+                }
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
@@ -701,24 +715,30 @@ impl ApplicationHandler for App {
                                     }
                                 }
                                 ui::Action::CloseTopmost => {
-                                    use ui::DismissResult;
-                                    let now = Instant::now();
-                                    match self.ui.close_topmost_layer(&mut self.ui_tree, now) {
-                                        DismissResult::Tooltips
-                                        | DismissResult::Panel(_)
-                                        | DismissResult::Inspector => {}
-                                        DismissResult::Modal(pop) => {
-                                            self.cleanup_after_modal_pop();
-                                            if let Some(action) = pop.on_dismiss {
-                                                self.dispatch_click(action);
+                                    // Cancel active drag-select before dismiss chain.
+                                    if self.map_drag_origin.is_some() {
+                                        self.map_drag_origin = None;
+                                        self.map_selecting = false;
+                                    } else {
+                                        use ui::DismissResult;
+                                        let now = Instant::now();
+                                        match self.ui.close_topmost_layer(&mut self.ui_tree, now) {
+                                            DismissResult::Tooltips
+                                            | DismissResult::Panel(_)
+                                            | DismissResult::Inspector => {}
+                                            DismissResult::Modal(pop) => {
+                                                self.cleanup_after_modal_pop();
+                                                if let Some(action) = pop.on_dismiss {
+                                                    self.dispatch_click(action);
+                                                }
                                             }
-                                        }
-                                        DismissResult::Sidebar(tab) => {
-                                            self.handle_tab_click(tab);
-                                        }
-                                        DismissResult::Exit => {
-                                            self.save_window_state();
-                                            event_loop.exit();
+                                            DismissResult::Sidebar(tab) => {
+                                                self.handle_tab_click(tab);
+                                            }
+                                            DismissResult::Exit => {
+                                                self.save_window_state();
+                                                event_loop.exit();
+                                            }
                                         }
                                     }
                                 }
@@ -953,33 +973,72 @@ impl ApplicationHandler for App {
                             }
                         }
 
-                        // Game: plain left-click selects entity for inspector (UI-I01d).
-                        if pressed
-                            && button == MouseButton::Left
+                        // Game: plain left-click / drag-select for inspector.
+                        if button == MouseButton::Left
                             && !self.modifiers.shift_key()
                             && self.map_cell_w > 0.0
                         {
-                            let vx = (px - self.map_origin.0) / self.map_cell_w;
-                            let vy = (py - self.map_origin.1) / self.map_cell_h;
-                            if vx >= 0.0 && vy >= 0.0 {
-                                let tile_x = self.camera.x + vx as i32;
-                                let tile_y = self.camera.y + vy as i32;
-                                let mut candidates: Vec<components::Entity> = self
-                                    .world
-                                    .body
-                                    .positions
-                                    .iter()
-                                    .filter(|(e, p)| {
-                                        p.x == tile_x
-                                            && p.y == tile_y
-                                            && self.world.alive.contains(e)
-                                    })
-                                    .map(|(e, _)| *e)
-                                    .collect();
-                                candidates.sort_by_key(|e| e.0);
-                                self.ui.selected_entity = candidates.first().copied();
-                            } else {
-                                self.ui.selected_entity = None;
+                            if pressed {
+                                // Record drag origin; don't select yet.
+                                self.map_drag_origin = Some((px, py));
+                                self.map_selecting = false;
+                            } else if let Some(origin) = self.map_drag_origin.take() {
+                                if self.map_selecting {
+                                    // Marquee select: find first entity whose
+                                    // tile center (screen px) is inside the box.
+                                    self.map_selecting = false;
+                                    let x0 = origin.0.min(px);
+                                    let y0 = origin.1.min(py);
+                                    let x1 = origin.0.max(px);
+                                    let y1 = origin.1.max(py);
+                                    let mcw = self.map_cell_w;
+                                    let mch = self.map_cell_h;
+                                    let cam_x = self.camera.x;
+                                    let cam_y = self.camera.y;
+                                    let ox = self.map_origin.0;
+                                    let oy = self.map_origin.1;
+                                    let mut candidates: Vec<components::Entity> = self
+                                        .world
+                                        .body
+                                        .positions
+                                        .iter()
+                                        .filter(|(e, p)| {
+                                            if !self.world.alive.contains(e) {
+                                                return false;
+                                            }
+                                            let cx = ox + (p.x - cam_x) as f32 * mcw + mcw * 0.5;
+                                            let cy = oy + (p.y - cam_y) as f32 * mch + mch * 0.5;
+                                            cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1
+                                        })
+                                        .map(|(e, _)| *e)
+                                        .collect();
+                                    candidates.sort_by_key(|e| e.0);
+                                    self.ui.selected_entity = candidates.first().copied();
+                                } else {
+                                    // Point select at release position.
+                                    let vx = (px - self.map_origin.0) / self.map_cell_w;
+                                    let vy = (py - self.map_origin.1) / self.map_cell_h;
+                                    if vx >= 0.0 && vy >= 0.0 {
+                                        let tile_x = self.camera.x + vx as i32;
+                                        let tile_y = self.camera.y + vy as i32;
+                                        let mut candidates: Vec<components::Entity> = self
+                                            .world
+                                            .body
+                                            .positions
+                                            .iter()
+                                            .filter(|(e, p)| {
+                                                p.x == tile_x
+                                                    && p.y == tile_y
+                                                    && self.world.alive.contains(e)
+                                            })
+                                            .map(|(e, _)| *e)
+                                            .collect();
+                                        candidates.sort_by_key(|e| e.0);
+                                        self.ui.selected_entity = candidates.first().copied();
+                                    } else {
+                                        self.ui.selected_entity = None;
+                                    }
+                                }
                             }
                         }
                     }
@@ -1425,11 +1484,12 @@ impl ApplicationHandler for App {
 
                             // Build hover tooltip after all UI is laid out, gated
                             // on cursor not being over any UI widget (UI-I01b).
+                            // Also suppress while dragging a selection box.
                             let cursor_over_ui = self
                                 .ui_tree
                                 .hit_test(self.cursor_pos.x as f32, self.cursor_pos.y as f32)
                                 .is_some();
-                            if !cursor_over_ui {
+                            if !cursor_over_ui && !self.map_selecting {
                                 let px = self.cursor_pos.x as f32;
                                 let py = self.cursor_pos.y as f32;
                                 let vx = (px - self.map_origin.0) / self.map_cell_w;
@@ -1636,6 +1696,30 @@ impl ApplicationHandler for App {
                                         );
                                     }
                                 }
+                            }
+
+                            // Drag-select marquee box overlay.
+                            if let Some(origin) = self.map_drag_origin
+                                && self.map_selecting
+                            {
+                                let cx = self.cursor_pos.x as f32;
+                                let cy = self.cursor_pos.y as f32;
+                                let x = origin.0.min(cx);
+                                let y = origin.1.min(cy);
+                                let w = (origin.0 - cx).abs().max(1.0);
+                                let h = (origin.1 - cy).abs().max(1.0);
+                                panel.add_panel(
+                                    x,
+                                    y,
+                                    w,
+                                    h,
+                                    [0.0, 0.0, 0.0, 0.0],
+                                    [1.0, 1.0, 1.0, 1.0],
+                                    1.0,
+                                    0.0,
+                                    no_clip_min,
+                                    no_clip_max,
+                                );
                             }
 
                             // Map overlay panels are already in the buffer.
@@ -1934,6 +2018,8 @@ fn main() {
         minimap_dragging: false,
         viewport_cols: 0,
         viewport_rows: 0,
+        map_drag_origin: None,
+        map_selecting: false,
     };
     event_loop.run_app(&mut app).expect("run event loop");
 }

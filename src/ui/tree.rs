@@ -71,6 +71,7 @@ impl WidgetTree {
             constraints: None,
             clip_rect: None,
             on_click: None,
+            hit_transparent: false,
         });
         self.roots.push((id, z_tier));
         id
@@ -94,6 +95,7 @@ impl WidgetTree {
             constraints: None,
             clip_rect: None,
             on_click: None,
+            hit_transparent: false,
         });
         if let Some(parent_node) = self.arena.get_mut(parent) {
             parent_node.children.push(id);
@@ -232,6 +234,14 @@ impl WidgetTree {
     pub fn set_on_click(&mut self, id: WidgetId, action: UiAction) {
         if let Some(node) = self.arena.get_mut(id) {
             node.on_click = Some(action);
+        }
+    }
+
+    /// Mark a widget (and its children) as invisible to hit-testing.
+    /// The widget still renders normally.
+    pub fn set_hit_transparent(&mut self, id: WidgetId, transparent: bool) {
+        if let Some(node) = self.arena.get_mut(id) {
+            node.hit_transparent = transparent;
         }
     }
 

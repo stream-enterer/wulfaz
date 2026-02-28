@@ -19,6 +19,9 @@ impl WidgetTree {
 
     fn hit_test_node(&self, id: WidgetId, x: f32, y: f32) -> Option<WidgetId> {
         let node = self.arena.get(id)?;
+        if node.hit_transparent {
+            return None;
+        }
         if !node.rect.contains(x, y) {
             return None;
         }

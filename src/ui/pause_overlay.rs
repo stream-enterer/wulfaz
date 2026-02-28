@@ -15,6 +15,7 @@ pub fn build_pause_overlay(tree: &mut WidgetTree, screen_w: f32, screen_h: f32) 
     });
     tree.set_position(overlay, Position::Fixed { x: 0.0, y: 0.0 });
     tree.set_sizing(overlay, Sizing::Fixed(screen_w), Sizing::Fixed(screen_h));
+    tree.set_hit_transparent(overlay, true);
     overlay
 }
 
