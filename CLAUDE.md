@@ -74,6 +74,10 @@ Debug:   #[cfg(debug_assertions)] validate_world(&world);
 - Phase 4 changes external world state (position, HP, inventory).
 - Phase 5 derives consequences from changes already made this tick.
 
+`validate_world()` runs every tick under `#[cfg(debug_assertions)]`.
+Every check is a `panic!` with a descriptive message. No
+`eprintln!`-and-continue.
+
 ## Code Rules
 
 - Missing table entry = skip that entity silently (`if let Some`). Never
@@ -88,6 +92,26 @@ Debug:   #[cfg(debug_assertions)] validate_world(&world);
 - Do not use `unsafe` without explicit approval.
 - Do not replace HashMap with another data structure without profiling data
   showing >5ms per tick for that system.
+- **System naming:** `run_{noun}_{operation}`. Noun first, then operation.
+  Never verb-first (`run_decay_hunger`). When a system spans subsystems,
+  use the driving table's noun.
+- **Collect-then-apply variables:** `let mut {noun}_changes: Vec<_>`.
+  Always `changes`.
+- **Constants** live in the system file that owns them, at the top.
+  Per-creature-type values belong in `data/*.kdl`. Global values that
+  apply uniformly are Rust `const`s.
+- **Binary flags** use `HashSet<Entity>`. Not `HashMap<Entity, bool>`,
+  not a `bool` field on a struct. Follows the same lifecycle as any
+  property table (see Adding a New Property Table).
+- **Method placement:** if a method touches only one sub-struct's fields,
+  it lives on that sub-struct. Methods on `World` only when they need
+  data from two or more sub-structs.
+- **Incoherent state** — entity present in the driving table but
+  associated data violates an invariant — `debug_assert!` and skip.
+  Example: `current_gait` present but no `GaitProfile`.
+- **KDL loading:** missing field = hard error at load time. Panic with
+  a message naming the file, node, and missing field. All KDL fields
+  are required; there are no optional fields.
 
 ## Spatial Scale
 
@@ -194,7 +218,7 @@ LOD caps active entities at ~4K; the rest are district aggregate models.
 2. Add `pub mod new_system;` to `src/systems/mod.rs`
 3. Add the call to the correct phase in `main.rs`
 4. Ensure deterministic iteration order — sort by `e.0` where it matters
-5. Write a unit test (see Testing)
+5. Write unit tests (see Testing)
 6. `cargo build` + run debug mode to confirm `validate_world()` passes
 
 ## Adding a New Property Table
@@ -277,9 +301,17 @@ No dirty tracking. No retained tree state. No diff-and-patch.
 
 ## Testing
 
-Every new system MUST ship with a unit test. Construct a minimal World
-with `World::new_with_seed(42)`, spawn an entity, insert components,
-run the system, assert state change.
+Every new system MUST ship with at least two unit tests:
 
-- Property-based tests in `tests/invariants.rs`: no zombie entities,
-  food conservation, deterministic replay with same seed.
+- **Positive case:** construct a minimal World with
+  `World::new_with_seed(42)`, spawn an entity, insert components, run
+  the system, assert the expected state change.
+- **Negative case:** spawn an entity that does not meet preconditions
+  (missing component, already in `pending_deaths`, on cooldown). Run
+  the system. Assert the entity was skipped.
+
+Test deterministic replay at the integration level in
+`tests/invariants.rs`, not per-system.
+
+Property-based tests in `tests/invariants.rs`: no zombie entities,
+food conservation.
