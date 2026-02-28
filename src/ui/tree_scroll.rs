@@ -187,8 +187,14 @@ impl WidgetTree {
 mod tests {
     use super::*;
     use crate::ui::draw::{DrawList, FontFamily, HeuristicMeasurer};
-    use crate::ui::test_helpers::screen;
     use crate::ui::{Edges, Position, Size, Sizing};
+
+    fn screen() -> Size {
+        Size {
+            width: 800.0,
+            height: 600.0,
+        }
+    }
 
     fn scroll_list_tree(n: usize) -> (WidgetTree, WidgetId) {
         let mut tree = WidgetTree::new();

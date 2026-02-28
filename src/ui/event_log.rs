@@ -215,8 +215,14 @@ mod tests {
     use super::*;
     use crate::ui::draw::{DrawList, HeuristicMeasurer};
     use crate::ui::geometry::{Position, Size};
-    use crate::ui::test_helpers::screen;
     use crate::ui::theme::Theme;
+
+    fn screen() -> Size {
+        Size {
+            width: 800.0,
+            height: 600.0,
+        }
+    }
     use crate::ui::tree::WidgetTree;
     use crate::ui::widget::Widget;
 

@@ -170,9 +170,15 @@ mod tests {
     use super::super::draw::{DrawList, HeuristicMeasurer};
     use super::super::geometry::Position;
     use super::super::node::ZTier;
-    use super::super::test_helpers::screen;
     use super::super::widget::TooltipContent;
     use super::*;
+
+    fn screen() -> Size {
+        Size {
+            width: 800.0,
+            height: 600.0,
+        }
+    }
 
     /// Helper: build a minimal HoverInfo with just terrain.
     fn hover_terrain_only() -> HoverInfo {

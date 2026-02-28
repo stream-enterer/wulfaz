@@ -783,7 +783,8 @@ pub(crate) fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::wrap_text;
-    use crate::ui::widget;
+    use crate::ui::draw::TextSpan;
+    use crate::ui::widget::{self, CrossAlign};
     use crate::ui::*;
 
     // ------------------------------------------------------------------
