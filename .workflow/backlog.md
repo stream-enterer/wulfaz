@@ -100,8 +100,6 @@ Developable on test map or integrated after Phase B.
 
 ## Phase UI-5 — Polish & Architecture (remaining)
 
-- **UI-511** — Evaluate `pub(crate)` + re-export convention at scale. `ui/mod.rs` is 130+ lines of `pub use` forwarding from 22 `pub(crate)` modules. The pattern is prescribed by CLAUDE.md and consistent, but the `#[allow(unused_imports)]` annotations on every re-export line are a code smell. Audit whether: (a) the unused_imports warnings can be resolved by removing genuinely dead re-exports, (b) grouping re-exports by concern improves readability, (c) some modules could merge to reduce the re-export surface. If the pattern proves untenable, propose a CLAUDE.md amendment to switch all UI modules to `pub mod` and drop the re-exports globally. Do not change one module in isolation.
-
 - **UI-500** — Retained tree optimization (incremental rebuild). Needs: UI-505 (done). Blocks: none.
   - Phase 1: `generation: u64` counter + `WidgetTree::gc()`.
   - Phase 2: builders skip rebuild if data unchanged.
