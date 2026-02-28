@@ -520,6 +520,13 @@ impl UiState {
         self.tooltip_pending = None;
     }
 
+    /// Push a fake tooltip entry for testing. The `root` widget must already
+    /// exist in the tree.
+    #[cfg(test)]
+    pub(crate) fn push_fake_tooltip(&mut self, source: WidgetId, root: WidgetId) {
+        self.tooltip_stack.push(TooltipEntry { source, root });
+    }
+
     /// Build and show a tooltip for the given source widget.
     fn show_tooltip(
         &mut self,

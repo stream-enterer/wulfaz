@@ -704,32 +704,29 @@ impl ApplicationHandler for App {
                                     }
                                 }
                                 ui::Action::CloseTopmost => {
-                                    // Priority: tooltips → modals → panels → inspector → sidebar → exit.
-                                    if self.ui.input.tooltip_count() > 0 {
-                                        self.ui.input.dismiss_all_tooltips(
-                                            &mut self.ui_tree,
-                                            Instant::now(),
-                                        );
-                                    } else if !self.ui.modals.is_empty() {
-                                        self.pop_modal_with(false);
-                                    } else if self
-                                        .ui
-                                        .panels
-                                        .close_topmost(&mut self.ui_tree)
-                                        .is_some()
-                                    {
-                                        // Closed a panel — done.
-                                    } else if self.selected_entity.is_some() {
-                                        self.selected_entity = None;
-                                    } else if self.ui.sidebar.active_tab.is_some()
-                                        && self.ui.animator.target("sidebar_slide") != Some(1.0)
-                                    {
-                                        // Close active sidebar tab.
-                                        let tab = self.ui.sidebar.active_tab.unwrap_or(0);
-                                        self.handle_tab_click(tab);
-                                    } else {
-                                        self.save_window_state();
-                                        event_loop.exit();
+                                    use ui::DismissResult;
+                                    let now = Instant::now();
+                                    match self.ui.close_topmost_layer(
+                                        &mut self.ui_tree,
+                                        &mut self.selected_entity,
+                                        now,
+                                    ) {
+                                        DismissResult::Tooltips
+                                        | DismissResult::Panel(_)
+                                        | DismissResult::Inspector => {}
+                                        DismissResult::Modal(pop) => {
+                                            self.cleanup_after_modal_pop();
+                                            if let Some(action) = pop.on_dismiss {
+                                                self.dispatch_click(action);
+                                            }
+                                        }
+                                        DismissResult::Sidebar(tab) => {
+                                            self.handle_tab_click(tab);
+                                        }
+                                        DismissResult::Exit => {
+                                            self.save_window_state();
+                                            event_loop.exit();
+                                        }
                                     }
                                 }
                                 // Phase UI-4: new keybinding actions (stubs for now).

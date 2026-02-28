@@ -52,7 +52,7 @@ pub use character_finder::{
 #[allow(unused_imports)] // Public API: used by main.rs for character panel (UI-400).
 pub use character_panel::{CharacterPanelInfo, build_character_panel, collect_character_info};
 #[allow(unused_imports)] // Public API: used by main.rs for UiContext (UI-P2).
-pub use context::{SidebarState, UiContext};
+pub use context::{DismissResult, SidebarState, UiContext};
 #[allow(unused_imports)] // Public API: used by main.rs for context menus (UI-303).
 pub use context_menu::{ContextMenu, MenuItem};
 #[allow(unused_imports)] // Public API: used by game panels constructing widgets.

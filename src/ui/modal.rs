@@ -17,6 +17,7 @@ impl ModalOptions {
 }
 
 /// Result of popping a modal.
+#[derive(Debug)]
 pub struct ModalPop {
     /// The content root that was removed.
     pub content: WidgetId,
