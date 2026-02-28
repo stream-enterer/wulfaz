@@ -39,16 +39,16 @@ pub fn run_wander(world: &mut World, tick: Tick) {
     candidates.sort_by_key(|e| e.0);
 
     // Determine which entities move this tick and what their new cooldowns are
-    let mut moves: Vec<(Entity, Position)> = Vec::new();
-    let mut cooldown_updates: Vec<(Entity, u32)> = Vec::new();
-    let mut wander_target_updates: Vec<(Entity, Option<WanderTarget>)> = Vec::new();
+    let mut position_changes: Vec<(Entity, Position)> = Vec::new();
+    let mut cooldown_changes: Vec<(Entity, u32)> = Vec::new();
+    let mut wander_target_changes: Vec<(Entity, Option<WanderTarget>)> = Vec::new();
 
     enum PathUpdate {
         Remove,
         Advance,             // bump next_step by 1
         Replace(CachedPath), // fresh path from A*
     }
-    let mut cached_path_updates: Vec<(Entity, PathUpdate)> = Vec::new();
+    let mut cached_path_changes: Vec<(Entity, PathUpdate)> = Vec::new();
 
     for e in candidates {
         let remaining = world
@@ -60,7 +60,7 @@ pub fn run_wander(world: &mut World, tick: Tick) {
 
         if remaining > 0 {
             // Still cooling down — decrement
-            cooldown_updates.push((e, remaining - 1));
+            cooldown_changes.push((e, remaining - 1));
             continue;
         }
 
@@ -76,6 +76,11 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             .get(&e)
             .copied()
             .unwrap_or(Gait::Walk);
+        debug_assert!(
+            world.body.gait_profiles.contains_key(&e) || !world.body.current_gaits.contains_key(&e),
+            "entity {:?}: has current_gait but no gait_profile",
+            e
+        );
         let base_cooldown = profile.cooldown(gait);
 
         let intention = world.mind.intentions.get(&e);
@@ -87,9 +92,9 @@ pub fn run_wander(world: &mut World, tick: Tick) {
         // Wander/None: pathfind to random destination.
         let is_tracking = match action {
             Some(ActionId::Idle) => {
-                cooldown_updates.push((e, base_cooldown));
-                wander_target_updates.push((e, None));
-                cached_path_updates.push((e, PathUpdate::Remove));
+                cooldown_changes.push((e, base_cooldown));
+                wander_target_changes.push((e, None));
+                cached_path_changes.push((e, PathUpdate::Remove));
                 continue;
             }
             Some(ActionId::Eat) | Some(ActionId::Attack) => true,
@@ -157,12 +162,12 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             let x = (pos.x + dx).clamp(0, (map_w - 1).max(0));
             let y = (pos.y + dy).clamp(0, (map_h - 1).max(0));
             if !world.tiles.is_walkable(x as usize, y as usize) {
-                cooldown_updates.push((e, base_cooldown));
+                cooldown_changes.push((e, base_cooldown));
                 continue;
             }
             let is_diag = is_diagonal_step((pos.x, pos.y), (x, y));
             if is_diag && !world.tiles.diagonal_clear(pos.x, pos.y, x, y) {
-                cooldown_updates.push((e, base_cooldown));
+                cooldown_changes.push((e, base_cooldown));
                 continue;
             }
             let reset = if is_diag {
@@ -170,10 +175,10 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             } else {
                 base_cooldown
             };
-            moves.push((e, Position { x, y }));
-            cooldown_updates.push((e, reset));
-            wander_target_updates.push((e, None));
-            cached_path_updates.push((e, PathUpdate::Remove));
+            position_changes.push((e, Position { x, y }));
+            cooldown_changes.push((e, reset));
+            wander_target_changes.push((e, None));
+            cached_path_changes.push((e, PathUpdate::Remove));
             continue;
         };
 
@@ -195,8 +200,8 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             let is_diag = is_diagonal_step((pos.x, pos.y), dest);
             if is_diag && !world.tiles.diagonal_clear(pos.x, pos.y, dest.0, dest.1) {
                 // Stale cache contains illegal diagonal — invalidate and re-path next tick.
-                cooldown_updates.push((e, base_cooldown));
-                cached_path_updates.push((e, PathUpdate::Remove));
+                cooldown_changes.push((e, base_cooldown));
+                cached_path_changes.push((e, PathUpdate::Remove));
                 continue;
             }
             // Use cached path: advance index
@@ -205,30 +210,30 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             } else {
                 base_cooldown
             };
-            moves.push((
+            position_changes.push((
                 e,
                 Position {
                     x: dest.0,
                     y: dest.1,
                 },
             ));
-            cooldown_updates.push((e, reset));
+            cooldown_changes.push((e, reset));
 
             // Check if path will be exhausted after this step
             let cp = &world.mind.cached_paths[&e];
             if cp.next_step + 1 >= cp.steps.len() {
                 // Path exhausted — clear target and cached path
-                wander_target_updates.push((e, None));
-                cached_path_updates.push((e, PathUpdate::Remove));
+                wander_target_changes.push((e, None));
+                cached_path_changes.push((e, PathUpdate::Remove));
             } else {
-                wander_target_updates.push((
+                wander_target_changes.push((
                     e,
                     Some(WanderTarget {
                         goal_x: gx,
                         goal_y: gy,
                     }),
                 ));
-                cached_path_updates.push((e, PathUpdate::Advance));
+                cached_path_changes.push((e, PathUpdate::Advance));
             }
         } else if let Some(path) = find_path(
             &world.tiles,
@@ -239,11 +244,11 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             // Compute fresh A* path using pooled workspace
             if path.is_empty() {
                 // Already at goal
-                cooldown_updates.push((e, base_cooldown));
+                cooldown_changes.push((e, base_cooldown));
                 if !is_tracking {
-                    wander_target_updates.push((e, None));
+                    wander_target_changes.push((e, None));
                 }
-                cached_path_updates.push((e, PathUpdate::Remove));
+                cached_path_changes.push((e, PathUpdate::Remove));
             } else {
                 let dest = path[0];
                 let is_diag = is_diagonal_step((pos.x, pos.y), dest);
@@ -252,22 +257,22 @@ pub fn run_wander(world: &mut World, tick: Tick) {
                 } else {
                     base_cooldown
                 };
-                moves.push((
+                position_changes.push((
                     e,
                     Position {
                         x: dest.0,
                         y: dest.1,
                     },
                 ));
-                cooldown_updates.push((e, reset));
+                cooldown_changes.push((e, reset));
 
                 if !is_tracking {
                     if path.len() <= 1 {
                         // Will arrive this step — clear target
-                        wander_target_updates.push((e, None));
-                        cached_path_updates.push((e, PathUpdate::Remove));
+                        wander_target_changes.push((e, None));
+                        cached_path_changes.push((e, PathUpdate::Remove));
                     } else {
-                        wander_target_updates.push((
+                        wander_target_changes.push((
                             e,
                             Some(WanderTarget {
                                 goal_x: gx,
@@ -275,7 +280,7 @@ pub fn run_wander(world: &mut World, tick: Tick) {
                             }),
                         ));
                         // Cache path with next_step=1 (step 0 already consumed)
-                        cached_path_updates.push((
+                        cached_path_changes.push((
                             e,
                             PathUpdate::Replace(CachedPath {
                                 steps: path,
@@ -286,7 +291,7 @@ pub fn run_wander(world: &mut World, tick: Tick) {
                     }
                 } else {
                     // Tracking: don't cache (target moves), invalidate any stale cache
-                    cached_path_updates.push((e, PathUpdate::Remove));
+                    cached_path_changes.push((e, PathUpdate::Remove));
                 }
             }
         } else {
@@ -305,16 +310,16 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             let x = (pos.x + dx).clamp(0, (map_w - 1).max(0));
             let y = (pos.y + dy).clamp(0, (map_h - 1).max(0));
             if !world.tiles.is_walkable(x as usize, y as usize) {
-                cooldown_updates.push((e, base_cooldown));
-                wander_target_updates.push((e, None));
-                cached_path_updates.push((e, PathUpdate::Remove));
+                cooldown_changes.push((e, base_cooldown));
+                wander_target_changes.push((e, None));
+                cached_path_changes.push((e, PathUpdate::Remove));
                 continue;
             }
             let is_diag = is_diagonal_step((pos.x, pos.y), (x, y));
             if is_diag && !world.tiles.diagonal_clear(pos.x, pos.y, x, y) {
-                cooldown_updates.push((e, base_cooldown));
-                wander_target_updates.push((e, None));
-                cached_path_updates.push((e, PathUpdate::Remove));
+                cooldown_changes.push((e, base_cooldown));
+                wander_target_changes.push((e, None));
+                cached_path_changes.push((e, PathUpdate::Remove));
                 continue;
             }
             let reset = if is_diag {
@@ -322,15 +327,15 @@ pub fn run_wander(world: &mut World, tick: Tick) {
             } else {
                 base_cooldown
             };
-            moves.push((e, Position { x, y }));
-            cooldown_updates.push((e, reset));
-            wander_target_updates.push((e, None));
-            cached_path_updates.push((e, PathUpdate::Remove));
+            position_changes.push((e, Position { x, y }));
+            cooldown_changes.push((e, reset));
+            wander_target_changes.push((e, None));
+            cached_path_changes.push((e, PathUpdate::Remove));
         }
     }
 
     // Apply cooldown updates
-    for (e, remaining) in cooldown_updates {
+    for (e, remaining) in cooldown_changes {
         world
             .body
             .move_cooldowns
@@ -338,7 +343,7 @@ pub fn run_wander(world: &mut World, tick: Tick) {
     }
 
     // Apply wander target updates
-    for (e, target) in wander_target_updates {
+    for (e, target) in wander_target_changes {
         if let Some(wt) = target {
             world.mind.wander_targets.insert(e, wt);
         } else {
@@ -347,7 +352,7 @@ pub fn run_wander(world: &mut World, tick: Tick) {
     }
 
     // Apply cached path updates
-    for (e, update) in cached_path_updates {
+    for (e, update) in cached_path_changes {
         match update {
             PathUpdate::Remove => {
                 world.mind.cached_paths.remove(&e);
@@ -363,8 +368,8 @@ pub fn run_wander(world: &mut World, tick: Tick) {
         }
     }
 
-    // Apply moves
-    for (e, new_pos) in moves {
+    // Apply position_changes
+    for (e, new_pos) in position_changes {
         if let Some(pos) = world.body.positions.get_mut(&e) {
             *pos = new_pos;
             world.events.push(Event::Moved {

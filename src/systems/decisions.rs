@@ -247,7 +247,7 @@ pub fn run_decisions(world: &mut World, _tick: Tick) {
 
     // Score and decide for each entity
     let config = world.mind.utility_config.clone();
-    let mut results: Vec<(Entity, ActionId, Option<Entity>)> = Vec::new();
+    let mut decision_changes: Vec<(Entity, ActionId, Option<Entity>)> = Vec::new();
 
     for &entity in &entities {
         let current_action = world
@@ -333,11 +333,11 @@ pub fn run_decisions(world: &mut World, _tick: Tick) {
             _ => None,
         };
 
-        results.push((entity, best_action, target));
+        decision_changes.push((entity, best_action, target));
     }
 
-    // Apply results
-    for (entity, action, target) in results {
+    // Apply decision changes
+    for (entity, action, target) in decision_changes {
         let old_action = world
             .mind
             .action_states

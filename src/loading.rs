@@ -49,6 +49,14 @@ fn child_f64(children: &kdl::KdlDocument, key: &str) -> Option<f64> {
         .or_else(|| val.as_integer().map(|i| i as f64))
 }
 
+fn require_str<'a>(children: &'a kdl::KdlDocument, key: &str, file: &str, node: &str) -> &'a str {
+    child_str(children, key).unwrap_or_else(|| panic!("{file}: node '{node}': missing '{key}'"))
+}
+
+fn require_f64(children: &kdl::KdlDocument, key: &str, file: &str, node: &str) -> f64 {
+    child_f64(children, key).unwrap_or_else(|| panic!("{file}: node '{node}': missing '{key}'"))
+}
+
 /// Default body/mind stats for spawning entities. Named archetypes live in
 /// `data/archetypes.kdl`; the GIS spawn path looks up the relevant one by name.
 pub struct Archetype {
@@ -94,18 +102,20 @@ pub fn load_archetypes(path: &str) -> HashMap<String, Archetype> {
         };
 
         let Some(children) = node.children() else {
-            map.insert(name.to_string(), Archetype::default());
-            continue;
+            panic!("{path}: node '{name}': missing children block (all fields required)");
         };
 
-        let icon_str = child_str(children, "icon").unwrap_or("?");
-        let icon = icon_str.chars().next().unwrap_or('?');
-        let health = child_f64(children, "health").unwrap_or(100.0) as f32;
-        let max_hunger = child_f64(children, "max_hunger").unwrap_or(100.0) as f32;
-        let attack = child_f64(children, "attack").unwrap_or(10.0) as f32;
-        let defense = child_f64(children, "defense").unwrap_or(5.0) as f32;
-        let aggression = child_f64(children, "aggression").unwrap_or(0.0) as f32;
-        let gaits_str = child_str(children, "gaits").unwrap_or("biped");
+        let icon_str = require_str(children, "icon", path, name);
+        let icon = icon_str
+            .chars()
+            .next()
+            .unwrap_or_else(|| panic!("{path}: node '{name}': 'icon' is empty"));
+        let health = require_f64(children, "health", path, name) as f32;
+        let max_hunger = require_f64(children, "max_hunger", path, name) as f32;
+        let attack = require_f64(children, "attack", path, name) as f32;
+        let defense = require_f64(children, "defense", path, name) as f32;
+        let aggression = require_f64(children, "aggression", path, name) as f32;
+        let gaits_str = require_str(children, "gaits", path, name);
         let gait_profile = match gaits_str {
             "quadruped" => GaitProfile::quadruped(),
             _ => GaitProfile::biped(),

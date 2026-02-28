@@ -30,7 +30,7 @@ pub fn run_eating(world: &mut World, tick: Tick) {
     hungry.sort_by_key(|(e, _, _, _)| e.0);
 
     // Find food items at same positions using spatial index
-    let mut eat_actions: Vec<(Entity, Entity, f32)> = Vec::new(); // (eater, food, nutrition)
+    let mut eat_changes: Vec<(Entity, Entity, f32)> = Vec::new(); // (eater, food, nutrition)
     let mut consumed: HashSet<Entity> = HashSet::new();
 
     for (eater, ex, ey, _) in &hungry {
@@ -44,7 +44,7 @@ pub fn run_eating(world: &mut World, tick: Tick) {
             && fp.y == *ey
             && n.value > 0.0
         {
-            eat_actions.push((*eater, target, n.value));
+            eat_changes.push((*eater, target, n.value));
             consumed.insert(target);
             continue;
         }
@@ -65,13 +65,13 @@ pub fn run_eating(world: &mut World, tick: Tick) {
         candidates.sort_unstable_by_key(|(e, _)| e.0); // determinism
 
         if let Some(&(food_entity, nutrition_value)) = candidates.first() {
-            eat_actions.push((*eater, food_entity, nutrition_value));
+            eat_changes.push((*eater, food_entity, nutrition_value));
             consumed.insert(food_entity);
         }
     }
 
     // Apply eating
-    for (eater, food, nutrition_value) in eat_actions {
+    for (eater, food, nutrition_value) in eat_changes {
         if let Some(hunger) = world.mind.hungers.get_mut(&eater) {
             hunger.current = (hunger.current - nutrition_value).max(0.0);
         }

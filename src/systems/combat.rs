@@ -71,9 +71,16 @@ pub fn run_combat(world: &mut World, tick: Tick) {
     combatants.sort_by_key(|(e, _, _, _)| e.0);
 
     // Find attack pairs: aggressive entity attacks another at same position
-    let mut attacks: Vec<(Entity, Entity, f32)> = Vec::new(); // (attacker, defender, damage)
+    let mut combat_changes: Vec<(Entity, Entity, f32)> = Vec::new(); // (attacker, defender, damage)
 
     for &(attacker, ax, ay, aggression) in &combatants {
+        debug_assert!(
+            world.body.combat_stats.contains_key(&attacker)
+                && world.body.healths.contains_key(&attacker)
+                && world.body.positions.contains_key(&attacker),
+            "entity {:?}: in combatants but missing combat_stats, health, or position",
+            attacker
+        );
         // Require Attack intention — no legacy fallback
         let dominated = match world.mind.intentions.get(&attacker) {
             Some(intention) => match intention.action {
@@ -117,7 +124,7 @@ pub fn run_combat(world: &mut World, tick: Tick) {
             && tp.y == ay
         {
             let damage = compute_fatigue_damage(world, attacker, target);
-            attacks.push((attacker, target, damage));
+            combat_changes.push((attacker, target, damage));
             found_target = true;
         }
 
@@ -134,13 +141,13 @@ pub fn run_combat(world: &mut World, tick: Tick) {
 
             if let Some(&defender) = candidates.first() {
                 let damage = compute_fatigue_damage(world, attacker, defender);
-                attacks.push((attacker, defender, damage));
+                combat_changes.push((attacker, defender, damage));
             }
         }
     }
 
-    // Apply attacks
-    for (attacker, defender, damage) in attacks {
+    // Apply combat_changes
+    for (attacker, defender, damage) in combat_changes {
         // Attacker gains fatigue from attacking
         if let Some(f) = world.body.fatigues.get_mut(&attacker) {
             f.current += ATTACK_FATIGUE_COST;

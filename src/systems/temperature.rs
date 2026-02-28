@@ -17,7 +17,7 @@ pub fn run_temperature(world: &mut World, _tick: Tick) {
 
     // (cx, cy, lx, ly, new_temp)
     let mut changes: Vec<(usize, usize, usize, usize, f32)> = Vec::new();
-    let mut equilibrium_chunks: Vec<(usize, usize)> = Vec::new();
+    let mut equilibrium_changes: Vec<(usize, usize)> = Vec::new();
 
     for cy in 0..cy_count {
         let local_h = if (cy + 1) * CHUNK_SIZE <= map_h {
@@ -59,7 +59,7 @@ pub fn run_temperature(world: &mut World, _tick: Tick) {
             }
 
             if !chunk_has_changes {
-                equilibrium_chunks.push((cx, cy));
+                equilibrium_changes.push((cx, cy));
             }
         }
     }
@@ -73,7 +73,7 @@ pub fn run_temperature(world: &mut World, _tick: Tick) {
     }
 
     // Mark chunks that had no changes as at equilibrium
-    for (cx, cy) in equilibrium_chunks {
+    for (cx, cy) in equilibrium_changes {
         world.tiles.chunk_at_mut(cx, cy).at_equilibrium = true;
     }
 }
@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn test_temperature_skips_equilibrium_chunks() {
+    fn test_temperature_skips_equilibrium_changes() {
         let mut world = World::new_with_seed(42);
         world.tiles = TileMap::new(130, 70);
         // Set some varied terrain
