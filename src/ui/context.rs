@@ -26,6 +26,10 @@ pub struct UiContext {
     pub scroll: HashMap<PanelKind, f32>,
     /// Sidebar-specific persistent state.
     pub sidebar: SidebarState,
+    /// Currently selected entity for the inspector panel.
+    pub selected_entity: Option<Entity>,
+    /// Last selected entity — used to detect selection changes for slide-in animation.
+    pub last_selected_entity: Option<Entity>,
 }
 
 /// Sidebar persistent state (was ad-hoc fields on App).
@@ -48,6 +52,12 @@ impl SidebarState {
             scroll_offset: 0.0,
             scroll_view_id: None,
         }
+    }
+
+    /// Whether the sidebar is logically open (has an active tab and is
+    /// not animating closed).
+    pub fn is_open(&self, animator: &Animator) -> bool {
+        self.active_tab.is_some() && animator.target("sidebar_slide") != Some(1.0)
     }
 }
 
@@ -72,15 +82,7 @@ impl UiContext {
     /// Walk the 6-level ESC dismiss chain and perform the first applicable
     /// dismissal. Returns which layer was dismissed so the caller can handle
     /// side effects (animations, window close, etc.).
-    ///
-    /// `selected_entity` is passed by mutable reference because the inspector
-    /// selection lives on App, not on UiContext.
-    pub fn close_topmost_layer(
-        &mut self,
-        tree: &mut WidgetTree,
-        selected_entity: &mut Option<Entity>,
-        now: Instant,
-    ) -> DismissResult {
+    pub fn close_topmost_layer(&mut self, tree: &mut WidgetTree, now: Instant) -> DismissResult {
         // Level 1: Tooltips.
         if self.input.tooltip_count() > 0 {
             self.input.dismiss_all_tooltips(tree, now);
@@ -98,13 +100,13 @@ impl UiContext {
         }
 
         // Level 4: Inspector (entity selection).
-        if selected_entity.is_some() {
-            *selected_entity = None;
+        if self.selected_entity.is_some() {
+            self.selected_entity = None;
             return DismissResult::Inspector;
         }
 
         // Level 5: Sidebar tab.
-        if self.sidebar.active_tab.is_some() && self.animator.target("sidebar_slide") != Some(1.0) {
+        if self.sidebar.is_open(&self.animator) {
             let tab = self.sidebar.active_tab.unwrap_or(0);
             return DismissResult::Sidebar(tab);
         }
@@ -128,6 +130,8 @@ mod tests {
             panels: PanelManager::new(),
             scroll: HashMap::new(),
             sidebar: SidebarState::new(),
+            selected_entity: None,
+            last_selected_entity: None,
         };
         let tree = WidgetTree::new();
         (ui, tree)
@@ -155,7 +159,7 @@ mod tests {
         ui.sidebar.active_tab = Some(0);
 
         // Level 4: Inspector — select an entity.
-        let mut selected = Some(Entity(42));
+        ui.selected_entity = Some(Entity(42));
 
         // Level 3: Panel — open a closeable panel.
         let panel_root = dummy_panel(&mut tree);
@@ -171,26 +175,26 @@ mod tests {
         ui.input.push_fake_tooltip(tooltip_source, tooltip_root);
 
         // --- ESC #1: should dismiss tooltips ---
-        let r = ui.close_topmost_layer(&mut tree, &mut selected, now);
+        let r = ui.close_topmost_layer(&mut tree, now);
         assert!(matches!(r, DismissResult::Tooltips));
         assert_eq!(ui.input.tooltip_count(), 0);
 
         // --- ESC #2: should pop the modal ---
-        let r = ui.close_topmost_layer(&mut tree, &mut selected, now);
+        let r = ui.close_topmost_layer(&mut tree, now);
         assert!(matches!(r, DismissResult::Modal(_)));
         assert!(ui.modals.is_empty());
 
         // --- ESC #3: should close the panel ---
-        let r = ui.close_topmost_layer(&mut tree, &mut selected, now);
+        let r = ui.close_topmost_layer(&mut tree, now);
         assert!(matches!(r, DismissResult::Panel(PanelKind::CharacterPanel)));
 
         // --- ESC #4: should clear inspector selection ---
-        let r = ui.close_topmost_layer(&mut tree, &mut selected, now);
+        let r = ui.close_topmost_layer(&mut tree, now);
         assert!(matches!(r, DismissResult::Inspector));
-        assert!(selected.is_none());
+        assert!(ui.selected_entity.is_none());
 
         // --- ESC #5: should close the sidebar tab ---
-        let r = ui.close_topmost_layer(&mut tree, &mut selected, now);
+        let r = ui.close_topmost_layer(&mut tree, now);
         assert!(matches!(r, DismissResult::Sidebar(0)));
 
         // Simulate caller starting the close animation (as handle_tab_click does).
@@ -207,7 +211,7 @@ mod tests {
         );
 
         // --- ESC #6: sidebar animating closed, nothing else — should signal exit ---
-        let r = ui.close_topmost_layer(&mut tree, &mut selected, now);
+        let r = ui.close_topmost_layer(&mut tree, now);
         assert!(matches!(r, DismissResult::Exit));
     }
 
@@ -215,8 +219,7 @@ mod tests {
     #[test]
     fn esc_with_nothing_open_returns_exit() {
         let (mut ui, mut tree) = make_ui();
-        let mut selected: Option<Entity> = None;
-        let r = ui.close_topmost_layer(&mut tree, &mut selected, Instant::now());
+        let r = ui.close_topmost_layer(&mut tree, Instant::now());
         assert!(matches!(r, DismissResult::Exit));
     }
 
@@ -224,7 +227,6 @@ mod tests {
     #[test]
     fn esc_skips_sidebar_when_closing_animation_active() {
         let (mut ui, mut tree) = make_ui();
-        let mut selected: Option<Entity> = None;
         let now = Instant::now();
 
         ui.sidebar.active_tab = Some(0);
@@ -240,7 +242,7 @@ mod tests {
             now,
         );
 
-        let r = ui.close_topmost_layer(&mut tree, &mut selected, now);
+        let r = ui.close_topmost_layer(&mut tree, now);
         assert!(matches!(r, DismissResult::Exit));
     }
 }

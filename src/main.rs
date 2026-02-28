@@ -365,13 +365,10 @@ struct App {
     // Immutable theme configuration.
     ui_theme: ui::Theme,
     last_hover_tile: Option<(i32, i32)>,
-    last_selected_entity: Option<components::Entity>,
     // Keyboard shortcut system (UI-I03)
     keybindings: ui::KeyBindings,
     paused: bool,
     sim_speed: u32, // 1 = normal, 2-5 = faster
-    // Entity inspector (UI-I01d)
-    selected_entity: Option<components::Entity>,
     inspector_close_id: Option<ui::WidgetId>,
     // Performance metrics (UI-505) — stores previous frame's metrics.
     ui_perf: ui::UiPerfMetrics,
@@ -402,7 +399,7 @@ impl App {
     /// Handle a sidebar tab click. Manages open/close/switch transitions.
     fn handle_tab_click(&mut self, tab_idx: usize) {
         let now = Instant::now();
-        let is_closing = self.ui.animator.target("sidebar_slide") == Some(1.0);
+        let is_closing = !self.ui.sidebar.is_open(&self.ui.animator);
         let current_slide = self.ui.animator.get("sidebar_slide", now).unwrap_or(
             if self.ui.sidebar.active_tab.is_some() {
                 0.0
@@ -505,7 +502,7 @@ impl App {
     fn dispatch_click(&mut self, action: ui::UiAction) {
         match action {
             ui::UiAction::InspectorClose => {
-                self.selected_entity = None;
+                self.ui.selected_entity = None;
             }
             ui::UiAction::ModalDismiss | ui::UiAction::DialogCancel => {
                 self.pop_modal_with(false);
@@ -706,11 +703,7 @@ impl ApplicationHandler for App {
                                 ui::Action::CloseTopmost => {
                                     use ui::DismissResult;
                                     let now = Instant::now();
-                                    match self.ui.close_topmost_layer(
-                                        &mut self.ui_tree,
-                                        &mut self.selected_entity,
-                                        now,
-                                    ) {
+                                    match self.ui.close_topmost_layer(&mut self.ui_tree, now) {
                                         DismissResult::Tooltips
                                         | DismissResult::Panel(_)
                                         | DismissResult::Inspector => {}
@@ -984,9 +977,9 @@ impl ApplicationHandler for App {
                                     .map(|(e, _)| *e)
                                     .collect();
                                 candidates.sort_by_key(|e| e.0);
-                                self.selected_entity = candidates.first().copied();
+                                self.ui.selected_entity = candidates.first().copied();
                             } else {
-                                self.selected_entity = None;
+                                self.ui.selected_entity = None;
                             }
                         }
                     }
@@ -1260,12 +1253,12 @@ impl ApplicationHandler for App {
 
                             // Build entity inspector if selected (UI-I01d).
                             self.inspector_close_id = None;
-                            if let Some(entity) = self.selected_entity {
+                            if let Some(entity) = self.ui.selected_entity {
                                 if let Some(info) = ui::collect_inspector_info(entity, &self.world)
                                 {
                                     // Start slide-in when entity first selected (UI-W05).
-                                    if self.last_selected_entity != Some(entity) {
-                                        self.last_selected_entity = Some(entity);
+                                    if self.ui.last_selected_entity != Some(entity) {
+                                        self.ui.last_selected_entity = Some(entity);
                                         self.ui.animator.start(
                                             "inspector_slide",
                                             ui::Anim {
@@ -1304,12 +1297,12 @@ impl ApplicationHandler for App {
                                     self.inspector_close_id = Some(close_id);
                                 } else {
                                     // Entity died or lost position — auto-close.
-                                    self.selected_entity = None;
-                                    self.last_selected_entity = None;
+                                    self.ui.selected_entity = None;
+                                    self.ui.last_selected_entity = None;
                                     self.ui.animator.remove("inspector_slide");
                                 }
                             } else {
-                                self.last_selected_entity = None;
+                                self.ui.last_selected_entity = None;
                                 self.ui.animator.remove("inspector_slide");
                             }
 
@@ -1592,7 +1585,7 @@ impl ApplicationHandler for App {
                             }
 
                             // Map overlay: selected entity highlight (UI-I02).
-                            if let Some(entity) = self.selected_entity
+                            if let Some(entity) = self.ui.selected_entity
                                 && let Some(pos) = self.world.body.positions.get(&entity)
                             {
                                 let vx = pos.x - self.camera.x;
@@ -1919,6 +1912,8 @@ fn main() {
                 scroll_offset: 0.0,
                 scroll_view_id: None,
             },
+            selected_entity: None,
+            last_selected_entity: None,
         },
         ui_tree: {
             let mut t = ui::WidgetTree::new();
@@ -1927,11 +1922,9 @@ fn main() {
         },
         ui_theme,
         last_hover_tile: None,
-        last_selected_entity: None,
         keybindings: ui::KeyBindings::defaults(),
         paused: false,
         sim_speed: 1,
-        selected_entity: None,
         inspector_close_id: None,
         ui_perf: ui::UiPerfMetrics::default(),
         minimap_sprites: None, // created in resumed() when GPU is available
