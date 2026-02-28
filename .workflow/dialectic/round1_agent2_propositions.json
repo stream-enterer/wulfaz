@@ -1,0 +1,402 @@
+[
+  {
+    "id": "a2-01",
+    "proposition": "A single-threaded simulation engine running at 100 ticks/sec has a hard budget of 10,000 microseconds per tick, and even after path caching brought wander from 75ms to 9ms, the total tick at 50k entities still exceeds 10ms because the problem is the sum of systems that each seem cheap in isolation.",
+    "scores": {
+      "defensibility": 0.95,
+      "specificity": 0.93,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "reasoning": {
+      "defensibility": "Grounded directly in benchmark data with specific microsecond measurements. The arithmetic is verifiable: the table of system costs sums to well over 10ms.",
+      "specificity": "Provides exact numbers (100 ticks/sec, 10,000us budget, 75ms before, 9ms after). A developer can immediately verify whether their system fits.",
+      "robustness": "The 100 ticks/sec target is assumed rather than derived from gameplay requirements. If 60 or 30 ticks/sec were acceptable, the budget relaxes significantly. The analysis does not justify why 100 is the right rate.",
+      "compatibility": "Fully compatible with the project's single-threaded, deterministic architecture. Sets the frame for all subsequent optimization rules."
+    }
+  },
+  {
+    "id": "a2-02",
+    "proposition": "Phase 1 (Environment) systems must operate on tiles/chunks only, never iterate entities; any Phase 1 system that touches entities is misclassified and must move to Phase 2+.",
+    "scores": {
+      "defensibility": 0.92,
+      "specificity": 0.90,
+      "robustness": 0.85,
+      "compatibility": 0.95
+    },
+    "reasoning": {
+      "defensibility": "Directly follows from the phase definitions in CLAUDE.md where Phase 1 is 'tile/environmental state, no entity interaction.' The temperature system at 9us proves the pattern works.",
+      "specificity": "Clear binary test: does the system touch entities? If yes, it is not Phase 1. Immediately actionable.",
+      "robustness": "Could be challenged by future systems where environment depends on entity density (e.g., pollution from entity actions). Such systems would need a Phase 2 read + Phase 1 write split, which this rule does not address.",
+      "compatibility": "Perfectly aligned with the existing phase classification in CLAUDE.md. Reinforces rather than modifies the architecture."
+    }
+  },
+  {
+    "id": "a2-03",
+    "proposition": "Phase 1 systems must implement chunk-level dirty/equilibrium flags so that steady-state cost is O(active_chunks) rather than O(total_tiles), with full tile iteration permitted only for chunks not at equilibrium.",
+    "scores": {
+      "defensibility": 0.88,
+      "specificity": 0.85,
+      "robustness": 0.80,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "The temperature system already demonstrates this pattern at 9us steady-state cost. The principle is proven by existing implementation.",
+      "specificity": "Names the exact mechanism (chunk-level dirty flags) and the complexity target. A developer knows exactly what to implement.",
+      "robustness": "Assumes chunks reach equilibrium. Systems with continuous external forcing (e.g., day/night cycle affecting all chunks) would degenerate to O(total_tiles) every cycle. The rule needs a caveat for globally-forced updates.",
+      "compatibility": "Compatible with TileMap's existing chunk structure. No conflicts with other systems."
+    }
+  },
+  {
+    "id": "a2-04",
+    "proposition": "Phase 2 systems must be O(n) with no HashMap lookups beyond the primary iteration table, at most one secondary lookup per entity, no spatial queries, no pathfinding, and no allocation beyond the collect buffer, with a budget ceiling of 3,000us at 50k entities.",
+    "scores": {
+      "defensibility": 0.85,
+      "specificity": 0.92,
+      "robustness": 0.72,
+      "compatibility": 0.88
+    },
+    "reasoning": {
+      "defensibility": "The 'at most one secondary lookup' constraint is derived from the 50ns/entity budget math (50k * 100ns = 5000us for two lookups). Sound arithmetic.",
+      "specificity": "Extremely concrete: names the exact operations forbidden (spatial queries, pathfinding, allocation) and gives a microsecond ceiling. Directly testable with benchmarks.",
+      "robustness": "The 3,000us ceiling assumes two Phase 2 systems. If a third Phase 2 system is added (e.g., morale, social needs), the budget must be redistributed. The rule does not scale to more Phase 2 systems without revision.",
+      "compatibility": "Consistent with current hunger (2,170us) and fatigue (726us) benchmarks. The 3,000us cap is tight but achievable for existing systems."
+    }
+  },
+  {
+    "id": "a2-05",
+    "proposition": "Phase 2 systems that push events per entity must push events only on state transitions (value crosses a threshold), not on every tick increment, because unconditional event pushes at 50k entities add approximately 1,000us of overhead.",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.88,
+      "robustness": 0.85,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "The 3x cost difference between hunger (with events) and fatigue (conditional events) at identical algorithmic complexity is strong empirical evidence. The 1,000us estimate follows directly.",
+      "specificity": "Names the exact anti-pattern (unconditional per-entity event push) and the exact fix (threshold-based transition events). Immediately actionable.",
+      "robustness": "Holds well unless a downstream consumer actually needs per-tick events. The document does not analyze whether any consumer depends on per-tick hunger events, which could make this optimization unsafe.",
+      "compatibility": "Compatible with EventLog's ring-buffer design, which benefits from fewer writes. Aligns with the event system rules in CLAUDE.md."
+    }
+  },
+  {
+    "id": "a2-06",
+    "proposition": "Phase 3 (Decisions) must pre-filter entities with O(1) checks before issuing spatial queries; spatial queries at SENSE_RANGE scale must never be called for all n entities unconditionally.",
+    "scores": {
+      "defensibility": 0.93,
+      "specificity": 0.88,
+      "robustness": 0.82,
+      "compatibility": 0.92
+    },
+    "reasoning": {
+      "defensibility": "The worst-case spatial query cost analysis (312M comparisons at 50k) makes the case overwhelming. The zero-product cutoff in utility scoring already implements this; the rule codifies the requirement.",
+      "specificity": "Clear directive: check hunger threshold, action cooldown, or intention type before calling entities_in_range. Names specific O(1) pre-filters.",
+      "robustness": "In pathological scenarios (all entities hungry, food present everywhere), the pre-filter passes all entities and the rule provides no protection. The rule reduces average cost but cannot bound worst case.",
+      "compatibility": "Fully compatible with the existing utility scoring system's zero-product cutoff mechanism."
+    }
+  },
+  {
+    "id": "a2-07",
+    "proposition": "SENSE_RANGE must be the minimum required by gameplay because every doubling of range quadruples the number of spatial cells scanned; current SENSE_RANGE=30 with CELL_SIZE=16 scans 16 cells, while SENSE_RANGE=64 would scan 25 cells.",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.90,
+      "robustness": 0.80,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The quadratic relationship between range and cells scanned is mathematical fact. The specific cell counts are computed correctly from the spatial grid formula.",
+      "specificity": "Gives exact numbers for current and hypothetical SENSE_RANGE values. A developer can compute the cost of any proposed range change.",
+      "robustness": "The rule says 'minimum required by gameplay' but provides no methodology for determining what gameplay requires. Without gameplay analysis, the minimum is undefined.",
+      "compatibility": "Compatible with the spatial index design. Slight tension with gameplay design freedom -- the rule constrains game design to fit performance, which may conflict with design goals."
+    }
+  },
+  {
+    "id": "a2-08",
+    "proposition": "Phase 4 must not call find_path per entity per tick; paths must be cached as components (CachedPath) and reused across ticks until invalidated by goal change, path blockage, or path exhaustion, with fresh A* calls capped at 30-50 per tick.",
+    "scores": {
+      "defensibility": 0.95,
+      "specificity": 0.95,
+      "robustness": 0.85,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "The benchmark data is definitive: uncached pathfinding at 50k costs 75ms (7.5x budget). The three invalidation conditions are necessary and sufficient for correctness.",
+      "specificity": "Names the exact component (CachedPath), three specific invalidation conditions, and a numeric cap range (30-50 calls). A developer can implement this specification directly.",
+      "robustness": "The 30-50 cap means some entities get no path for a tick and fall back to random stepping. In dense obstacle environments, random stepping could trap entities permanently. The fallback behavior needs more specification.",
+      "compatibility": "CachedPath already exists in the codebase. The rule formalizes existing practice and adds the per-tick cap, which is a new constraint but architecturally compatible."
+    }
+  },
+  {
+    "id": "a2-09",
+    "proposition": "For tracking intentions (Eat/Attack), cached paths should not be invalidated every tick when the target moves; instead, re-path only when the target has moved more than K tiles (suggested K=3) from the cached goal position.",
+    "scores": {
+      "defensibility": 0.88,
+      "specificity": 0.90,
+      "robustness": 0.75,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The document identifies per-tick invalidation for tracking targets as 'the performance hole that makes eating at 25ms at 50k.' The lazy invalidation is the direct fix.",
+      "specificity": "Names the exact threshold (K=3 tiles), the exact comparison (target position vs cached goal), and the specific systems affected (Eat/Attack). Directly implementable.",
+      "robustness": "K=3 means entities can be up to 3 tiles off-course before re-pathing. In tight corridors or when targets move perpendicular to the path, this could cause visually wrong movement. The optimal K depends on map topology.",
+      "compatibility": "Compatible with the CachedPath design. Requires adding target-position tracking to the cache, which is a minor extension to existing components."
+    }
+  },
+  {
+    "id": "a2-10",
+    "proposition": "Movement cooldowns naturally throttle pathfinding: at Walk gait (9 ticks/tile), only ~11% of entities request movement per tick, and systems must not bypass this rate-limiter by pre-computing paths for entities still on cooldown.",
+    "scores": {
+      "defensibility": 0.92,
+      "specificity": 0.85,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "reasoning": {
+      "defensibility": "The 11% figure follows directly from the gait system: 1/9 entities move per tick at Walk. This natural throttle is a mathematical consequence of the gait design.",
+      "specificity": "Names the exact gait (Walk), the exact fraction (1/9 = 11%), and the specific anti-pattern to avoid (pre-computing paths during cooldown).",
+      "robustness": "Robust because the gait system is a fixed architectural element. Weakened only if many entities use Sprint (1/3 active) or if a future system needs path pre-computation for prediction.",
+      "compatibility": "Perfectly aligned with the gait system described in CLAUDE.md. Exploits an existing architectural feature rather than adding new mechanism."
+    }
+  },
+  {
+    "id": "a2-11",
+    "proposition": "Phase 5 systems must iterate only the affected set (pending_deaths, co-located pairs, event-driven triggers), never the full entity population, with a budget ceiling of 500us at 50k entities under normal conditions.",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.88,
+      "robustness": 0.78,
+      "compatibility": 0.92
+    },
+    "reasoning": {
+      "defensibility": "Phase 5 derives consequences from Phase 4 changes, which affect a small subset. The death system already demonstrates this: it iterates only pending_deaths.",
+      "specificity": "Names three specific affected-set sources and gives a concrete microsecond ceiling. Testable and implementable.",
+      "robustness": "The 500us ceiling is fragile under mass-death scenarios (e.g., all 50k entities starving simultaneously). The document acknowledges this as 'transient' but does not provide a mechanism to handle the spike.",
+      "compatibility": "Consistent with the existing death system design and the CLAUDE.md rule that only run_death calls despawn."
+    }
+  },
+  {
+    "id": "a2-12",
+    "proposition": "The sort-by-entity-ID requirement for deterministic replay imposes a hidden O(n log n) tax per system: at 50k entities, sorting costs approximately 3,900us per system, and with 5+ systems sorting independently, the total sort cost approaches 8,000-20,000us.",
+    "scores": {
+      "defensibility": 0.88,
+      "specificity": 0.90,
+      "robustness": 0.82,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The arithmetic is sound: 50k * log2(50k) * 5ns = ~4,000us. The concern that multiple systems each pay this cost independently is a genuine architectural issue.",
+      "specificity": "Gives exact cost estimates at exact entity counts with explicit assumptions (5ns per comparison). A developer can verify or refine these estimates.",
+      "robustness": "The 5ns-per-comparison estimate may be too high or too low depending on cache behavior. The actual sort cost depends on how sorted the data already is (nearly-sorted data is cheaper with TimSort). The estimates may overstate the problem.",
+      "compatibility": "Directly addresses a consequence of the mandatory deterministic-replay sort requirement in CLAUDE.md. The problem is real and architecturally inherent."
+    }
+  },
+  {
+    "id": "a2-13",
+    "proposition": "Systems must sort entity IDs only once per system invocation, not per inner loop, and if multiple systems in the same phase iterate the same sorted entity set, the sorted Vec should be passed between them rather than re-sorted.",
+    "scores": {
+      "defensibility": 0.92,
+      "specificity": 0.88,
+      "robustness": 0.85,
+      "compatibility": 0.80
+    },
+    "reasoning": {
+      "defensibility": "Sorting once vs. N times is a straightforward optimization with no correctness risk. Passing sorted Vecs between systems avoids redundant work.",
+      "specificity": "Names the exact anti-pattern (sort per inner loop) and two concrete mitigations (sort once, pass between systems).",
+      "robustness": "Passing sorted Vecs between systems requires either storing them on World or returning them. This adds coupling between systems, which the CLAUDE.md rule 'systems communicate only through shared state on World' permits but which increases World's surface area.",
+      "compatibility": "The 'shared state on World' communication rule supports this. Minor tension with the 'one system per file' rule if systems become coupled through shared sorted vectors."
+    }
+  },
+  {
+    "id": "a2-14",
+    "proposition": "When key space maps to tile coordinates (bounded, dense), always use a flat array indexed by y * width + x; never use HashMap<(i32, i32), T> for tile-indexed data, because flat-array lookup costs ~5ns versus HashMap's ~50-80ns.",
+    "scores": {
+      "defensibility": 0.95,
+      "specificity": 0.95,
+      "robustness": 0.92,
+      "compatibility": 0.95
+    },
+    "reasoning": {
+      "defensibility": "The 10-16x performance difference between array indexing and HashMap lookup is well-established in systems programming. The A* implementation already validates this choice.",
+      "specificity": "Names the exact indexing formula (y * width + x), the exact cost comparison (5ns vs 50-80ns), and the exact use case (tile coordinates). Zero ambiguity.",
+      "robustness": "Extremely robust. The only edge case is maps with sparse walkable tiles where a HashMap might use less memory, but at 256x256 the flat array is only 256KB -- negligible.",
+      "compatibility": "Fully compatible with the existing TileMap design. Reinforces the CLAUDE.md rule against replacing HashMap without profiling, by establishing that tile data should never use HashMap in the first place."
+    }
+  },
+  {
+    "id": "a2-15",
+    "proposition": "A* pathfinding must use pooled buffers with generation-counter clearing rather than allocating fresh vectors per find_path call, because at 256x256 each call allocates 768KB (3 x 65,536 x 4 bytes), and 50 calls per tick means 37.5MB of allocation churn.",
+    "scores": {
+      "defensibility": 0.93,
+      "specificity": 0.95,
+      "robustness": 0.88,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "The allocation math is exact and the generation-counter technique is a well-known optimization in pathfinding literature. Both the problem and solution are concrete.",
+      "specificity": "Names exact byte counts, the exact technique (generation counter), and exactly where to store the pool (on TileMap or a PathfindingPool struct on World). Directly implementable.",
+      "robustness": "The generation counter introduces a subtle bug risk: if the generation counter wraps (u32 overflow after 4B calls), stale data could be read as valid. At 50 calls/tick and 100 ticks/sec, this takes ~248 days of continuous runtime -- unlikely but not impossible for a long-running simulation.",
+      "compatibility": "Compatible with the existing A* implementation. Requires adding a struct to World, which follows the CLAUDE.md pattern for new infrastructure."
+    }
+  },
+  {
+    "id": "a2-16",
+    "proposition": "The spatial index must support incremental updates rather than full rebuild: track moved entities from the wander system, remove from old cells and insert into new cells at O(moved_entities) cost instead of O(all_entities), reducing two rebuilds from ~5,400us to ~550us at 50k entities.",
+    "scores": {
+      "defensibility": 0.88,
+      "specificity": 0.90,
+      "robustness": 0.72,
+      "compatibility": 0.78
+    },
+    "reasoning": {
+      "defensibility": "The cost savings are well-argued: at Walk gait, ~11% of entities move, so incremental update is 10x cheaper. The math checks out (5,500 moves * 2 ops * 50ns = 550us).",
+      "specificity": "Names the exact data to track (move list from wander), the exact operations (remove old, insert new), and the exact cost comparison. Directly implementable.",
+      "robustness": "Incremental updates accumulate errors if any position change is missed (a system other than wander moves an entity). The document acknowledges spawn/death but not other position-changing systems (combat knockback, teleportation). A missed update creates a stale spatial index entry.",
+      "compatibility": "Requires wander to output its move list, creating a data dependency between wander and the spatial rebuild. This is architecturally valid (shared state on World) but couples systems in a way the current design avoids."
+    }
+  },
+  {
+    "id": "a2-17",
+    "proposition": "At 50k entities on a 256x256 map with CELL_SIZE=16, uniform density yields ~195 entities per cell, making SENSE_RANGE=30 queries scan 16 cells x 195 entities = 3,120 comparisons per query; reducing CELL_SIZE to 8 (CELL_SHIFT=3) gives 49/cell and 25 cells scanned = 1,225 comparisons.",
+    "scores": {
+      "defensibility": 0.85,
+      "specificity": 0.95,
+      "robustness": 0.70,
+      "compatibility": 0.80
+    },
+    "reasoning": {
+      "defensibility": "The arithmetic is correct for uniform density. The 2.5x improvement from CELL_SIZE=8 is a genuine optimization. The document shows its work step by step.",
+      "specificity": "Provides exact cell counts, exact entities-per-cell, exact comparisons per query at two cell sizes. A developer can reproduce and verify every number.",
+      "robustness": "Uniform density is a poor assumption: entities cluster around food, water, and walkable terrain. Actual density variance could make some cells have 1000+ entities while others have 0, invalidating the averages. The analysis needs worst-case density, not average.",
+      "compatibility": "SPATIAL_CELL_SHIFT is an existing tunable. Changing it from 4 to 3 affects all spatial queries, which is safe. But the CLAUDE.md rule says 'do not replace HashMap with another data structure without profiling data' -- changing cell size is a parameter change, not a data structure change, so this is compatible."
+    }
+  },
+  {
+    "id": "a2-18",
+    "proposition": "Use HashSet for membership testing (pending_deaths, consumed sets); never use Vec::contains for O(n) membership checks, because the benchmark showed eating at 28ms partially due to this O(n^2) pattern.",
+    "scores": {
+      "defensibility": 0.95,
+      "specificity": 0.92,
+      "robustness": 0.90,
+      "compatibility": 0.95
+    },
+    "reasoning": {
+      "defensibility": "Vec::contains being O(n) is axiomatic. The benchmark evidence (eating at 28ms) provides empirical confirmation of the theoretical cost. This is among the most defensible claims in the document.",
+      "specificity": "Names the exact anti-pattern (Vec::contains), the exact replacement (HashSet), specific examples (pending_deaths, consumed), and benchmark evidence. Immediately actionable.",
+      "robustness": "Extremely robust. There is no scenario where Vec::contains outperforms HashSet::contains for membership testing at scale. The only edge case is very small sets (<10 elements) where Vec may be faster due to cache locality, but the rule targets large sets.",
+      "compatibility": "CLAUDE.md already declares alive as HashSet. This rule extends the same principle to all membership-test sets. Perfectly compatible."
+    }
+  },
+  {
+    "id": "a2-19",
+    "proposition": "Systems with cooldown mechanics must test the timer first and early-exit in O(1), with no secondary lookups, spatial queries, or allocation for entities on cooldown.",
+    "scores": {
+      "defensibility": 0.93,
+      "specificity": 0.88,
+      "robustness": 0.90,
+      "compatibility": 0.95
+    },
+    "reasoning": {
+      "defensibility": "Pure cost avoidance: if an entity is on cooldown, any work done for it is wasted. The principle is self-evidently correct from a performance perspective.",
+      "specificity": "Names the exact check order (timer first) and the exact operations forbidden on the fast path (secondary lookups, spatial queries, allocation).",
+      "robustness": "Very robust. The only risk is if the cooldown check itself becomes expensive (e.g., requires a HashMap lookup), but cooldown values are typically stored in the primary iteration table.",
+      "compatibility": "Perfectly aligned with the gait system's movement cooldowns. Applies naturally to any system with periodic triggers."
+    }
+  },
+  {
+    "id": "a2-20",
+    "proposition": "The decisions system should support inertia-based skip: entities whose action has been stable for 10+ consecutive ticks skip scoring for the next 5 ticks, reducing the scoring population by up to 80% in stable simulations.",
+    "scores": {
+      "defensibility": 0.80,
+      "specificity": 0.88,
+      "robustness": 0.65,
+      "compatibility": 0.82
+    },
+    "reasoning": {
+      "defensibility": "The 80% reduction estimate assumes most entities are in stable states, which is plausible for passive/wandering entities but not guaranteed. The optimization is sound in principle.",
+      "specificity": "Names exact thresholds (10 ticks stable, 5 ticks skip), the exact component to modify (ActionState), and the exact field to add (next_decision_tick). Directly implementable.",
+      "robustness": "Dangerous: a skipped entity misses environmental changes (food appearing, enemy approaching) for up to 5 ticks. In a fast-paced combat scenario, 5 ticks of blindness could cause entities to stand still while being attacked. The 'significant state change' interrupt is mentioned in passing but not specified.",
+      "compatibility": "Adds a new field to ActionState, which requires the full new-property-table checklist from CLAUDE.md. The determinism requirement is met (next_decision_tick is stored state), but the skip creates observable behavioral differences that may surprise users."
+    }
+  },
+  {
+    "id": "a2-21",
+    "proposition": "Within a single system invocation, spatial query results should be cached per cell coordinate so that multiple entities in the same spatial cell share the query result, reducing spatial query cost by up to 12x at uniform density with 50k entities.",
+    "scores": {
+      "defensibility": 0.88,
+      "specificity": 0.90,
+      "robustness": 0.78,
+      "compatibility": 0.88
+    },
+    "reasoning": {
+      "defensibility": "With ~12 entities per cell at uniform density, sharing one query result among 12 entities is a 12x reduction. The optimization is mathematically sound.",
+      "specificity": "Names the exact data structure (HashMap<(i32,i32), (food_count, enemy_count, Option<Entity>, Option<Entity>)>), the exact key (cell coordinate), and the exact reuse pattern. Directly implementable.",
+      "robustness": "The 12x improvement assumes uniform density. In practice, some cells have 0 entities (wasting the cache entry) while others have hundreds (getting outsized benefit). The average improvement is less than 12x but still significant.",
+      "compatibility": "The cache is local to the system invocation, so it does not pollute World state. Fully compatible with the collect-then-apply pattern and determinism requirements."
+    }
+  },
+  {
+    "id": "a2-22",
+    "proposition": "Cache invalidation must be checked by the consuming system (not the producing system), comparing cached assumptions against current world state; every cached component must include the assumptions it was computed under.",
+    "scores": {
+      "defensibility": 0.92,
+      "specificity": 0.85,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "reasoning": {
+      "defensibility": "In a blackboard architecture where any system can write any state, the producer cannot know all consumers. Consumer-side validation is the only correct pattern. This is well-established in cache theory.",
+      "specificity": "Names the exact pattern (consumer checks, not producer), and gives CachedPath as a concrete example with its stored assumption (goal position). The 'assumptions included in cache' rule is a clear structural requirement.",
+      "robustness": "Robust within the blackboard model. The main risk is that a consumer forgets to validate, using stale cached data. The rule cannot enforce itself -- it relies on developer discipline. Static analysis or a validation helper could mitigate this.",
+      "compatibility": "Perfectly aligned with the blackboard architecture described in CLAUDE.md. Systems communicate through shared state, so consumer-side validation is the natural fit."
+    }
+  },
+  {
+    "id": "a2-23",
+    "proposition": "Never invalidate a cache based on tick count alone ('re-path every N ticks'); this wastes computation when the path is still valid and misses invalidation when the path becomes invalid before N ticks.",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.85,
+      "robustness": 0.80,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "Both failure modes are correctly identified: over-invalidation wastes budget, under-invalidation causes stale behavior. Condition-based invalidation dominates timer-based in both dimensions.",
+      "specificity": "A clear prohibition with named reasoning. A developer reviewing code can immediately flag any tick-count-based invalidation.",
+      "robustness": "There are legitimate uses for periodic re-validation as a safety net (e.g., in case a condition-based check has a bug). The absolute 'never' may be too strong; 'prefer condition-based, use periodic only as a fallback' would be more robust.",
+      "compatibility": "Compatible with the cache-as-component pattern. Reinforces the consumer-side validation rule."
+    }
+  },
+  {
+    "id": "a2-24",
+    "proposition": "Each system must have exactly one 'driving table' that it iterates; all other data access must be via point lookup (HashMap::get), because iterating two tables and joining them has multiplicative cache cost.",
+    "scores": {
+      "defensibility": 0.85,
+      "specificity": 0.88,
+      "robustness": 0.75,
+      "compatibility": 0.88
+    },
+    "reasoning": {
+      "defensibility": "Cache-hostility of HashMap iteration is real: each table's memory layout is independent, so iterating two tables alternately thrashes L1/L2. The 'multiplicative' cost claim is slightly overstated (it is additive in cache misses, multiplicative in miss rate) but directionally correct.",
+      "specificity": "Names the exact pattern (one driving table, point lookups for secondary) and the exact anti-pattern (iterating two tables and joining). A developer can audit any system against this rule.",
+      "robustness": "Some systems genuinely need to join two tables (e.g., a system that processes entities that have BOTH hunger AND a target). The rule forces picking one as primary and looking up the other, which works but may miss entities present in the secondary but not the primary table.",
+      "compatibility": "Compatible with existing system patterns. Hunger iterates the hunger table; wander iterates the action table. The rule formalizes existing practice."
+    }
+  },
+  {
+    "id": "a2-25",
+    "proposition": "The total current cost at 50k entities exceeds 23,000us, and reaching the 10,000us target requires implementing ALL of: incremental spatial index (~4,000us savings), A* buffer pooling + call cap (~5,000us), pre-sorted alive list (~1,500us), decision query deduplication (~1,000us), and conditional event pushing (~500us), with the architecture's structural floor at approximately 6,000-7,000us even with perfect optimization.",
+    "scores": {
+      "defensibility": 0.82,
+      "specificity": 0.92,
+      "robustness": 0.68,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The savings estimates are individually plausible and the sum (12,000us) nearly closes the gap from 23,000us to 10,000us. The structural floor estimate (6,000-7,000us) is a useful honest assessment.",
+      "specificity": "Names five specific optimizations with exact microsecond savings for each. A developer can prioritize implementation by bang-for-buck.",
+      "robustness": "The savings are estimated, not measured. Optimizations often interact (incremental spatial index changes the cost profile for spatial queries, which changes the decision query dedup savings). The total savings may be more or less than the sum of individual estimates. The 'ALL of' requirement is fragile -- if any one optimization underperforms, the target is missed.",
+      "compatibility": "All five optimizations are compatible with the architecture. The honest admission that 50k at 10ms/tick is 'achievable but tight' is compatible with realistic project planning."
+    }
+  }
+]

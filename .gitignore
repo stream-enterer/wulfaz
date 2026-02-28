@@ -21,7 +21,7 @@ settings.kdl
 # Claude Code
 .claude/
 .mcp.json
-.workflow/
+!.workflow/
 
 # Shell/personal dotfiles
 .bash_profile

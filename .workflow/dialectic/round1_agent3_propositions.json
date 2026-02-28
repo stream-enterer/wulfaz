@@ -1,0 +1,370 @@
+[
+  {
+    "id": "a3-01",
+    "proposition": "When entities cluster spatially (as they will on the real Paris map inside buildings), every system calling entities_in_range produces O(d^2) cost per spatial cell where d is local density, and multiple systems calling it independently produce O(k * d^2) rather than O(k * d), because each caller re-scans the full cell contents for every entity in that cell.",
+    "scores": {
+      "defensibility": 0.95,
+      "specificity": 0.92,
+      "robustness": 0.88,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The quadratic scaling is a direct mathematical consequence of nested iteration: for each of d entities in a cell, scanning all d entities in the same cell is d*d. This is provable from the code structure, not speculative.",
+      "specificity": "Names the exact function (entities_in_range), the exact mechanism (per-caller full cell scan), and the exact trigger condition (spatial clustering in building interiors). A developer could write a benchmark for this specific scenario.",
+      "robustness": "This failure mode activates whenever entities cluster, which is guaranteed on any realistic city map. It is not a theoretical edge case but a baseline operational condition for the target use case.",
+      "compatibility": "Interacts with benchmark blindness (a3-18) since uniform-distribution benchmarks cannot detect it. Also compounds with any future system that adds spatial queries."
+    }
+  },
+  {
+    "id": "a3-02",
+    "proposition": "The spatial index rebuild (clear + reinsert all entities) performs 4000+ Vec allocations and deallocations per rebuild on a 256x256 map, and each additional rebuild_spatial_index call added by a new system doubles this allocation traffic, establishing a precedent where 'just rebuild when needed' accumulates to consume 25%+ of tick budget by the time 5 rebuilds exist.",
+    "scores": {
+      "defensibility": 0.88,
+      "specificity": 0.90,
+      "robustness": 0.82,
+      "compatibility": 0.80
+    },
+    "reasoning": {
+      "defensibility": "The allocation count follows directly from the code: clear() deallocates inner Vecs, then entry().or_default() reallocates. The arithmetic (cells * rebuilds) is verifiable. The 25% figure at 5 rebuilds is an extrapolation but grounded in measured per-rebuild costs.",
+      "specificity": "Names the exact operations (clear, entry, or_default), the exact allocation count (4000 per rebuild for 256x256), and the exact trigger (adding rebuild calls in new systems). Directly measurable.",
+      "robustness": "The failure requires multiple systems each adding their own rebuild, which is plausible but depends on development patterns. With only 2 rebuilds currently, the threshold is distant.",
+      "compatibility": "Compounds with collect-then-apply allocation pressure (a3-09) and A* allocation (a3-05) through allocator fragmentation."
+    }
+  },
+  {
+    "id": "a3-03",
+    "proposition": "No system currently invalidates cached paths when terrain walkability changes, so the first system that modifies tile walkability at runtime (flooding, doors, building collapse) will silently corrupt all cached paths passing through affected tiles, causing mass path cache misses that each trigger a full A* recomputation.",
+    "scores": {
+      "defensibility": 0.93,
+      "specificity": 0.91,
+      "robustness": 0.75,
+      "compatibility": 0.88
+    },
+    "reasoning": {
+      "defensibility": "The absence of terrain-change cache invalidation is verifiable by code inspection. The consequence (stale paths leading to failed moves and re-pathfinding) follows logically and inevitably from the missing invalidation.",
+      "specificity": "Names the exact component (CachedPath), the exact missing mechanism (terrain-change invalidation), and concrete trigger scenarios (flooding, doors, building collapse). A developer can grep for the invalidation and confirm its absence.",
+      "robustness": "This is latent: it only activates when a terrain-mutation system is added. If the simulation never changes walkability at runtime, the failure never manifests. Score reflects this conditionality.",
+      "compatibility": "Directly triggers a3-04 (A* allocation on production map). Also interacts with a3-01 if many entities in a corridor simultaneously re-pathfind."
+    }
+  },
+  {
+    "id": "a3-04",
+    "proposition": "A single A* call on the production 11000x7000 map allocates and initializes 693 MB of flat arrays (308 MB g_score + 308 MB came_from + 77 MB closed), making every unnecessary pathfinding call catastrophic: even 1% of 50k entities re-pathfinding per tick means 500 calls each allocating and freeing 693 MB.",
+    "scores": {
+      "defensibility": 0.96,
+      "specificity": 0.95,
+      "robustness": 0.90,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The allocation sizes are arithmetic: width * height * sizeof(type). 11000 * 7000 * 4 = 308 MB for each u32 array, 11000 * 7000 * 1 = 77 MB for the bool array. This is provable, not estimated.",
+      "specificity": "Provides exact byte counts for each array, the exact map dimensions, and the exact threshold (1% re-pathfind rate) at which the system becomes catastrophic. Fully testable.",
+      "robustness": "This applies to every A* invocation on the production map, regardless of why the pathfinding was triggered. The only mitigation is avoiding unnecessary A* calls, which multiple other failure modes (a3-03, stale caches) undermine.",
+      "compatibility": "Interacts with allocator fragmentation (a3-09), benchmark blindness (a3-18, since the benchmark map makes this 1000x smaller), and stale cache paths (a3-03)."
+    }
+  },
+  {
+    "id": "a3-05",
+    "proposition": "The benchmark's 256x256 map makes A* flat arrays cost 590 KB per call, which is 1175x smaller than the production map's 693 MB, meaning A* performance regressions are invisible in the benchmark and can only be detected by profiling on the production map geometry.",
+    "scores": {
+      "defensibility": 0.94,
+      "specificity": 0.93,
+      "robustness": 0.92,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "The ratio is arithmetic: (11000*7000) / (256*256) = 1175. The claim that this makes regressions invisible follows from the fact that 590 KB fits in L2 cache while 693 MB does not fit in RAM without swapping on most machines.",
+      "specificity": "Provides exact sizes for both maps, the exact ratio, and the exact consequence (benchmark cannot detect production-map A* costs). A developer can verify this by comparing benchmark times on both maps.",
+      "robustness": "This is structural: the benchmark will always underestimate A* costs unless it uses production-scale map geometry. No code change to A* affects this ratio.",
+      "compatibility": "This is the specific instantiation of benchmark blindness (a3-18) for pathfinding. Amplifies every pathfinding-related failure mode."
+    }
+  },
+  {
+    "id": "a3-06",
+    "proposition": "The cumulative HashMap operation count across all systems grows as (system_count * entity_count * tables_referenced_per_system), and at 50k entities with 15 systems each referencing 4-5 tables, the total exceeds 5 million hash operations per tick, where even with aHash the per-operation cost of hashing + probing + cache misses across disjoint table memory regions becomes a dominant fraction of tick budget.",
+    "scores": {
+      "defensibility": 0.87,
+      "specificity": 0.85,
+      "robustness": 0.83,
+      "compatibility": 0.82
+    },
+    "reasoning": {
+      "defensibility": "The multiplicative scaling formula is correct: each system iterates entities and looks up multiple tables per entity. The 5 million figure is a reasonable extrapolation from the current 2 million at 8 systems. The cache-miss argument is well-founded: disjoint HashMaps cannot share cache lines.",
+      "specificity": "Provides the scaling formula, current operation count (2M at 8 systems), projected count (5M at 15 systems), and the mechanism (SipHash/aHash cost * millions of operations). Measurable with perf counters.",
+      "robustness": "The exact threshold depends on the hasher and CPU cache hierarchy. With aHash the per-op cost is lower than SipHash, so the 40ms estimate for SipHash is pessimistic. But the scaling direction is unavoidable.",
+      "compatibility": "Interacts with table proliferation (a3-12): more tables means more cross-table lookups. Also interacts with sort cost (a3-07) since both are per-system-per-entity taxes."
+    }
+  },
+  {
+    "id": "a3-07",
+    "proposition": "The mandatory deterministic sort (sort_by_key on entity ID) costs O(n log n) per system per tick, and since every system independently re-sorts the same entity set from HashMap's random iteration order, the total sort cost at 50k entities across 10 systems is approximately 7.5ms (75% of the 10ms tick budget), doubling to 15ms at 20 systems.",
+    "scores": {
+      "defensibility": 0.85,
+      "specificity": 0.88,
+      "robustness": 0.78,
+      "compatibility": 0.80
+    },
+    "reasoning": {
+      "defensibility": "The O(n log n) per system is correct. The 7.5ms estimate assumes ~15ns per element for pdqsort at 50k elements, which is within reasonable range for modern CPUs. The key insight that the same IDs are sorted from scratch in every system is structurally provable.",
+      "specificity": "Provides the per-element cost estimate (15ns), the formula (systems * n * cost), and the resulting wall-time at two system counts. A developer can benchmark this directly.",
+      "robustness": "The 15ns/element estimate may be pessimistic if the data is nearly sorted (pdqsort detects this). But HashMap iteration order is essentially random, so the pessimistic case applies. Score reflects some uncertainty in the constant factor.",
+      "compatibility": "Directly interacts with HashMap iteration (a3-06): the sort is needed precisely because HashMap gives random order. Also interacts with table proliferation (a3-12) since more tables drive more systems drive more sorts."
+    }
+  },
+  {
+    "id": "a3-08",
+    "proposition": "The shared seeded RNG creates a butterfly effect where any change to one system's conditional RNG consumption (e.g., tweaking a threshold that changes which entities roll dice) shifts the RNG stream for all downstream systems, making it impossible to bisect behavior changes because every parameter tweak produces a global cascade through combat outcomes, movement choices, and entity deaths.",
+    "scores": {
+      "defensibility": 0.91,
+      "specificity": 0.82,
+      "robustness": 0.87,
+      "compatibility": 0.75
+    },
+    "reasoning": {
+      "defensibility": "The butterfly effect through a shared sequential RNG stream is a well-known property of deterministic simulations. The mechanism is provable: if system A consumes one more RNG call, every subsequent call in every subsequent system receives a different value.",
+      "specificity": "Names the exact mechanism (data-dependent conditional RNG consumption), the exact consequence (global cascade), and the exact debugging impact (bisection becomes impossible). The fatigue threshold example is concrete.",
+      "robustness": "This is inherent to the single-RNG architecture and cannot be mitigated without per-system or per-entity RNG streams. It affects every future parameter change.",
+      "compatibility": "Interacts with benchmark blindness (a3-18): an RNG stream shift can change entity density patterns, making benchmark comparisons between parameter tweaks unreliable."
+    }
+  },
+  {
+    "id": "a3-09",
+    "proposition": "The collect-then-apply pattern mandated by the architecture generates 8-10 MB of Vec buffer allocations per tick at 50k entities across 8 systems, producing 800 MB to 1 GB of allocation churn per second that fragments the allocator's free list and causes fresh mmap calls when large allocations (A* arrays) can no longer find contiguous free blocks.",
+    "scores": {
+      "defensibility": 0.86,
+      "specificity": 0.87,
+      "robustness": 0.80,
+      "compatibility": 0.83
+    },
+    "reasoning": {
+      "defensibility": "The per-system Vec sizes are calculable from entity count * tuple size. The 8-10 MB total is a reasonable sum across the known systems. The fragmentation argument is well-established in systems programming: alternating small and large allocations degrades allocator performance.",
+      "specificity": "Provides per-system Vec sizes (1.2 MB for hunger, 600 KB for fatigue, 4 MB for wander), the total per tick and per second, and the specific fragmentation interaction with A* arrays.",
+      "robustness": "The fragmentation effect depends on the system allocator's coalescing behavior, which varies by OS and allocator implementation. jemalloc or mimalloc would mitigate this. Score reflects platform dependence.",
+      "compatibility": "Directly interacts with A* allocation (a3-04) through fragmentation cascades, and with spatial rebuild allocation (a3-02). The three allocation sources create a multi-frequency fragmentation pattern."
+    }
+  },
+  {
+    "id": "a3-10",
+    "proposition": "Phase boundary violations are unenforced by the compiler: nothing prevents a Phase 3 system from writing positions (Phase 4 territory) or a Phase 4 system from reading hungers (Phase 2 territory), and each violation triggers compensating workarounds (extra spatial rebuilds, re-running decision phases) that silently accumulate infrastructure cost.",
+    "scores": {
+      "defensibility": 0.89,
+      "specificity": 0.84,
+      "robustness": 0.85,
+      "compatibility": 0.88
+    },
+    "reasoning": {
+      "defensibility": "The absence of compiler enforcement is provable: all systems take &mut World, granting unrestricted access. The compensating-workaround pattern is a well-documented consequence of unenforced architectural contracts in mutable-world architectures.",
+      "specificity": "Names the exact mechanism (Phase 3 writing positions, Phase 4 reading hungers), the exact workarounds (extra spatial rebuilds, re-running phases), and the cost type (cumulative infrastructure overhead).",
+      "robustness": "This depends on future developers violating phase contracts. With a small team and clear documentation, it may be avoided. Score reflects that documentation-only enforcement degrades as team size grows.",
+      "compatibility": "Directly triggers spatial index abuse (a3-02) and interacts with determinism fragility (a3-08) if phases are re-run, consuming RNG twice."
+    }
+  },
+  {
+    "id": "a3-11",
+    "proposition": "Each new property table added to World increases despawn cost by one HashMap::remove per entity death, validation cost by one full-table iteration in debug builds, and cache pollution by one additional disjoint memory region per cross-table lookup, and at 40 tables with 50k entities the validation pass alone costs ~16ms per tick in debug mode, exceeding the tick budget.",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.91,
+      "robustness": 0.85,
+      "compatibility": 0.87
+    },
+    "reasoning": {
+      "defensibility": "The per-table costs are provable from the code: despawn calls remove() on every table, validate_world iterates every key of every table. The 16ms figure at 40 tables assumes ~8ns per HashSet lookup * 40 tables * 50k entities = 16ms. The arithmetic is sound.",
+      "specificity": "Provides exact costs (despawn removes, validation lookups, cache lines), exact thresholds (40 tables, 50k entities), and exact debug-mode impact (16ms). Each claim is independently measurable.",
+      "robustness": "The 40-table threshold is speculative but the linear scaling is guaranteed. Even at 30 tables the costs become noticeable. The cache pollution effect is non-linear and harder to predict precisely.",
+      "compatibility": "Compounds with HashMap tax (a3-06): more tables means more cross-table lookups in every system. Also drives sort cost (a3-07) by enabling more systems."
+    }
+  },
+  {
+    "id": "a3-12",
+    "proposition": "The utility_config.clone() in decisions.rs clones the entire BTreeMap<ActionId, ActionDef> every tick regardless of entity count, establishing a pattern ('clone shared config to avoid borrow conflicts') that will be replicated in future systems, scaling per-tick clone cost with the number of systems and the complexity of their configs.",
+    "scores": {
+      "defensibility": 0.82,
+      "specificity": 0.85,
+      "robustness": 0.70,
+      "compatibility": 0.78
+    },
+    "reasoning": {
+      "defensibility": "The clone is verifiable at the cited line. The pattern-replication argument is sociological (developers copy patterns) but well-grounded: borrow conflicts with &mut World are structural, and cloning is the path of least resistance.",
+      "specificity": "Names the exact line, the exact type being cloned, the exact cost (10 heap allocations currently), and the scaling formula (actions * considerations * systems using the pattern).",
+      "robustness": "The current cost is negligible. The pattern only becomes expensive if the utility AI grows significantly or many systems adopt it. Score reflects that this is a slow-burn risk.",
+      "compatibility": "Interacts with allocation pressure (a3-09) as another source of per-tick allocation churn, though at a much smaller scale than collect-then-apply Vecs."
+    }
+  },
+  {
+    "id": "a3-13",
+    "proposition": "The EventLog ring buffer with 10k capacity receives 50k+ events per tick from the hunger system alone, meaning 80%+ of constructed Event structs are immediately overwritten before any consumer reads them, wasting the CPU cycles spent constructing those events and polluting cache lines with writes to a buffer that wraps 5+ times per tick.",
+    "scores": {
+      "defensibility": 0.91,
+      "specificity": 0.93,
+      "robustness": 0.86,
+      "compatibility": 0.82
+    },
+    "reasoning": {
+      "defensibility": "The capacity (10k) and event rate (50k from hunger alone) are verifiable from events.rs line 63 and the hunger system's per-entity push. The 80% waste figure follows arithmetically: (50k - 10k) / 50k = 80%.",
+      "specificity": "Names the exact buffer capacity, the exact event source (hunger system), the exact waste ratio (80%+), and the exact cache impact (240 KB buffer repeatedly written). Fully measurable.",
+      "robustness": "This is active right now at 50k entities, not a future risk. Any system that pushes per-entity events compounds it. The only mitigation is either increasing buffer size (more memory) or reducing event frequency.",
+      "compatibility": "Interacts with allocation pressure (a3-09) if Event variants grow to include heap-allocated fields, converting waste writes into waste allocations."
+    }
+  },
+  {
+    "id": "a3-14",
+    "proposition": "The benchmark uses uniform random entity placement on a 256x256 grid, which produces Poisson-distributed density (~12 entities per spatial cell), while the production Paris map concentrates entities in buildings where a single 16x16 spatial cell can contain 200+ entities, making all density-dependent algorithms 10-60x more expensive than the benchmark predicts.",
+    "scores": {
+      "defensibility": 0.93,
+      "specificity": 0.90,
+      "robustness": 0.91,
+      "compatibility": 0.92
+    },
+    "reasoning": {
+      "defensibility": "The density calculation is arithmetic: 50k entities / 4096 cells = ~12.2 per cell uniform. The 200+ per cell in dense quartiers follows from the map's building geometry concentrating entities. The 10-60x factor comes from (200/12)^2 for quadratic algorithms.",
+      "specificity": "Provides exact numbers for both distributions (12 vs 200+ per cell), the exact ratio for quadratic algorithms, and names the specific map feature causing clustering (buildings in Arcis quartier).",
+      "robustness": "Entity clustering on the Paris map is guaranteed by the map's geometry and entity spawning rules. This is not a hypothetical but a baseline condition of the production scenario.",
+      "compatibility": "This is the root cause that makes a3-01 (quadratic spatial queries) catastrophic. Also interacts with every density-dependent failure mode."
+    }
+  },
+  {
+    "id": "a3-15",
+    "proposition": "The benchmark's random swiss-cheese terrain produces nearly-straight A* paths, while the production map's connected buildings, continuous river, and winding streets force A* to expand 2-5x more nodes due to constricted passages (doorways, bridges), meaning pathfinding cost on real terrain is 2-5x higher than benchmark terrain even at the same map scale.",
+    "scores": {
+      "defensibility": 0.86,
+      "specificity": 0.83,
+      "robustness": 0.80,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "A* node expansion count is known to increase with terrain complexity and constriction points. Random-obstacle terrain typically allows near-optimal paths, while urban terrain with doorways creates search bottlenecks. The 2-5x factor is a reasonable estimate for urban vs random terrain.",
+      "specificity": "Names the specific terrain features (buildings, river, streets, doorways, bridges) and the specific mechanism (constricted passages increasing node expansion). The 2-5x range is approximate but grounded.",
+      "robustness": "The exact multiplier depends on the specific map geometry and path queries. Urban terrain universally increases pathfinding cost relative to open terrain, so the direction is reliable even if the magnitude varies.",
+      "compatibility": "Compounds with A* allocation cost (a3-04) and benchmark blindness (a3-05) to create a multi-factor underestimate of production pathfinding cost."
+    }
+  },
+  {
+    "id": "a3-16",
+    "proposition": "At 8 systems the cumulative infrastructure overhead (HashMap tax + sort tax + allocation churn + spatial queries) consumes 4-5ms of the 10ms tick budget, leaving 5-6ms for actual computation, and this overhead scales linearly with system count such that at 15 systems the infrastructure alone consumes 8-10ms, leaving zero headroom for system logic.",
+    "scores": {
+      "defensibility": 0.83,
+      "specificity": 0.80,
+      "robustness": 0.78,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "The 4-5ms figure is a synthesis of the individual failure mode estimates. Each individual estimate has uncertainty, and combining them introduces compounding uncertainty. However, the linear-in-system-count scaling is structurally guaranteed since each system adds a fixed per-entity tax.",
+      "specificity": "Provides exact budget figures at two system counts and names the four contributing overhead categories. A developer could measure each category independently to verify.",
+      "robustness": "The exact crossover point depends on constant factors that vary with hardware, allocator, and entity distribution. The qualitative claim (infrastructure overhead eventually dominates) is robust; the specific system-count threshold is approximate.",
+      "compatibility": "This is the synthesis proposition that ties together a3-06, a3-07, a3-09, and a3-01. It represents the aggregate consequence of all per-system-per-entity taxes."
+    }
+  },
+  {
+    "id": "a3-17",
+    "proposition": "No individual failure mode in this architecture produces a single-system hotspot attributable by profiling to one call site; the costs are distributed across all systems equally (HashMap lookups, sorting, allocation), making the performance disease architectural and undiagnosable by standard profiling techniques that attribute cost to individual functions.",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.78,
+      "robustness": 0.88,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The distributed-cost property follows from the architecture: every system pays the same per-entity taxes. A profiler showing 'HashMap::get consumes 60% of tick time' across dozens of call sites provides no actionable information about which system to optimize.",
+      "specificity": "Names the exact profiling failure mode (cost distributed across call sites) and the exact architectural cause (per-entity taxes paid uniformly by all systems). Less specific about remediation.",
+      "robustness": "This is inherent to HashMap-based EAV architectures with sorted iteration. The only fix is architectural (e.g., SoA layout, pre-sorted entity lists), not per-system optimization.",
+      "compatibility": "This is the meta-observation explaining why a3-06, a3-07, and a3-09 are particularly dangerous: they cannot be caught by conventional profiling workflows."
+    }
+  },
+  {
+    "id": "a3-18",
+    "proposition": "The benchmark exercises the wrong scale (256x256 vs 11000x7000), the wrong density distribution (uniform vs clustered-in-buildings), the wrong terrain topology (random swiss-cheese vs connected urban), and the wrong entity type mix (uniform creatures vs heterogeneous citizens and items), making it structurally incapable of detecting any of the failure modes that will manifest in production.",
+    "scores": {
+      "defensibility": 0.94,
+      "specificity": 0.88,
+      "robustness": 0.93,
+      "compatibility": 0.92
+    },
+    "reasoning": {
+      "defensibility": "Each of the four mismatches is a verifiable factual claim about the benchmark's configuration vs production conditions. The conclusion that these mismatches prevent failure detection follows logically from the analysis of each failure mode's activation conditions.",
+      "specificity": "Enumerates four specific mismatches with exact numbers (256x256 vs 11000x7000, uniform vs clustered, etc.). A developer can address each independently.",
+      "robustness": "This is structural: the benchmark's configuration is fixed and the production conditions are determined by the game's design. The mismatches persist until the benchmark is redesigned.",
+      "compatibility": "This is the meta-failure mode that makes all other failure modes invisible. It amplifies every other proposition by explaining why they will not be caught before production."
+    }
+  },
+  {
+    "id": "a3-19",
+    "proposition": "If a Phase 4 system is inserted between run_wander and rebuild_spatial_index, it sees an inconsistent spatial index where some entities have moved but the index reflects pre-movement positions, and the natural 'fix' (adding another rebuild) costs O(n) per additional rebuild while setting a precedent that accumulates rebuilds over time.",
+    "scores": {
+      "defensibility": 0.87,
+      "specificity": 0.89,
+      "robustness": 0.82,
+      "compatibility": 0.86
+    },
+    "reasoning": {
+      "defensibility": "The staleness window between run_wander and the next rebuild_spatial_index is provable from the main loop ordering. Any system reading the spatial index in that window sees stale data. The O(n) per-rebuild cost is verifiable.",
+      "specificity": "Names the exact insertion point (between run_wander and spatial rebuild 2), the exact inconsistency (some entities moved, index not updated), and the exact workaround cost (O(n) per additional rebuild).",
+      "robustness": "This activates as soon as a new Phase 4 system is added that uses spatial queries. The main loop structure makes this a likely scenario for any movement-aware system.",
+      "compatibility": "Directly feeds into spatial index abuse (a3-02) and phase boundary violations (a3-10). The three propositions form a causal chain."
+    }
+  },
+  {
+    "id": "a3-20",
+    "proposition": "The determinism test (test_wander_deterministic_with_seed) only verifies that the same seed produces the same result, but does not detect that adding a single RNG call in a new system changes the output of every downstream system, meaning the test suite provides false confidence that determinism is robust when it is actually fragile to any system modification.",
+    "scores": {
+      "defensibility": 0.92,
+      "specificity": 0.86,
+      "robustness": 0.88,
+      "compatibility": 0.80
+    },
+    "reasoning": {
+      "defensibility": "The test's scope is verifiable: it checks same-seed-same-result, not cross-system-RNG-stability. The gap between what the test verifies and what developers assume it verifies is a concrete false-confidence mechanism.",
+      "specificity": "Names the exact test, the exact property it verifies (same seed same result), the exact property it misses (cross-system RNG stability), and the exact consequence (false confidence). A developer could write the missing test.",
+      "robustness": "This applies to every future system that consumes RNG. The test gap is permanent until a cross-system stability test is added.",
+      "compatibility": "Directly supports the RNG butterfly effect (a3-08) by explaining why it will not be caught. Also interacts with benchmark blindness (a3-18) through the RNG-driven density shift mechanism."
+    }
+  },
+  {
+    "id": "a3-21",
+    "proposition": "A single terrain walkability change affecting a busy corridor could force thousands of entities to simultaneously invalidate their cached paths and re-pathfind, creating a per-tick spike where thousands of A* calls each allocate 693 MB on the production map, which is unrecoverable within a single tick's budget.",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.88,
+      "robustness": 0.72,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The causal chain is logically complete: terrain change -> path invalidation -> mass re-pathfinding -> catastrophic allocation. Each step follows necessarily from the architecture's current design.",
+      "specificity": "Names the trigger (terrain change in busy corridor), the scale (thousands of entities), the per-call cost (693 MB), and the consequence (unrecoverable spike). Concrete enough to simulate.",
+      "robustness": "Requires a future terrain-mutation system AND a high-traffic corridor AND many cached paths through that corridor. The conjunction of conditions makes this less likely than simpler failure modes, but the consequence is severe enough to warrant attention.",
+      "compatibility": "Combines a3-03 (missing invalidation) with a3-04 (A* allocation cost) and a3-14 (density clustering). This is the worst-case scenario where three failure modes compound."
+    }
+  },
+  {
+    "id": "a3-22",
+    "proposition": "Future goal-directed movement (home-to-work commutes) will produce correlated movement patterns with rush-hour clustering at doorways and bridge congestion, creating density spikes that stress spatial queries, pathfinding, and collision systems in ways that random wandering cannot exercise, and no current test or benchmark models these patterns.",
+    "scores": {
+      "defensibility": 0.85,
+      "specificity": 0.80,
+      "robustness": 0.77,
+      "compatibility": 0.88
+    },
+    "reasoning": {
+      "defensibility": "Correlated movement producing congestion at bottlenecks is a well-established result in agent-based simulation. The Paris map's specific bottlenecks (bridges, doorways) are knowable from the map geometry.",
+      "specificity": "Names the specific movement pattern (home-to-work commutes), the specific bottlenecks (doorways, bridges), and the specific systems stressed (spatial queries, pathfinding, collision). The missing test coverage is verifiable.",
+      "robustness": "This requires goal-directed movement to be implemented, which is a design goal but not yet present. The failure mode is entirely latent. Score reflects this distance from current implementation.",
+      "compatibility": "Compounds with density-dependent quadratic costs (a3-01), benchmark blindness (a3-18), and pathfinding costs (a3-04). This is the realistic operational scenario that combines multiple failure modes."
+    }
+  },
+  {
+    "id": "a3-23",
+    "proposition": "The HashMap operation cost grows as the product of system count and table count (not their sum), because each new system that references a new table adds (entity_count) additional cross-table lookups, meaning the scaling is multiplicative and the per-system marginal cost increases as the architecture grows rather than remaining constant.",
+    "scores": {
+      "defensibility": 0.88,
+      "specificity": 0.84,
+      "robustness": 0.86,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The multiplicative scaling follows from the architecture: each system iterates entities and looks up tables per entity. Total ops = sum over systems of (entities * tables_per_system). If both system count and per-system table references grow, the total grows as their product.",
+      "specificity": "Distinguishes additive from multiplicative scaling and names the exact variables (system count, table count, entity count) in the product. The increasing-marginal-cost insight is actionable for capacity planning.",
+      "robustness": "This is architectural and unavoidable in a HashMap-based EAV. The only mitigation is reducing per-system table references (fewer cross-table lookups) or changing the data structure.",
+      "compatibility": "This is the formal statement of how a3-06 (HashMap tax) and a3-11 (table proliferation) interact multiplicatively rather than additively."
+    }
+  }
+]

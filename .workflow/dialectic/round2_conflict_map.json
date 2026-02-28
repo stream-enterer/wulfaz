@@ -1,0 +1,247 @@
+[
+  {
+    "tension_id": "t-01",
+    "propositions": ["a1-07", "a3-08"],
+    "type": "undermining",
+    "severity": 0.88,
+    "description": "a1-07 allows omitting the deterministic sort if three conditions hold (no RNG, order-independent results, no pending_deaths push). a3-08 warns that the shared seeded RNG creates butterfly effects where any change to conditional RNG consumption shifts the stream for all downstream systems. If a developer incorrectly judges condition (a) or a future refactor introduces indirect RNG dependency, the sort-skip silently breaks determinism in a way the test suite (per a3-20) cannot catch. The sort-skip exception creates exactly the kind of fragile assumption a3-08 warns is undetectable."
+  },
+  {
+    "tension_id": "t-02",
+    "propositions": ["a1-07", "a3-07"],
+    "type": "latent_tension",
+    "severity": 0.65,
+    "description": "a1-07 relaxes the mandatory sort requirement under specific conditions. a3-07 identifies sort cost as consuming 75% of the tick budget at 50k entities across 10 systems. The tension: a1-07 offers a partial escape from the cost a3-07 identifies, but only for systems meeting strict criteria. If developers aggressively apply a1-07 to avoid sorting (motivated by a3-07's cost analysis), they risk determinism violations. Conversely, if they respect a3-07's warning and always sort, a1-07 becomes dead letter."
+  },
+  {
+    "tension_id": "t-03",
+    "propositions": ["a1-07", "a3-20"],
+    "type": "undermining",
+    "severity": 0.80,
+    "description": "a3-20 warns that the determinism test only verifies same-seed-same-result and provides false confidence that determinism is robust. a1-07 provides conditions under which the deterministic sort can be safely omitted. The sort-skip exception is designed to be safe for determinism, but a3-20 reveals the test suite cannot verify this safety. If a developer applies a1-07's exception incorrectly, the determinism test passes (same seed, same result per run) but cross-system stability is broken. The safety net that should catch a1-07 violations does not exist."
+  },
+  {
+    "tension_id": "t-04",
+    "propositions": ["a1-08", "a3-07", "a2-12"],
+    "type": "undermining",
+    "severity": 0.75,
+    "description": "a1-08 proposes a per-tick cached sorted entity list (World::sorted_entities) to eliminate redundant sorts, saving ~1.5ms. a3-07 identifies sort cost as ~7.5ms at 50k entities across 10 systems. a2-12 estimates ~3,900us per system. The proposals converge on the problem but a1-08's solution has a design flaw its own reasoning acknowledges: systems iterate different tables, so a single sorted list of all alive entities still requires per-system filtering. The cached list saves the sort but not the filter, undermining the projected savings."
+  },
+  {
+    "tension_id": "t-05",
+    "propositions": ["a1-08", "a2-13"],
+    "type": "latent_tension",
+    "severity": 0.55,
+    "description": "a1-08 proposes a World::sorted_entities rebuilt once per tick. a2-13 proposes passing sorted Vecs between systems in the same phase. These are competing solutions to the same problem (redundant sorts). a1-08 centralizes on World with lifecycle management (invalidate on spawn/despawn); a2-13 couples systems via shared sorted vectors, tensioning with CLAUDE.md's one-system-per-file independence. Both add complexity but in incompatible ways."
+  },
+  {
+    "tension_id": "t-06",
+    "propositions": ["a1-13", "a3-03"],
+    "type": "undermining",
+    "severity": 0.92,
+    "description": "a1-13 prescribes path caching rules (check cache, store result, invalidate on goal change) and its reasoning notes 'the map is static after loading.' a3-03 warns that no system currently invalidates cached paths when terrain walkability changes, and the first terrain-mutation system will silently corrupt all cached paths. a1-13's caching rules are built on an assumption (static map) that a3-03 identifies as a latent time bomb: the caching rules have no terrain-change invalidation hook, so following a1-13 while adding a terrain-mutation system creates exactly the mass cache corruption a3-03 predicts."
+  },
+  {
+    "tension_id": "t-07",
+    "propositions": ["a2-08", "a3-21"],
+    "type": "undermining",
+    "severity": 0.85,
+    "description": "a2-08 caps fresh A* calls at 30-50 per tick, expecting this to contain pathfinding cost. a3-21 warns that a terrain walkability change in a busy corridor could force thousands of entities to simultaneously invalidate cached paths. The cap means 95%+ of invalidated entities get no fresh path that tick and must fall back to random stepping or standing still, creating a mass behavioral freeze lasting dozens of ticks as the queue drains at 30-50/tick. The cap prevents the allocation catastrophe but creates a behavioral catastrophe."
+  },
+  {
+    "tension_id": "t-08",
+    "propositions": ["a2-09", "a3-03"],
+    "type": "undermining",
+    "severity": 0.72,
+    "description": "a2-09 proposes lazy path invalidation for tracking targets (re-path only when target moves >K tiles). a3-03 warns no terrain-change invalidation exists. a2-09 adds another cache-stability assumption (target position is the only invalidation trigger) that compounds a3-03's gap. If terrain changes while tracking a target, the path traverses newly impassable tiles, and a2-09's lazy invalidation misses it because the target hasn't moved."
+  },
+  {
+    "tension_id": "t-09",
+    "propositions": ["a2-23", "a3-03"],
+    "type": "mutual_exclusion",
+    "severity": 0.78,
+    "description": "a2-23 prohibits timer-based cache invalidation ('never invalidate based on tick count alone'). a3-03 identifies that no terrain-change invalidation mechanism exists. In the absence of condition-based terrain invalidation, periodic re-validation is the only safety net against stale paths through changed terrain. a2-23 forecloses this fallback without a3-03's prerequisite (terrain-change detection) being in place. Following a2-23 before implementing terrain-change detection makes stale path corruption permanent."
+  },
+  {
+    "tension_id": "t-10",
+    "propositions": ["a2-16", "a3-19"],
+    "type": "undermining",
+    "severity": 0.82,
+    "description": "a2-16 proposes incremental spatial index updates (track moved entities, remove/insert at O(moved) cost). a3-19 warns that systems inserted between run_wander and rebuild_spatial_index see a stale index. Incremental updates worsen this: instead of a full rebuild that corrects all positions, incremental updates track only entities moved through the designated channel (wander's move list). Any system that moves entities outside that channel (combat knockback, teleportation) creates stale entries that a full rebuild would catch but an incremental update misses."
+  },
+  {
+    "tension_id": "t-11",
+    "propositions": ["a2-17", "a3-01", "a3-14"],
+    "type": "undermining",
+    "severity": 0.80,
+    "description": "a2-17 proposes reducing CELL_SIZE from 16 to 8, projecting 2.5x improvement under uniform density (49 entities/cell down from 195). a3-01 identifies spatial query cost as O(d^2) where d is local density. a3-14 warns the production Paris map concentrates 200+ entities in a single 16x16 cell. With CELL_SIZE=8, those 200+ entities occupy 1-4 adjacent cells. The 2.5x improvement under uniform density shrinks to marginal under clustering, because the quadratic cost from density dominates the cell-count reduction. The optimization addresses the wrong bottleneck."
+  },
+  {
+    "tension_id": "t-12",
+    "propositions": ["a1-11", "a3-02"],
+    "type": "undermining",
+    "severity": 0.73,
+    "description": "a1-11 codifies 'exactly two rebuilds per tick' and suggests incremental updates beyond 50k. a3-02 warns each rebuild performs 4000+ Vec allocations, and the 'just add another rebuild' precedent accumulates to 25%+ of tick budget at 5 rebuilds. a1-11's exception clause ('a third call requires explicit justification') creates a social guardrail, not structural prevention, against the accumulation a3-02 predicts."
+  },
+  {
+    "tension_id": "t-13",
+    "propositions": ["a1-12", "a3-01"],
+    "type": "undermining",
+    "severity": 0.77,
+    "description": "a1-12 requires spatial queries in Phase 3 to have a result cap (e.g., .count().min(3)) or caching mechanism. a3-01 identifies that O(d^2) cost comes from scanning all entities in the cell, regardless of the result cap. a1-12's own reasoning concedes this: 'the cap prevents downstream work but not the scan.' The result cap reduces processing cost on results but does not address the scan cost that a3-01 identifies as the actual bottleneck in clustered environments."
+  },
+  {
+    "tension_id": "t-14",
+    "propositions": ["a1-01", "a2-01"],
+    "type": "contradiction",
+    "severity": 0.82,
+    "description": "a1-01 derives a per-entity budget of 100ns based on 10k entities. a2-01 frames all analysis around 50k entities with the same 10,000us budget. At 50k entities, a1-01's budget drops to 20ns — less than a single HashMap::get (25-40ns per a1-25). The two agents assume fundamentally different entity counts, producing budgets that differ by 5x. Rules calibrated to a1-01's budget (a1-14's 500ns threshold, a1-21's cost estimation table) are 5x too generous at a2-01's entity count."
+  },
+  {
+    "tension_id": "t-15",
+    "propositions": ["a1-14", "a2-04"],
+    "type": "latent_tension",
+    "severity": 0.70,
+    "description": "a1-14 sets a 500ns per-entity threshold for requiring amortization, derived from the 100ns budget at 10k entities. a2-04 sets a 3,000us system-level ceiling for Phase 2 at 50k entities, which is 60ns per entity. At a2-04's entity count, a1-14's 500ns threshold allows systems costing 25,000us total, exceeding a2-04's ceiling by 8x. The thresholds are calibrated to incompatible entity counts and cannot both be followed."
+  },
+  {
+    "tension_id": "t-16",
+    "propositions": ["a1-21", "a3-17"],
+    "type": "undermining",
+    "severity": 0.75,
+    "description": "a1-21 provides a cost estimation table (HashMap ~30ns, spatial ~1000-5000ns, pathfinding ~100k-500kns) for LLM agents to estimate per-entity cost and trigger amortization. a3-17 argues performance costs are distributed across all systems equally (HashMap lookups, sorting, allocation), making the disease architectural and undiagnosable by attributing cost to individual functions. a1-21's per-entity estimation treats each system in isolation, but a3-17 warns cumulative cross-system costs (cache pollution, allocator fragmentation) are the actual bottleneck and are invisible to per-system accounting."
+  },
+  {
+    "tension_id": "t-17",
+    "propositions": ["a1-05", "a3-09"],
+    "type": "undermining",
+    "severity": 0.68,
+    "description": "a1-05 mandates Vec::with_capacity() sized to the candidate count to eliminate reallocation. a3-09 identifies collect-then-apply as generating 8-10 MB of allocation churn per tick at 50k entities. a1-05 maximizes each Vec's initial allocation to the full candidate count, which at 50k entities means every system allocates a 50k-capacity Vec even if only 1% of entities produce changes. This amplifies exactly the allocation churn a3-09 warns about: full-candidate-count pre-allocation across 8 systems produces larger total allocation than growing dynamically."
+  },
+  {
+    "tension_id": "t-18",
+    "propositions": ["a1-22", "a2-20"],
+    "type": "latent_tension",
+    "severity": 0.60,
+    "description": "a1-22 proposes staggering decisions with ticks_in_action < 5 as skip threshold and damage/health as interrupts. a2-20 proposes inertia-based skip: 10 ticks stable triggers 5-tick skip window. The thresholds differ by 2x (5 vs 10 ticks), mechanisms differ (cooldown vs inertia window), and interrupt conditions are specified at different levels of detail. Implementing either without reconciling creates inconsistent decision timing. Both project ~80% reduction but with different behavioral trade-offs."
+  },
+  {
+    "tension_id": "t-19",
+    "propositions": ["a1-22", "a3-08"],
+    "type": "undermining",
+    "severity": 0.78,
+    "description": "a1-22 proposes that entities with ticks_in_action < 5 skip decision re-evaluation, reducing spatial query volume by ~80%. a3-08 warns any change to conditional RNG consumption shifts the stream for all downstream systems. Decision staggering changes which entities consume RNG on which ticks: a skipped entity doesn't roll dice, shifting the RNG stream for all subsequent entities and systems. The stagger threshold directly controls RNG stream shape, making the butterfly effect data-dependent on action durations."
+  },
+  {
+    "tension_id": "t-20",
+    "propositions": ["a2-20", "a3-08"],
+    "type": "undermining",
+    "severity": 0.78,
+    "description": "a2-20 proposes inertia-based decision skip (10 ticks stable -> 5 ticks skip). a3-08 warns any change to conditional RNG consumption cascades through all downstream systems. Decision skipping is data-dependent (which entities are stable changes over time), meaning the skip pattern alters RNG consumption every time an entity transitions into or out of the skip window. This makes the RNG stream dependent on action durations across the entire population, creating butterfly effects whenever stagger thresholds interact."
+  },
+  {
+    "tension_id": "t-21",
+    "propositions": ["a1-23", "a3-04"],
+    "type": "undermining",
+    "severity": 0.72,
+    "description": "a1-23 proposes a reusable PathfindingWorkspace and estimates 540MB on an 8192x7424 map. a3-04 corrects the production map dimensions to 11000x7000, yielding 693MB. Workspace reuse eliminates per-call allocation but requires 693MB of permanent resident memory. Even with reuse, clearing 693MB (~100us per memset) at a2-08's cap of 50 calls/tick costs ~5ms — half the tick budget — in clearing alone. The reuse optimization trades allocation churn for clearing cost, and the clearing cost at production scale may negate the benefit."
+  },
+  {
+    "tension_id": "t-22",
+    "propositions": ["a1-23", "a2-15"],
+    "type": "latent_tension",
+    "severity": 0.62,
+    "description": "a1-23 proposes a reusable PathfindingWorkspace with pre-allocated flat arrays on World. a2-15 proposes pooled buffers with generation-counter clearing. Both solve A* allocation churn but with different mechanisms: a1-23 uses memset clearing, a2-15 uses generation counters to avoid clearing. At production scale (693MB per a3-04), generation counters (a2-15) avoid the ~100us memset cost per call, making them strictly superior. But a2-15's numbers are computed only for the 256x256 benchmark map. Neither proposal fully addresses production-scale costs."
+  },
+  {
+    "tension_id": "t-23",
+    "propositions": ["a1-08", "a2-25", "a3-18"],
+    "type": "undermining",
+    "severity": 0.76,
+    "description": "a1-08 conditions the sorted entity list optimization on 'if tick profiling shows sorting consuming more than 15% of budget.' a2-25 estimates specific microsecond savings for profiling-gated optimizations. a3-18 argues the benchmark exercises the wrong scale, density, topology, and entity mix, making it structurally incapable of detecting production failure modes. Profiling-gated optimizations cannot trigger when the only profiling target (the benchmark) cannot detect the problem. The optimization gates are locked by the wrong key."
+  },
+  {
+    "tension_id": "t-24",
+    "propositions": ["a2-25", "a3-16"],
+    "type": "contradiction",
+    "severity": 0.72,
+    "description": "a2-25 claims the structural floor at 50k entities is 6,000-7,000us with perfect optimization and lists 5 optimizations totaling ~12,000us savings. a3-16 claims infrastructure overhead alone (HashMap tax + sort tax + allocation churn + spatial queries) consumes 8-10ms at 15 systems, leaving zero headroom. a3-16's infrastructure floor exceeds a2-25's structural floor by 1-3ms. The two agents disagree on whether 50k entities at 10ms/tick is achievable even with all optimizations."
+  },
+  {
+    "tension_id": "t-25",
+    "propositions": ["a1-19", "a3-17"],
+    "type": "undermining",
+    "severity": 0.73,
+    "description": "a1-19 requires every system's doc comment to state big-O complexity, enabling LLMs to flag per-system violations. a3-17 argues the performance disease is architectural and distributed across all systems equally, making it undiagnosable by techniques that attribute cost to individual functions. Per-system big-O annotations address per-system complexity but miss the cumulative infrastructure tax. A system annotated O(n) is correct but misleading when the constant factor is dominated by architectural overhead the annotation does not capture."
+  },
+  {
+    "tension_id": "t-26",
+    "propositions": ["a2-21", "a3-01"],
+    "type": "undermining",
+    "severity": 0.70,
+    "description": "a2-21 proposes caching spatial query results per cell coordinate so co-located entities share results, claiming up to 12x improvement at uniform density. a3-01 identifies O(d^2) cost per spatial cell where d is local density. The cache eliminates redundant queries across entities in the same cell, but the first query for a dense cell still pays the full O(d^2) scan. With 200+ entities in a cell (a3-14), one cached query still costs 40,000+ comparisons. The cache avoids repeating the expensive query but does not reduce the cost of the query itself."
+  },
+  {
+    "tension_id": "t-27",
+    "propositions": ["a1-16", "a3-06", "a3-23"],
+    "type": "latent_tension",
+    "severity": 0.85,
+    "description": "a1-16 defends HashMap as correct for entity tables, citing sparse IDs and CLAUDE.md's rule against replacing HashMap without profiling. a3-06 identifies 5 million hash operations per tick at 15 systems with 50k entities. a3-23 warns HashMap cost grows as the product (not sum) of system count and table count. a1-16 is correct under current constraints, but a3-06/a3-23 demonstrate this correct choice has a structural ceiling: performance is fundamentally bounded by HashMap throughput, and no per-system optimization escapes this. The tension is between 'correct choice' and 'ceiling of the correct choice.'"
+  },
+  {
+    "tension_id": "t-28",
+    "propositions": ["a1-25", "a3-06"],
+    "type": "latent_tension",
+    "severity": 0.70,
+    "description": "a1-25 estimates HashMap::get at 25-40ns and calculates 0.9ms for 3 tables at 10k entities, framing this as a manageable cost to work within. a3-06 scales the same per-operation cost to 5M operations at 15 systems with 50k entities, yielding 150-200ms total hash time. Both use the same per-operation cost but reach opposite conclusions because they operate at different scales. a1-25's 'manageable cost' framing becomes actively misleading at a3-06's scale."
+  },
+  {
+    "tension_id": "t-29",
+    "propositions": ["a2-16", "a3-02"],
+    "type": "undermining",
+    "severity": 0.68,
+    "description": "a2-16 proposes incremental spatial updates to reduce rebuild cost from ~5,400us to ~550us. a3-02 warns each full rebuild performs 4000+ Vec allocations. Incremental updates avoid full clear-and-reinsert, reducing allocation churn. But incremental updates still require occasional full rebuilds (after spawns, deaths, or missed moves), and the mixed strategy of 'usually incremental, sometimes full' creates variable-cost patterns harder to budget for than consistent full-rebuild cost."
+  },
+  {
+    "tension_id": "t-30",
+    "propositions": ["a2-05", "a3-13"],
+    "type": "latent_tension",
+    "severity": 0.62,
+    "description": "a2-05 proposes pushing events only on state transitions, not every tick, saving ~1,000us. a3-13 identifies the hunger system already pushes 50k+ events per tick, overwhelming the 10k ring buffer with 80% wasted construction. Both agree on the diagnosis but disagree on framing: a2-05 treats it as an optimization opportunity, a3-13 as an active failure mode. If a downstream consumer depends on per-tick hunger events, a2-05's fix breaks it — a possibility neither proposition investigates."
+  },
+  {
+    "tension_id": "t-31",
+    "propositions": ["a2-22", "a1-13"],
+    "type": "latent_tension",
+    "severity": 0.58,
+    "description": "a2-22 requires cache invalidation to be checked by the consuming system with assumptions stored in the cache. a1-13 places invalidation on the pathfinding consumer and specifies goal change as the invalidation condition. These align in principle but a1-13's invalidation conditions (goal change only) are incomplete by a2-22's standard: the cached assumptions should include terrain state, not just goal position. a2-22's broader principle exposes a gap in a1-13's specific rules."
+  },
+  {
+    "tension_id": "t-32",
+    "propositions": ["a2-04", "a3-11"],
+    "type": "undermining",
+    "severity": 0.68,
+    "description": "a2-04 mandates Phase 2 systems be O(n) with at most one secondary HashMap lookup per entity and a 3,000us ceiling. a3-11 warns each new property table increases cache pollution by one disjoint memory region per cross-table lookup. As more Phase 2 systems are added (each needing different secondary tables), cache pollution compounds, meaning the 'one secondary lookup' a2-04 permits becomes increasingly expensive. The per-lookup cost is not constant but grows with table count."
+  },
+  {
+    "tension_id": "t-33",
+    "propositions": ["a1-24", "a3-12"],
+    "type": "latent_tension",
+    "severity": 0.55,
+    "description": "a1-24 identifies utility_config.clone() as a borrow-checker workaround with negligible cost (~200 bytes) and suggests accepting it with a comment. a3-12 warns this establishes a pattern that will be replicated in future systems, scaling clone cost with system count and config complexity. Both identify the same issue but disagree on severity: a1-24 treats it as negligible, a3-12 as slow-burn architectural debt."
+  },
+  {
+    "tension_id": "t-34",
+    "propositions": ["a2-10", "a1-22"],
+    "type": "latent_tension",
+    "severity": 0.52,
+    "description": "a2-10 relies on movement cooldowns as a natural throttle (~11% of entities move per tick at Walk gait). a1-22 proposes staggering decision re-evaluation (only ~20% re-evaluate per tick). If both are implemented, the effective per-tick processing rate becomes the product of two independent throttles: ~20% decisions * ~11% movement = ~2.2% of entities doing significant work per tick. This double-throttle could make entities appear unresponsive."
+  },
+  {
+    "tension_id": "t-35",
+    "propositions": ["a1-10", "a2-07"],
+    "type": "latent_tension",
+    "severity": 0.50,
+    "description": "a1-10 requires 'minimum range that satisfies the system's design' with named consts and real-world justification. a2-07 requires SENSE_RANGE to be 'the minimum required by gameplay.' Both agree on minimizing range but neither provides a methodology for determining the minimum. Gameplay requirements (what entities need to perceive) may conflict with performance constraints (what the spatial index can afford), and neither proposition provides a resolution when these conflict."
+  }
+]

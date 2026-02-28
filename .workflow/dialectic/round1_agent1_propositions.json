@@ -1,0 +1,402 @@
+[
+  {
+    "id": "a1-01",
+    "proposition": "At 100 ticks/sec with 8 systems, 2 spatial index rebuilds, and a debug validation pass, each system gets roughly 1ms, yielding a per-entity budget of 100ns at 10k entities.",
+    "scores": {
+      "defensibility": 0.82,
+      "specificity": 0.93,
+      "robustness": 0.68,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The arithmetic is straightforward (10ms / (8+2+1) ~ 1ms per system, 1ms / 10k = 100ns). However, the division assumes equal allocation across systems, which is unrealistic -- some systems are trivially cheap while others (decisions, wander) dominate. The budget is a heuristic, not a hard limit.",
+      "specificity": "Extremely concrete: names the tick rate, system count, entity count, and derived budget. An LLM or developer can immediately use this as a go/no-go threshold for per-entity computation.",
+      "robustness": "Brittle under different entity counts (1k vs 50k entities change the budget dramatically) and under different tick rates (30fps simulation is far more forgiving). The 10k entity assumption is not justified from population data. Also assumes all systems touch all entities, which is false for spatial systems that only touch subsets.",
+      "compatibility": "Aligns with CLAUDE.md's single-threaded sequential loop and HashMap architecture. Does not conflict with any existing architectural constraint."
+    }
+  },
+  {
+    "id": "a1-02",
+    "proposition": "A system should iterate the table with the fewest entries that still captures all entities it needs to process (PERF-ITER-01).",
+    "scores": {
+      "defensibility": 0.92,
+      "specificity": 0.88,
+      "robustness": 0.90,
+      "compatibility": 0.95
+    },
+    "reasoning": {
+      "defensibility": "This is a textbook optimization: minimize the outer-loop cardinality. The examples (hunger iterates hungers, combat iterates combat_stats) are directly verifiable in the codebase.",
+      "specificity": "Actionable: for any new system, identify which table defines its domain, verify it has the fewest entries among required tables, iterate that one. The verifiable check is mechanical.",
+      "robustness": "Holds across all entity counts and system types. The only edge case is when the 'narrowest' table is ambiguous because two required tables have similar cardinality, in which case the rule still works (either is acceptable).",
+      "compatibility": "Fully compatible with CLAUDE.md's collect-then-apply and skip-pending-deaths rules. Does not conflict with any architectural constraint."
+    }
+  },
+  {
+    "id": "a1-03",
+    "proposition": "Every system's candidate collection must filter pending_deaths before any secondary table lookup (PERF-ITER-02), with filter ordering: cheapest rejection first.",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.92,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "reasoning": {
+      "defensibility": "Filtering dead entities first avoids wasted work on doomed entities. The cheapest-first ordering is a standard optimization principle (short-circuit evaluation). The codebase already follows this pattern in run_hunger, run_eating, and run_wander.",
+      "specificity": "Gives a concrete ordering (pending_deaths check, then contains_key, then get with predicate). An LLM authoring a new system can follow this recipe mechanically.",
+      "robustness": "Universally applicable. The only scenario where this is suboptimal is when pending_deaths is empty (the check is wasted), but the cost is a single HashSet::contains per entity -- negligible.",
+      "compatibility": "Directly reinforces CLAUDE.md's rule 'Systems MUST skip entities already in pending_deaths'. The two rules are mutually reinforcing."
+    }
+  },
+  {
+    "id": "a1-04",
+    "proposition": "Within a single system function, no HashMap::get call should read a value that was already extracted in the same function and cannot have changed (PERF-ITER-03).",
+    "scores": {
+      "defensibility": 0.85,
+      "specificity": 0.87,
+      "robustness": 0.80,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "Eliminating redundant lookups is straightforward. The document correctly notes that in a collect-then-apply system within a single phase, values cannot change between collection and processing, making re-reads provably wasteful.",
+      "specificity": "Highly actionable. An LLM can mechanically scan for duplicate .get() calls on the same entity and table within one function.",
+      "robustness": "The 'cannot have changed' qualifier is the weak point. An LLM must prove the value is immutable within the function scope, which requires understanding borrow-checker constraints and the collect-then-apply pattern. Edge cases exist where a value is extracted during filtering but only for a subset of entities, making it unavailable for non-filtered entities in the processing loop.",
+      "compatibility": "Compatible with the architecture. The document notes that run_combat already violates this rule (re-reads combat_stats), showing the rule is aspirational rather than enforced."
+    }
+  },
+  {
+    "id": "a1-05",
+    "proposition": "Every Vec::new() used for collecting changes must be replaced with Vec::with_capacity() sized to the candidate count, or justified with a comment explaining why the expected size is much smaller (PERF-ITER-04).",
+    "scores": {
+      "defensibility": 0.78,
+      "specificity": 0.90,
+      "robustness": 0.72,
+      "compatibility": 0.92
+    },
+    "reasoning": {
+      "defensibility": "Pre-sizing eliminates reallocation during the collect phase. However, at typical entity counts (hundreds to low thousands), Vec reallocation overhead is a few microseconds total -- well within budget. The optimization is sound but its impact is marginal.",
+      "specificity": "Extremely mechanical: replace Vec::new() with Vec::with_capacity(candidates.len()). An LLM can apply this with zero judgment required.",
+      "robustness": "Over-allocates when only a small fraction of candidates produce changes (e.g., combat system where few entities are actually in combat). The comment justification escape hatch handles this, but in practice the over-allocation is harmless (Vec memory is freed at scope exit). Fragile in the sense that the optimization provides negligible real-world benefit for the complexity of the rule.",
+      "compatibility": "Fully compatible. The existing codebase uses both Vec::new() and Vec::with_capacity() inconsistently, so this standardizes the practice."
+    }
+  },
+  {
+    "id": "a1-06",
+    "proposition": "The sort by Entity.0 must happen exactly once per system on the primary candidate list; secondary sorts are permitted only on Vecs derived from spatial queries or secondary HashMap iterations within the per-entity processing loop (PERF-SORT-01).",
+    "scores": {
+      "defensibility": 0.88,
+      "specificity": 0.90,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "reasoning": {
+      "defensibility": "Sorting once is necessary and sufficient for deterministic primary iteration. Secondary sorts on spatial query results are correctly identified as the only additional non-deterministic source. The rule directly maps to the CLAUDE.md determinism requirement.",
+      "specificity": "Gives a concrete, verifiable invariant: exactly one sort_by_key(|e| e.0) on the primary Vec per system. An LLM can count sort calls mechanically.",
+      "robustness": "Holds across all system types. The only edge case is a system that derives multiple independent candidate lists from different HashMap iterations (not currently present in the codebase), which would need one sort each.",
+      "compatibility": "Directly implements CLAUDE.md's 'Systems MUST sort entity collections by e.0 before processing' with more precision about where and how many times."
+    }
+  },
+  {
+    "id": "a1-07",
+    "proposition": "A system may omit the deterministic sort ONLY if it satisfies ALL of: (a) does not use world.rng, (b) per-entity results are independent of processing order, (c) it does not push to pending_deaths (PERF-SORT-02).",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.93,
+      "robustness": 0.87,
+      "compatibility": 0.82
+    },
+    "reasoning": {
+      "defensibility": "The three conditions are logically necessary and jointly sufficient for proving sort-independence. RNG consumption order affects future draws; order-dependent results break determinism directly; pending_deaths modifications affect downstream systems. All three are real failure modes.",
+      "specificity": "Three boolean conditions that can be mechanically verified by code inspection. An LLM can check each condition against a system's source code.",
+      "robustness": "Condition (b) is the hardest to verify -- proving that results are order-independent requires understanding the system's semantics, not just its syntax. An LLM might miss subtle ordering dependencies (e.g., a system that reads from a table modified by earlier iterations despite the collect-then-apply pattern).",
+      "compatibility": "Slightly tensions with CLAUDE.md, which says 'Systems MUST sort entity collections by e.0 before processing' without exception. This rule adds nuance by identifying safe exceptions. The CLAUDE.md rule is stricter; this rule relaxes it under specific conditions."
+    }
+  },
+  {
+    "id": "a1-08",
+    "proposition": "If tick profiling shows sorting consuming more than 15% of the tick budget, a per-tick cached sorted entity list (World::sorted_entities rebuilt once per tick) should be implemented, saving approximately 1.5ms per tick at 10k entities by eliminating 6 redundant sorts (PERF-SORT-03).",
+    "scores": {
+      "defensibility": 0.75,
+      "specificity": 0.88,
+      "robustness": 0.65,
+      "compatibility": 0.78
+    },
+    "reasoning": {
+      "defensibility": "The math is plausible: 6 sorts at ~0.3ms each = 1.8ms, reduced to ~0.3ms with caching. However, this assumes all 6 systems sort the same entity set, which is false -- each system iterates a different table (hungers, combat_stats, positions) with different membership. A single sorted list of alive entities does not help unless each system still filters it.",
+      "specificity": "Concrete: names the field (World::sorted_entities), the rebuild trigger (once per tick), and the threshold (15% of budget). Actionable but predicated on profiling data that does not exist yet.",
+      "robustness": "The proposal has a design flaw: systems iterate different tables, so a sorted list of all alive entities still requires per-system filtering, which re-introduces O(n) iteration over entities that lack the system's required components. The cache helps only if most alive entities have all components, which is not guaranteed.",
+      "compatibility": "Adding mutable state to World is architecturally compatible. However, maintaining a cached sorted list adds a rebuild step and a coherence obligation (must invalidate on spawn/despawn), which adds complexity to the lifecycle rules in CLAUDE.md."
+    }
+  },
+  {
+    "id": "a1-09",
+    "proposition": "If a system has access to a specific Entity ID, it must use positions.get(&entity) rather than a spatial query to find that entity's location, because direct lookup costs ~30ns versus ~1000ns minimum for a spatial query (PERF-SPATIAL-01).",
+    "scores": {
+      "defensibility": 0.95,
+      "specificity": 0.95,
+      "robustness": 0.93,
+      "compatibility": 0.95
+    },
+    "reasoning": {
+      "defensibility": "The cost difference (30x) is overwhelming and the logic is irrefutable: a HashMap lookup by known key is always faster than scanning a spatial grid to find the same entity. The codebase already follows this pattern (combat and eating check preferred target first).",
+      "specificity": "A single, mechanical rule: if you have the Entity, use .get(). No judgment required.",
+      "robustness": "Universally applicable. No edge case where a spatial query would be faster than a direct lookup for a known entity.",
+      "compatibility": "Fully compatible with all architectural constraints. Reinforces existing codebase patterns."
+    }
+  },
+  {
+    "id": "a1-10",
+    "proposition": "Every call to entities_in_range must use the minimum range that satisfies the system's design, with the range defined as a named const with a comment stating the real-world distance and justification (PERF-SPATIAL-02).",
+    "scores": {
+      "defensibility": 0.88,
+      "specificity": 0.90,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "reasoning": {
+      "defensibility": "Spatial query cost scales quadratically with range (number of grid cells scanned). Minimizing range directly reduces cost. The documentation requirement (real-world distance + justification) ensures the range is intentional, not arbitrary.",
+      "specificity": "Two concrete requirements: (1) use a const, (2) comment with real-world units. Both are mechanically verifiable. The codebase already has SENSE_RANGE = 30 with '30 meters' in the comment.",
+      "robustness": "Holds universally. The only weakness is that 'minimum necessary' requires domain knowledge that an LLM may lack (e.g., what is the biologically plausible visual range for a creature?). But the documentation requirement forces explicit reasoning.",
+      "compatibility": "Directly reinforces CLAUDE.md's spatial scale rule ('1 tile = 1 meter, every spatial constant MUST have a comment with real-world units')."
+    }
+  },
+  {
+    "id": "a1-11",
+    "proposition": "rebuild_spatial_index is called exactly twice per tick (before Phase 2 and before Phase 4) at a cost of ~0.5ms each; a third call requires explicit justification, and beyond ~50k entities incremental updates should be considered (PERF-SPATIAL-03).",
+    "scores": {
+      "defensibility": 0.83,
+      "specificity": 0.88,
+      "robustness": 0.75,
+      "compatibility": 0.88
+    },
+    "reasoning": {
+      "defensibility": "The two-rebuild pattern is justified by the phase structure: positions are stable within needs/decisions but change during actions. The cost estimate (~0.5ms for 10k entities) is reasonable. The 50k entity threshold for incremental updates is a plausible inflection point but lacks profiling data.",
+      "specificity": "Names the exact call sites, the cost, and the scaling threshold. A developer adding a third rebuild would know they need justification.",
+      "robustness": "The 50k threshold is arbitrary without benchmarks. The 'exactly twice' constraint could break if a new phase is introduced between existing ones. However, the phase structure is documented as stable in CLAUDE.md.",
+      "compatibility": "Compatible with the main loop phase ordering in CLAUDE.md. The two rebuild points map to documented phase boundaries."
+    }
+  },
+  {
+    "id": "a1-12",
+    "proposition": "Every spatial query in a Phase 3 system must have either a result cap (e.g., .count().min(3)) or a caching/staggering mechanism documented in a comment, because the decisions system's spatial queries are the single most expensive operation in the tick loop at 3.2M entity comparisons for 10k entities (PERF-SPATIAL-04).",
+    "scores": {
+      "defensibility": 0.87,
+      "specificity": 0.90,
+      "robustness": 0.82,
+      "compatibility": 0.88
+    },
+    "reasoning": {
+      "defensibility": "The cost analysis is sound: 10k entities x 2 queries x 160 comparisons each = 3.2M comparisons. This is verifiable from the codebase (decisions.rs lines 119-136 do FoodNearby and EnemyNearby spatial queries). The mitigation strategies (result cap, staggering, caching) are all valid.",
+      "specificity": "Gives concrete mitigation options and identifies the existing .count().min(3) cap in the codebase. A developer adding a new consideration with spatial sensing knows what to do.",
+      "robustness": "The .count().min(3) cap only reduces the cost of counting, not the cost of the spatial query itself (it still scans all cells in range). The real win would come from early-exit iteration, which the current entities_in_range API does not support. The cap prevents downstream work but not the scan.",
+      "compatibility": "Compatible with CLAUDE.md's phase classification (Phase 3 reads needs + environment, writes intentions). The result cap does not violate any architectural constraint."
+    }
+  },
+  {
+    "id": "a1-13",
+    "proposition": "Any system that calls find_path must check cached_paths first for the same goal, store the result in cached_paths if the goal is stable, and invalidate cached_paths when the goal changes; systems tracking moving targets may skip caching but must document why (PERF-CACHE-01).",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.92,
+      "robustness": 0.85,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "A* on the Paris map costs 100-500us per call. Caching avoids recomputation for stable goals. The wander system already implements this pattern correctly. The exception for moving targets (Eat/Attack) is justified because the path would be immediately stale.",
+      "specificity": "Three concrete steps: check, store, invalidate. The existing CachedPath component and its usage in run_wander provide a template. The documentation requirement for skipping ensures intentionality.",
+      "robustness": "The main risk is stale cache: if the map changes (tiles become unwalkable) but the goal remains the same, the cached path could lead through newly impassable terrain. The current system does not handle map mutation, but this is consistent with the architecture (map is static after loading).",
+      "compatibility": "The CachedPath component already exists in MindTables with proper lifecycle management (remove in despawn, validate_world check). Fully aligned with existing architecture."
+    }
+  },
+  {
+    "id": "a1-14",
+    "proposition": "If a system's per-entity computation exceeds 500ns (measured or estimated from operation counts), it must implement cooldown skip, tick staggering, or result caching, with the mechanism documented in the system's doc comment (PERF-CACHE-02).",
+    "scores": {
+      "defensibility": 0.80,
+      "specificity": 0.85,
+      "robustness": 0.72,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The 500ns threshold derives from the 100ns budget with a 5x safety margin for amortization. The threshold is somewhat arbitrary but provides a useful decision point. The three mitigation strategies (cooldown, stagger, cache) cover the main amortization patterns.",
+      "specificity": "Names a concrete threshold (500ns), three concrete strategies, and a documentation requirement. An LLM estimating per-entity cost can apply this rule by counting operations and their costs from the table in section 1.1.",
+      "robustness": "The 500ns threshold assumes the 100ns-per-entity budget from section 1, which itself depends on the contested 10k entity assumption. At 1k entities, the budget is 1000ns, making the 500ns threshold unnecessarily aggressive. The threshold does not scale with entity count.",
+      "compatibility": "Compatible with CLAUDE.md's requirement for doc comments on system functions. The movement system already uses MoveCooldown as an amortization mechanism, validating the pattern."
+    }
+  },
+  {
+    "id": "a1-15",
+    "proposition": "Every system that iterates tiles must either use chunk-level dirty/equilibrium flags to skip stable chunks, or justify in a comment why full iteration is necessary (PERF-CACHE-03).",
+    "scores": {
+      "defensibility": 0.87,
+      "specificity": 0.85,
+      "robustness": 0.80,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "The temperature system demonstrates the pattern: at_equilibrium chunks are skipped entirely, reducing steady-state cost to O(1). This is a proven optimization in the codebase. The justification escape hatch handles edge cases (e.g., systems depending on neighboring chunks).",
+      "specificity": "Points to an existing implementation (temperature) as a template. The two options (use dirty flags OR justify) are clear.",
+      "robustness": "Depends on the assumption that most tile-based computation reaches equilibrium. For a system like dynamic lighting or real-time visibility, equilibrium may never be reached, making the rule inapplicable -- but the comment justification handles this case.",
+      "compatibility": "Compatible with TileMap's chunk-based architecture. The at_equilibrium flag pattern is already established in the codebase."
+    }
+  },
+  {
+    "id": "a1-16",
+    "proposition": "Entity property tables must use HashMap because entity IDs are sparse (monotonically increasing, never reused, with gaps from despawned entities), and a Vec indexed by Entity.0 would waste memory proportional to max_entity_id rather than alive_count (PERF-DS-01).",
+    "scores": {
+      "defensibility": 0.92,
+      "specificity": 0.88,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "reasoning": {
+      "defensibility": "The sparsity argument is sound: entity IDs are monotonically increasing and never reused (confirmed by World::spawn() which increments next_entity_id). After despawning entities, the ID space has gaps. A dense Vec would waste memory and defeat cache locality benefits.",
+      "specificity": "Clear decision criterion: sparse/unbounded keys use HashMap, bounded/dense keys use flat arrays. The examples (correct: TileMap arrays, A* g_score; incorrect: entity tables as Vec) are concrete.",
+      "robustness": "Could be challenged with a generational index approach (recycle entity IDs with a generation counter), which would make Vec viable. But this would require a fundamental Entity type change that conflicts with CLAUDE.md's Entity(pub u64) definition.",
+      "compatibility": "Directly reinforces CLAUDE.md's 'Do not replace HashMap with another data structure without profiling data showing >5ms per tick for that system'. The HashMap choice is architecturally entrenched."
+    }
+  },
+  {
+    "id": "a1-17",
+    "proposition": "No system may contain a nested loop where both the outer and inner loops iterate entity collections of size proportional to total entity count; the inner loop must be bounded by a spatial query, a fixed-size collection, or a constant (PERF-QUAD-01).",
+    "scores": {
+      "defensibility": 0.93,
+      "specificity": 0.90,
+      "robustness": 0.90,
+      "compatibility": 0.92
+    },
+    "reasoning": {
+      "defensibility": "O(n^2) algorithms are the most common performance catastrophe in entity processing. The spatial index exists specifically to convert O(n) inner loops to O(k) where k is the per-cell entity count. The codebase already follows this pattern in combat and eating.",
+      "specificity": "Clear prohibition with three acceptable alternatives. The code example (bad: nested combatants loop; good: entities_at spatial query) makes the rule concrete.",
+      "robustness": "Universally applicable. The only edge case is when the spatial query result itself is proportional to n (all entities in one cell), which degrades back to O(n^2). But this is a degenerate spatial distribution, not a code structure issue.",
+      "compatibility": "Fully compatible with the spatial index architecture. Reinforces the purpose of rebuild_spatial_index and entities_at/entities_in_range methods on World."
+    }
+  },
+  {
+    "id": "a1-18",
+    "proposition": "Every .contains() call inside a loop must be on a HashSet, BTreeSet, or sorted Vec with binary search; plain Vec .contains() inside a loop is permitted only with a comment proving the Vec size is bounded by a constant (PERF-QUAD-02).",
+    "scores": {
+      "defensibility": 0.85,
+      "specificity": 0.90,
+      "robustness": 0.82,
+      "compatibility": 0.90
+    },
+    "reasoning": {
+      "defensibility": "Vec::contains is O(n) per call; inside a loop of size m, total cost is O(m*n). If the Vec grows with the loop, this is O(n^2). HashSet::contains is O(1) amortized. The eating system's consumed set was correctly migrated from Vec to HashSet.",
+      "specificity": "Mechanical rule: grep for .contains() inside loops, check the collection type, enforce HashSet or document the bound. An LLM can apply this statically.",
+      "robustness": "The PERF-DS-04 rule in the same document says Vec with .contains() is acceptable for collections under 20 elements due to cache locality. These two rules are in slight tension: PERF-QUAD-02 is stricter (requires a constant-bound comment) while PERF-DS-04 gives a numeric threshold (20). The reconciliation (bounded = ok with comment) is workable but adds cognitive overhead.",
+      "compatibility": "Compatible with the existing codebase. The consumed HashSet in run_eating already follows this pattern."
+    }
+  },
+  {
+    "id": "a1-19",
+    "proposition": "Every system's doc comment must state its expected per-tick complexity in big-O notation, parameterized by entity count (n), spatial density (k), and map size (w*h) as appropriate (PERF-LLM-01).",
+    "scores": {
+      "defensibility": 0.82,
+      "specificity": 0.87,
+      "robustness": 0.75,
+      "compatibility": 0.85
+    },
+    "reasoning": {
+      "defensibility": "The LLM-agent constraint is real: an LLM cannot profile code but can reason about complexity from annotations. Big-O in doc comments makes complexity statically visible, enabling the LLM to flag violations. However, big-O notation without constant factors can be misleading (O(n) with 100ns per entity vs O(n) with 100us per entity are vastly different).",
+      "specificity": "Concrete: doc comments, big-O notation, three named parameters. An LLM writing a system knows exactly what to include. The existing hunger system doc comment ('every living entity with a Hunger component') partially satisfies this already.",
+      "robustness": "Big-O annotations become stale as code evolves. If a system adds a spatial query but the doc comment is not updated, the annotation is actively misleading. Maintenance burden is real. Also, the existing systems do not consistently follow this rule, creating a compliance gap.",
+      "compatibility": "Compatible with CLAUDE.md's 'Write a unit test' and system authoring guidelines. Adds a documentation requirement that is additive rather than conflicting."
+    }
+  },
+  {
+    "id": "a1-20",
+    "proposition": "Every value that affects computational complexity must be a named const with a comment stating its performance implication (PERF-LLM-02).",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.88,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "reasoning": {
+      "defensibility": "Named constants with performance comments serve two purposes: they make the cost implications of tuning visible, and they prevent magic numbers. The examples (MAX_EXPANDED, SENSE_RANGE, WANDER_RANGE) are already in the codebase and demonstrate the pattern.",
+      "specificity": "Clear: every complexity-affecting value gets a const with a performance comment. The rule is mechanical to verify (search for magic numbers in spatial query ranges, loop bounds, etc.).",
+      "robustness": "The boundary of 'affects computational complexity' is somewhat fuzzy. Does a hunger increment rate (1.0 per tick) affect complexity? No, but it is a magic number. The rule risks scope creep into 'all constants should be named', which is already a general best practice and not specific to performance.",
+      "compatibility": "Directly reinforces CLAUDE.md's spatial scale rule about commented constants. The existing codebase already uses this pattern for SPATIAL_CELL_SHIFT, SENSE_RANGE, WANDER_RANGE, DIAGONAL_FACTOR."
+    }
+  },
+  {
+    "id": "a1-21",
+    "proposition": "When authoring a system, the LLM should estimate per-entity cost by summing: HashMap lookups at ~30ns each, arithmetic at ~3ns each, spatial queries at ~1000-5000ns each, and pathfinding calls at ~100,000-500,000ns each; if the total exceeds 500ns, amortization is required, and if it exceeds 5000ns, aggressive amortization with >90% skip rate is required (PERF-LLM-03).",
+    "scores": {
+      "defensibility": 0.78,
+      "specificity": 0.92,
+      "robustness": 0.65,
+      "compatibility": 0.82
+    },
+    "reasoning": {
+      "defensibility": "The operation cost estimates are reasonable for modern x86 hardware with warm caches. The tiered threshold system (500ns / 5000ns) provides actionable decision points. However, the estimates are hardware-dependent and do not account for cache effects, branch prediction, or compiler optimizations that can change costs by 2-5x.",
+      "specificity": "Highly specific: names four operation types with nanosecond costs, two thresholds, and a skip-rate requirement. An LLM can mechanically sum operations and compare to thresholds.",
+      "robustness": "The cost estimates will be wrong on different hardware (ARM, older CPUs, debug builds with bounds checking). The 500ns and 5000ns thresholds inherit the fragility of the 100ns-per-entity budget assumption. On a faster machine or with fewer entities, these thresholds are overly conservative; on a slower machine, they are insufficient.",
+      "compatibility": "Compatible with the existing codebase patterns (MoveCooldown for amortization, CachedPath for caching). The mental estimation approach is designed specifically for LLM agents that cannot run benchmarks."
+    }
+  },
+  {
+    "id": "a1-22",
+    "proposition": "The decisions system (run_decisions) should stagger re-evaluation: entities with ticks_in_action < 5 and no high-priority stimulus (damage taken, health below threshold) should skip re-evaluation and retain their current intention, reducing spatial query volume by approximately 80% at steady state.",
+    "scores": {
+      "defensibility": 0.82,
+      "specificity": 0.88,
+      "robustness": 0.68,
+      "compatibility": 0.75
+    },
+    "reasoning": {
+      "defensibility": "The staggering concept is sound: most entities do not need to re-evaluate every tick. The 80% reduction estimate assumes entities typically maintain actions for 5+ ticks, which is plausible given the inertia bonus mechanism in the utility scorer. The existing ActionState.ticks_in_action field provides the infrastructure.",
+      "specificity": "Names the threshold (ticks_in_action < 5), the interrupt conditions (damage, health), and the expected benefit (80% reduction). A developer could implement this from the description.",
+      "robustness": "The 80% figure is an estimate without empirical backing. The stagger threshold (5 ticks) is arbitrary. More critically, staggering changes the simulation's behavior: entities respond more slowly to environmental changes, which could create noticeable AI 'lag' if the threshold is too high. The interrupt conditions (damage, health) may be incomplete -- what about a food item despawning nearby?",
+      "compatibility": "Partially conflicts with CLAUDE.md's Phase 3 description: 'reads needs + environment, writes intentions'. Staggering means Phase 3 would sometimes NOT read the environment for some entities, retaining stale intentions. This is a semantic change to the phase contract."
+    }
+  },
+  {
+    "id": "a1-23",
+    "proposition": "find_path allocates three Vecs per call (g_score, came_from, closed) totaling 540MB on the Paris map (8192x7424); a reusable PathfindingWorkspace struct with pre-allocated flat arrays should be added to World, cleared between calls rather than reallocated.",
+    "scores": {
+      "defensibility": 0.90,
+      "specificity": 0.92,
+      "robustness": 0.85,
+      "compatibility": 0.82
+    },
+    "reasoning": {
+      "defensibility": "The allocation cost analysis is mathematically correct: 60M tiles * (4+4+1) bytes = 540MB. This is the actual bottleneck for pathfinding -- allocation and zero-initialization dominate the search itself. Workspace reuse is a standard optimization for repeated searches on the same graph.",
+      "specificity": "Names the exact struct (PathfindingWorkspace), its location (World), the arrays to include (g_score, came_from, closed), and the clearing strategy (clear, not deallocate). A developer has a complete implementation specification.",
+      "robustness": "The 540MB workspace is a permanent memory cost. On systems with limited RAM, this is significant. Also, clearing a 540MB array (memset) still costs ~100us, which is non-trivial. The optimization trades allocation cost for clearing cost, which is a net win only if the clearing is cheaper than allocation (likely true due to OS page-fault avoidance on reuse).",
+      "compatibility": "Adding mutable state to World is architecturally compatible. However, the workspace must be excluded from despawn cleanup and validate_world checks, as it is infrastructure, not entity data. This requires care to avoid confusion with the property-table lifecycle rules."
+    }
+  },
+  {
+    "id": "a1-24",
+    "proposition": "The clone() of UtilityConfig in run_decisions allocates every tick; the cost is small (~200 bytes for 4 actions with 2-3 considerations each) but should be restructured to extract config as a local reference before the mutable phase, or accepted with a comment.",
+    "scores": {
+      "defensibility": 0.72,
+      "specificity": 0.85,
+      "robustness": 0.70,
+      "compatibility": 0.80
+    },
+    "reasoning": {
+      "defensibility": "The clone is a borrow-checker workaround: the system needs &world for reads and &mut world for writes. The ~200-byte allocation per tick is genuinely negligible (well under 1us). The document correctly identifies this as minor and offers 'accept with comment' as a valid option.",
+      "specificity": "Names the exact line (utility_config.clone()), the cost (~200 bytes), and two remediation options (restructure or comment). Concrete and actionable.",
+      "robustness": "The cost assessment assumes 4 actions with 2-3 considerations. If the action space grows (20+ actions with complex consideration trees), the clone cost could become non-trivial. The BTreeMap in UtilityConfig also means allocation is proportional to the tree structure, not just the raw data size.",
+      "compatibility": "The clone workaround is a common Rust pattern for borrow-checker constraints. Restructuring would require splitting the system function into separate read and write phases, which is already the architectural pattern (collect-then-apply). The suggestion is compatible but the existing code already implicitly follows the pattern."
+    }
+  },
+  {
+    "id": "a1-25",
+    "proposition": "HashMap::get costs 25-40ns per call due to hashing, cache-line straddling, and pointer chasing; a system touching 3 tables for 10k entities incurs approximately 0.9ms in hash lookups alone before any computation.",
+    "scores": {
+      "defensibility": 0.80,
+      "specificity": 0.90,
+      "robustness": 0.70,
+      "compatibility": 0.88
+    },
+    "reasoning": {
+      "defensibility": "The 25-40ns estimate for HashMap::get is in the right ballpark for modern x86 with the standard Rust SipHash hasher. However, Rust's default hasher is SipHash-1-3, which is faster than the original SipHash-2-4, and the actual cost depends heavily on key type (Entity wraps u64, which hashes quickly), table load factor, and cache state. 30ns is reasonable as a median estimate.",
+      "specificity": "Provides concrete cost per operation and a worked example (3 tables * 10k entities * 30ns = 0.9ms). An LLM can directly use these numbers for cost estimation.",
+      "robustness": "The estimate is hardware-specific and will vary by 2-3x across different CPUs. Cache effects dominate: sequential iteration of a HashMap with good locality (entities inserted in order) is faster than random access. The 'cache-line straddling and pointer chasing' framing implies worst-case behavior, but in practice the iteration pattern matters more.",
+      "compatibility": "Compatible with CLAUDE.md's HashMap architecture. These are the known costs of the chosen data structure, presented as constraints to work within rather than reasons to change the architecture."
+    }
+  }
+]

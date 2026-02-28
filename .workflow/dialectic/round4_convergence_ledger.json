@@ -1,0 +1,1945 @@
+[
+  {
+    "id": "a1-09",
+    "proposition": "If a system has access to a specific Entity ID, it must use positions.get(&entity) rather than a spatial query to find that entity's location, because direct lookup costs ~30ns versus ~1000ns minimum for a spatial query (PERF-SPATIAL-01).",
+    "initial_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.95,
+      "robustness": 0.93,
+      "compatibility": 0.95
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.95,
+      "robustness": 0.93,
+      "compatibility": 0.95
+    },
+    "composite": 0.945,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-14",
+    "proposition": "When key space maps to tile coordinates (bounded, dense), always use a flat array indexed by y * width + x; never use HashMap<(i32, i32), T> for tile-indexed data, because flat-array lookup costs ~5ns versus HashMap's ~50-80ns.",
+    "initial_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.95,
+      "robustness": 0.92,
+      "compatibility": 0.95
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.95,
+      "robustness": 0.92,
+      "compatibility": 0.95
+    },
+    "composite": 0.9425,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-01",
+    "proposition": "A single-threaded simulation engine running at 100 ticks/sec has a hard budget of 10,000 microseconds per tick, and even after path caching brought wander from 75ms to 9ms, the total tick at 50k entities still exceeds 10ms because the problem is the sum of systems that each seem cheap in isolation.",
+    "initial_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.93,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.02,
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibra..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.97,
+      "specificity": 0.93,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "composite": 0.9325,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-18",
+    "proposition": "Use HashSet for membership testing (pending_deaths, consumed sets); never use Vec::contains for O(n) membership checks, because the benchmark showed eating at 28ms partially due to this O(n^2) pattern.",
+    "initial_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.92,
+      "robustness": 0.9,
+      "compatibility": 0.95
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.92,
+      "robustness": 0.9,
+      "compatibility": 0.95
+    },
+    "composite": 0.93,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-05",
+    "proposition": "The benchmark's 256x256 map makes A* flat arrays cost 590 KB per call, which is 1175x smaller than the production map's 693 MB, meaning A* performance regressions are invisible in the benchmark and can only be detected by profiling on the production map geometry.",
+    "initial_scores": {
+      "defensibility": 0.94,
+      "specificity": 0.93,
+      "robustness": 0.92,
+      "compatibility": 0.9
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.94,
+      "specificity": 0.93,
+      "robustness": 0.92,
+      "compatibility": 0.9
+    },
+    "composite": 0.9225,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-18",
+    "proposition": "The benchmark exercises the wrong scale (256x256 vs 11000x7000), the wrong density distribution (uniform vs clustered-in-buildings), the wrong terrain topology (random swiss-cheese vs connected urban), and the wrong entity type mix (uniform creatures vs heterogeneous citizens and items), making it structurally incapable of detecting any of the failure modes that will manifest in production.",
+    "initial_scores": {
+      "defensibility": 0.94,
+      "specificity": 0.88,
+      "robustness": 0.93,
+      "compatibility": 0.92
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-23, t-25 (profiling blindness)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.02,
+        "reasoning": "The defense is correct that the right response to benchmark blindness is to fix the benchmark, not to abandon measurement-gated decisions. However, the prosecution's point stands that propositions gat..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.96,
+      "specificity": 0.88,
+      "robustness": 0.93,
+      "compatibility": 0.92
+    },
+    "composite": 0.9225,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-14",
+    "proposition": "The benchmark uses uniform random entity placement on a 256x256 grid, which produces Poisson-distributed density (~12 entities per spatial cell), while the production Paris map concentrates entities in buildings where a single 16x16 spatial cell can contain 200+ entities, making all density-dependent algorithms 10-60x more expensive than the benchmark predicts.",
+    "initial_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.9,
+      "robustness": 0.91,
+      "compatibility": 0.92
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-10 through t-13, t-26 (spatial optimizations vs production reality)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.02,
+        "reasoning": "The defense makes two valid points: (1) optimizations should be evaluated in combination, not isolation, and (2) a2-21's 12x claim is for downstream processing specifically. However, the prosecution's..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.9,
+      "robustness": 0.91,
+      "compatibility": 0.92
+    },
+    "composite": 0.92,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-15",
+    "proposition": "A* pathfinding must use pooled buffers with generation-counter clearing rather than allocating fresh vectors per find_path call, because at 256x256 each call allocates 768KB (3 x 65,536 x 4 bytes), and 50 calls per tick means 37.5MB of allocation churn.",
+    "initial_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.95,
+      "robustness": 0.88,
+      "compatibility": 0.9
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-21, t-22 (pathfinding workspace design)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.03,
+        "reasoning": "The defense's sparse-clearing point is strong: clearing only the explored set eliminates the full-map memset concern. However, a1-23's specific proposal uses 'pre-allocated flat arrays cleared between..."
+      },
+      {
+        "round": 3,
+        "tension": "t-21, t-22 (pathfinding workspace design)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.03,
+        "reasoning": "The defense's sparse-clearing point is strong: clearing only the explored set eliminates the full-map memset concern. However, a1-23's specific proposal uses 'pre-allocated flat arrays cleared between..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.96,
+      "specificity": 0.95,
+      "robustness": 0.85,
+      "compatibility": 0.9
+    },
+    "composite": 0.915,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-19",
+    "proposition": "Systems with cooldown mechanics must test the timer first and early-exit in O(1), with no secondary lookups, spatial queries, or allocation for entities on cooldown.",
+    "initial_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.88,
+      "robustness": 0.9,
+      "compatibility": 0.95
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.88,
+      "robustness": 0.9,
+      "compatibility": 0.95
+    },
+    "composite": 0.915,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-04",
+    "proposition": "A single A* call on the production 11000x7000 map allocates and initializes 693 MB of flat arrays (308 MB g_score + 308 MB came_from + 77 MB closed), making every unnecessary pathfinding call catastrophic: even 1% of 50k entities re-pathfinding per tick means 500 calls each allocating and freeing 693 MB.",
+    "initial_scores": {
+      "defensibility": 0.96,
+      "specificity": 0.95,
+      "robustness": 0.9,
+      "compatibility": 0.85
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.96,
+      "specificity": 0.95,
+      "robustness": 0.9,
+      "compatibility": 0.85
+    },
+    "composite": 0.915,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-02",
+    "proposition": "A system should iterate the table with the fewest entries that still captures all entities it needs to process (PERF-ITER-01).",
+    "initial_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.88,
+      "robustness": 0.9,
+      "compatibility": 0.95
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.88,
+      "robustness": 0.9,
+      "compatibility": 0.95
+    },
+    "composite": 0.9125,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-03",
+    "proposition": "Every system's candidate collection must filter pending_deaths before any secondary table lookup (PERF-ITER-02), with filter ordering: cheapest rejection first.",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.92,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.92,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "composite": 0.9125,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-17",
+    "proposition": "No system may contain a nested loop where both the outer and inner loops iterate entity collections of size proportional to total entity count; the inner loop must be bounded by a spatial query, a fixed-size collection, or a constant (PERF-QUAD-01).",
+    "initial_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.9,
+      "robustness": 0.9,
+      "compatibility": 0.92
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.9,
+      "robustness": 0.9,
+      "compatibility": 0.92
+    },
+    "composite": 0.9125,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-02",
+    "proposition": "Phase 1 (Environment) systems must operate on tiles/chunks only, never iterate entities; any Phase 1 system that touches entities is misclassified and must move to Phase 2+.",
+    "initial_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.9,
+      "robustness": 0.85,
+      "compatibility": 0.95
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.9,
+      "robustness": 0.85,
+      "compatibility": 0.95
+    },
+    "composite": 0.905,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-01",
+    "proposition": "When entities cluster spatially (as they will on the real Paris map inside buildings), every system calling entities_in_range produces O(d^2) cost per spatial cell where d is local density, and multiple systems calling it independently produce O(k * d^2) rather than O(k * d), because each caller re-scans the full cell contents for every entity in that cell.",
+    "initial_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.92,
+      "robustness": 0.88,
+      "compatibility": 0.85
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-10 through t-13, t-26 (spatial optimizations vs production reality)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.02,
+        "reasoning": "The defense makes two valid points: (1) optimizations should be evaluated in combination, not isolation, and (2) a2-21's 12x claim is for downstream processing specifically. However, the prosecution's..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.97,
+      "specificity": 0.92,
+      "robustness": 0.88,
+      "compatibility": 0.85
+    },
+    "composite": 0.905,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-10",
+    "proposition": "Movement cooldowns naturally throttle pathfinding: at Walk gait (9 ticks/tile), only ~11% of entities request movement per tick, and systems must not bypass this rate-limiter by pre-computing paths for entities still on cooldown.",
+    "initial_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.85,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.85,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "composite": 0.9,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-16",
+    "proposition": "Entity property tables must use HashMap because entity IDs are sparse (monotonically increasing, never reused, with gaps from despawned entities), and a Vec indexed by Entity.0 would waste memory proportional to max_entity_id rather than alive_count (PERF-DS-01).",
+    "initial_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.88,
+      "robustness": 0.88,
+      "compatibility": 0.95
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-27 (HashMap structural ceiling)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.05,
+        "reasoning": "The defense is largely correct: a1-16's scope is the data structure choice, and it answers that question soundly. Penalizing it for not also doing ceiling analysis is unfair. However, a small robustne..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.88,
+      "robustness": 0.83,
+      "compatibility": 0.95
+    },
+    "composite": 0.895,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-08",
+    "proposition": "Phase 4 must not call find_path per entity per tick; paths must be cached as components (CachedPath) and reused across ticks until invalidated by goal change, path blockage, or path exhaustion, with fresh A* calls capped at 30-50 per tick.",
+    "initial_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.95,
+      "robustness": 0.85,
+      "compatibility": 0.9
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-06 through t-09 (path caching vs terrain invalidation)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.07,
+        "reasoning": "The defense makes a valid point: terrain mutation does not currently exist, so penalizing rules for not handling it is partially speculative. However, the adjudicator resolves this in favor of the mor..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.95,
+      "robustness": 0.78,
+      "compatibility": 0.9
+    },
+    "composite": 0.895,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-06",
+    "proposition": "The sort by Entity.0 must happen exactly once per system on the primary candidate list; secondary sorts are permitted only on Vecs derived from spatial queries or secondary HashMap iterations within the per-entity processing loop (PERF-SORT-01).",
+    "initial_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "composite": 0.8875,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-20",
+    "proposition": "Every value that affects computational complexity must be a named const with a comment stating its performance implication (PERF-LLM-02).",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.88,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.88,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "composite": 0.8875,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-06",
+    "proposition": "Phase 3 (Decisions) must pre-filter entities with O(1) checks before issuing spatial queries; spatial queries at SENSE_RANGE scale must never be called for all n entities unconditionally.",
+    "initial_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.88,
+      "robustness": 0.82,
+      "compatibility": 0.92
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.88,
+      "robustness": 0.82,
+      "compatibility": 0.92
+    },
+    "composite": 0.8875,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-10",
+    "proposition": "Every call to entities_in_range must use the minimum range that satisfies the system's design, with the range defined as a named const with a comment stating the real-world distance and justification (PERF-SPATIAL-02).",
+    "initial_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-35 (SENSE_RANGE minimization methodology gap)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.01,
+        "reasoning": "a1-10's real-world justification requirement is a genuine methodology, as the defense argues. a2-07's 'minimum required by gameplay' is vaguer and less actionable. Minimal penalty for a1-10, slightly ..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.84,
+      "compatibility": 0.92
+    },
+    "composite": 0.885,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-22",
+    "proposition": "Cache invalidation must be checked by the consuming system (not the producing system), comparing cached assumptions against current world state; every cached component must include the assumptions it was computed under.",
+    "initial_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.85,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.85,
+      "robustness": 0.85,
+      "compatibility": 0.92
+    },
+    "composite": 0.885,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-13",
+    "proposition": "The EventLog ring buffer with 10k capacity receives 50k+ events per tick from the hunger system alone, meaning 80%+ of constructed Event structs are immediately overwritten before any consumer reads them, wasting the CPU cycles spent constructing those events and polluting cache lines with writes to a buffer that wraps 5+ times per tick.",
+    "initial_scores": {
+      "defensibility": 0.91,
+      "specificity": 0.93,
+      "robustness": 0.86,
+      "compatibility": 0.82
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-30 (event push frequency)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.02,
+        "reasoning": "The defense makes a devastating point: the ring buffer already drops 80% of events, so per-tick consumers are already broken. However, the prosecution's concern that no consumer audit was performed re..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.93,
+      "robustness": 0.86,
+      "compatibility": 0.82
+    },
+    "composite": 0.885,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-03",
+    "proposition": "No system currently invalidates cached paths when terrain walkability changes, so the first system that modifies tile walkability at runtime (flooding, doors, building collapse) will silently corrupt all cached paths passing through affected tiles, causing mass path cache misses that each trigger a full A* recomputation.",
+    "initial_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.91,
+      "robustness": 0.75,
+      "compatibility": 0.88
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-06 through t-09 (path caching vs terrain invalidation)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.03,
+        "reasoning": "The defense makes a valid point: terrain mutation does not currently exist, so penalizing rules for not handling it is partially speculative. However, the adjudicator resolves this in favor of the mor..."
+      },
+      {
+        "round": 3,
+        "tension": "t-06 through t-09 (path caching vs terrain invalidation)",
+        "pass": "adjudication",
+        "axis": "specificity",
+        "delta": 0.03,
+        "reasoning": "The defense makes a valid point: terrain mutation does not currently exist, so penalizing rules for not handling it is partially speculative. However, the adjudicator resolves this in favor of the mor..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.96,
+      "specificity": 0.94,
+      "robustness": 0.75,
+      "compatibility": 0.88
+    },
+    "composite": 0.8825,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-11",
+    "proposition": "Each new property table added to World increases despawn cost by one HashMap::remove per entity death, validation cost by one full-table iteration in debug builds, and cache pollution by one additional disjoint memory region per cross-table lookup, and at 40 tables with 50k entities the validation pass alone costs ~16ms per tick in debug mode, exceeding the tick budget.",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.91,
+      "robustness": 0.85,
+      "compatibility": 0.87
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.91,
+      "robustness": 0.85,
+      "compatibility": 0.87
+    },
+    "composite": 0.8825,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-05",
+    "proposition": "Phase 2 systems that push events per entity must push events only on state transitions (value crosses a threshold), not on every tick increment, because unconditional event pushes at 50k entities add approximately 1,000us of overhead.",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.88,
+      "robustness": 0.85,
+      "compatibility": 0.9
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-30 (event push frequency)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.02,
+        "reasoning": "The defense makes a devastating point: the ring buffer already drops 80% of events, so per-tick consumers are already broken. However, the prosecution's concern that no consumer audit was performed re..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.88,
+      "robustness": 0.83,
+      "compatibility": 0.9
+    },
+    "composite": 0.8775,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-20",
+    "proposition": "The determinism test (test_wander_deterministic_with_seed) only verifies that the same seed produces the same result, but does not detect that adding a single RNG call in a new system changes the output of every downstream system, meaning the test suite provides false confidence that determinism is robust when it is actually fragile to any system modification.",
+    "initial_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.86,
+      "robustness": 0.88,
+      "compatibility": 0.8
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-01 through t-05 (sort/determinism cluster)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.03,
+        "reasoning": "The defense is correct that a1-07's conditions are statically checkable via grep, which mitigates the 'prove a negative' concern. However, the prosecution's point about the missing test safety net (a3..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.95,
+      "specificity": 0.86,
+      "robustness": 0.88,
+      "compatibility": 0.8
+    },
+    "composite": 0.8725,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-11",
+    "proposition": "Phase 5 systems must iterate only the affected set (pending_deaths, co-located pairs, event-driven triggers), never the full entity population, with a budget ceiling of 500us at 50k entities under normal conditions.",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.88,
+      "robustness": 0.78,
+      "compatibility": 0.92
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.88,
+      "robustness": 0.78,
+      "compatibility": 0.92
+    },
+    "composite": 0.87,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-18",
+    "proposition": "Every .contains() call inside a loop must be on a HashSet, BTreeSet, or sorted Vec with binary search; plain Vec .contains() inside a loop is permitted only with a comment proving the Vec size is bounded by a constant (PERF-QUAD-02).",
+    "initial_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.9,
+      "robustness": 0.82,
+      "compatibility": 0.9
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.9,
+      "robustness": 0.82,
+      "compatibility": 0.9
+    },
+    "composite": 0.8675,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-17",
+    "proposition": "No individual failure mode in this architecture produces a single-system hotspot attributable by profiling to one call site; the costs are distributed across all systems equally (HashMap lookups, sorting, allocation), making the performance disease architectural and undiagnosable by standard profiling techniques that attribute cost to individual functions.",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.78,
+      "robustness": 0.88,
+      "compatibility": 0.85
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-23, t-25 (profiling blindness)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.03,
+        "reasoning": "The defense is correct that the right response to benchmark blindness is to fix the benchmark, not to abandon measurement-gated decisions. However, the prosecution's point stands that propositions gat..."
+      },
+      {
+        "round": 3,
+        "tension": "t-16 (per-system estimation vs distributed overhead)",
+        "pass": "adjudication",
+        "axis": "specificity",
+        "delta": 0.03,
+        "reasoning": "The defense is right that preventing per-system catastrophes is independently valuable. a1-21 does help an LLM avoid O(n^2) systems and pathfinding-every-tick mistakes. The prosecution is right that a..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.81,
+      "robustness": 0.88,
+      "compatibility": 0.85
+    },
+    "composite": 0.8675,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-23",
+    "proposition": "The HashMap operation cost grows as the product of system count and table count (not their sum), because each new system that references a new table adds (entity_count) additional cross-table lookups, meaning the scaling is multiplicative and the per-system marginal cost increases as the architecture grows rather than remaining constant.",
+    "initial_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.84,
+      "robustness": 0.86,
+      "compatibility": 0.85
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-27 (HashMap structural ceiling)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.04,
+        "reasoning": "The defense is largely correct: a1-16's scope is the data structure choice, and it answers that question soundly. Penalizing it for not also doing ceiling analysis is unfair. However, a small robustne..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.84,
+      "robustness": 0.86,
+      "compatibility": 0.85
+    },
+    "composite": 0.8675,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-10",
+    "proposition": "Phase boundary violations are unenforced by the compiler: nothing prevents a Phase 3 system from writing positions (Phase 4 territory) or a Phase 4 system from reading hungers (Phase 2 territory), and each violation triggers compensating workarounds (extra spatial rebuilds, re-running decision phases) that silently accumulate infrastructure cost.",
+    "initial_scores": {
+      "defensibility": 0.89,
+      "specificity": 0.84,
+      "robustness": 0.85,
+      "compatibility": 0.88
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.89,
+      "specificity": 0.84,
+      "robustness": 0.85,
+      "compatibility": 0.88
+    },
+    "composite": 0.865,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-13",
+    "proposition": "Any system that calls find_path must check cached_paths first for the same goal, store the result in cached_paths if the goal is stable, and invalidate cached_paths when the goal changes; systems tracking moving targets may skip caching but must document why (PERF-CACHE-01).",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.92,
+      "robustness": 0.85,
+      "compatibility": 0.9
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-06 through t-09 (path caching vs terrain invalidation)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.1,
+        "reasoning": "The defense makes a valid point: terrain mutation does not currently exist, so penalizing rules for not handling it is partially speculative. However, the adjudicator resolves this in favor of the mor..."
+      },
+      {
+        "round": 3,
+        "tension": "t-31 (cache invalidation completeness)",
+        "pass": "adjudication",
+        "axis": "specificity",
+        "delta": -0.02,
+        "reasoning": "The defense is right that double-counting is unfair. However, a2-22's principle (assumptions must be stored in the cache) exposes that a1-13's specificity is narrowly correct but incomplete. A very sm..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.9,
+      "robustness": 0.75,
+      "compatibility": 0.9
+    },
+    "composite": 0.8625,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-12",
+    "proposition": "The sort-by-entity-ID requirement for deterministic replay imposes a hidden O(n log n) tax per system: at 50k entities, sorting costs approximately 3,900us per system, and with 5+ systems sorting independently, the total sort cost approaches 8,000-20,000us.",
+    "initial_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.82,
+      "compatibility": 0.85
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.82,
+      "compatibility": 0.85
+    },
+    "composite": 0.8625,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-19",
+    "proposition": "If a Phase 4 system is inserted between run_wander and rebuild_spatial_index, it sees an inconsistent spatial index where some entities have moved but the index reflects pre-movement positions, and the natural 'fix' (adding another rebuild) costs O(n) per additional rebuild while setting a precedent that accumulates rebuilds over time.",
+    "initial_scores": {
+      "defensibility": 0.87,
+      "specificity": 0.89,
+      "robustness": 0.82,
+      "compatibility": 0.86
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.87,
+      "specificity": 0.89,
+      "robustness": 0.82,
+      "compatibility": 0.86
+    },
+    "composite": 0.86,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-03",
+    "proposition": "Phase 1 systems must implement chunk-level dirty/equilibrium flags so that steady-state cost is O(active_chunks) rather than O(total_tiles), with full tile iteration permitted only for chunks not at equilibrium.",
+    "initial_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.85,
+      "robustness": 0.8,
+      "compatibility": 0.9
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.85,
+      "robustness": 0.8,
+      "compatibility": 0.9
+    },
+    "composite": 0.8575,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-06",
+    "proposition": "The cumulative HashMap operation count across all systems grows as (system_count * entity_count * tables_referenced_per_system), and at 50k entities with 15 systems each referencing 4-5 tables, the total exceeds 5 million hash operations per tick, where even with aHash the per-operation cost of hashing + probing + cache misses across disjoint table memory regions becomes a dominant fraction of tick budget.",
+    "initial_scores": {
+      "defensibility": 0.87,
+      "specificity": 0.85,
+      "robustness": 0.83,
+      "compatibility": 0.82
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.03,
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibra..."
+      },
+      {
+        "round": 3,
+        "tension": "t-27 (HashMap structural ceiling)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.03,
+        "reasoning": "The defense is largely correct: a1-16's scope is the data structure choice, and it answers that question soundly. Penalizing it for not also doing ceiling analysis is unfair. However, a small robustne..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.85,
+      "robustness": 0.83,
+      "compatibility": 0.82
+    },
+    "composite": 0.8575,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-04",
+    "proposition": "Within a single system function, no HashMap::get call should read a value that was already extracted in the same function and cannot have changed (PERF-ITER-03).",
+    "initial_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.87,
+      "robustness": 0.8,
+      "compatibility": 0.9
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.87,
+      "robustness": 0.8,
+      "compatibility": 0.9
+    },
+    "composite": 0.855,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-15",
+    "proposition": "Every system that iterates tiles must either use chunk-level dirty/equilibrium flags to skip stable chunks, or justify in a comment why full iteration is necessary (PERF-CACHE-03).",
+    "initial_scores": {
+      "defensibility": 0.87,
+      "specificity": 0.85,
+      "robustness": 0.8,
+      "compatibility": 0.9
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.87,
+      "specificity": 0.85,
+      "robustness": 0.8,
+      "compatibility": 0.9
+    },
+    "composite": 0.855,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-23",
+    "proposition": "find_path allocates three Vecs per call (g_score, came_from, closed) totaling 540MB on the Paris map (8192x7424); a reusable PathfindingWorkspace struct with pre-allocated flat arrays should be added to World, cleared between calls rather than reallocated.",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.92,
+      "robustness": 0.85,
+      "compatibility": 0.82
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-21, t-22 (pathfinding workspace design)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.07,
+        "reasoning": "The defense's sparse-clearing point is strong: clearing only the explored set eliminates the full-map memset concern. However, a1-23's specific proposal uses 'pre-allocated flat arrays cleared between..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.92,
+      "robustness": 0.78,
+      "compatibility": 0.82
+    },
+    "composite": 0.855,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-07",
+    "proposition": "SENSE_RANGE must be the minimum required by gameplay because every doubling of range quadruples the number of spatial cells scanned; current SENSE_RANGE=30 with CELL_SIZE=16 scans 16 cells, while SENSE_RANGE=64 would scan 25 cells.",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.9,
+      "robustness": 0.8,
+      "compatibility": 0.85
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-35 (SENSE_RANGE minimization methodology gap)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.03,
+        "reasoning": "a1-10's real-world justification requirement is a genuine methodology, as the defense argues. a2-07's 'minimum required by gameplay' is vaguer and less actionable. Minimal penalty for a1-10, slightly ..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.9,
+      "robustness": 0.77,
+      "compatibility": 0.85
+    },
+    "composite": 0.855,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-08",
+    "proposition": "The shared seeded RNG creates a butterfly effect where any change to one system's conditional RNG consumption (e.g., tweaking a threshold that changes which entities roll dice) shifts the RNG stream for all downstream systems, making it impossible to bisect behavior changes because every parameter tweak produces a global cascade through combat outcomes, movement choices, and entity deaths.",
+    "initial_scores": {
+      "defensibility": 0.91,
+      "specificity": 0.82,
+      "robustness": 0.87,
+      "compatibility": 0.75
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-01 through t-05 (sort/determinism cluster)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.03,
+        "reasoning": "The defense is correct that a1-07's conditions are statically checkable via grep, which mitigates the 'prove a negative' concern. However, the prosecution's point about the missing test safety net (a3..."
+      },
+      {
+        "round": 3,
+        "tension": "t-18 through t-20, t-34 (decision staggering vs RNG butterfly)",
+        "pass": "adjudication",
+        "axis": "specificity",
+        "delta": 0.03,
+        "reasoning": "The defense raises a strong point: the RNG butterfly applies to all conditional optimizations, not just decision staggering. This is correct and the prosecution was selectively applying the standard. ..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.94,
+      "specificity": 0.85,
+      "robustness": 0.87,
+      "compatibility": 0.75
+    },
+    "composite": 0.8525,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-12",
+    "proposition": "Every spatial query in a Phase 3 system must have either a result cap (e.g., .count().min(3)) or a caching/staggering mechanism documented in a comment, because the decisions system's spatial queries are the single most expensive operation in the tick loop at 3.2M entity comparisons for 10k entities (PERF-SPATIAL-04).",
+    "initial_scores": {
+      "defensibility": 0.87,
+      "specificity": 0.9,
+      "robustness": 0.82,
+      "compatibility": 0.88
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-10 through t-13, t-26 (spatial optimizations vs production reality)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.07,
+        "reasoning": "The defense makes two valid points: (1) optimizations should be evaluated in combination, not isolation, and (2) a2-21's 12x claim is for downstream processing specifically. However, the prosecution's..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.87,
+      "specificity": 0.9,
+      "robustness": 0.75,
+      "compatibility": 0.88
+    },
+    "composite": 0.85,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-02",
+    "proposition": "The spatial index rebuild (clear + reinsert all entities) performs 4000+ Vec allocations and deallocations per rebuild on a 256x256 map, and each additional rebuild_spatial_index call added by a new system doubles this allocation traffic, establishing a precedent where 'just rebuild when needed' accumulates to consume 25%+ of tick budget by the time 5 rebuilds exist.",
+    "initial_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.82,
+      "compatibility": 0.8
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.82,
+      "compatibility": 0.8
+    },
+    "composite": 0.85,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-21",
+    "proposition": "A single terrain walkability change affecting a busy corridor could force thousands of entities to simultaneously invalidate their cached paths and re-pathfind, creating a per-tick spike where thousands of A* calls each allocate 693 MB on the production map, which is unrecoverable within a single tick's budget.",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.88,
+      "robustness": 0.72,
+      "compatibility": 0.85
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-06 through t-09 (path caching vs terrain invalidation)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.03,
+        "reasoning": "The defense makes a valid point: terrain mutation does not currently exist, so penalizing rules for not handling it is partially speculative. However, the adjudicator resolves this in favor of the mor..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.93,
+      "specificity": 0.88,
+      "robustness": 0.72,
+      "compatibility": 0.85
+    },
+    "composite": 0.845,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-13",
+    "proposition": "Systems must sort entity IDs only once per system invocation, not per inner loop, and if multiple systems in the same phase iterate the same sorted entity set, the sorted Vec should be passed between them rather than re-sorted.",
+    "initial_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.88,
+      "robustness": 0.85,
+      "compatibility": 0.8
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-01 through t-05 (sort/determinism cluster)",
+        "pass": "adjudication",
+        "axis": "compatibility",
+        "delta": -0.08,
+        "reasoning": "The defense is correct that a1-07's conditions are statically checkable via grep, which mitigates the 'prove a negative' concern. However, the prosecution's point about the missing test safety net (a3..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.92,
+      "specificity": 0.88,
+      "robustness": 0.85,
+      "compatibility": 0.72
+    },
+    "composite": 0.8425,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-21",
+    "proposition": "Within a single system invocation, spatial query results should be cached per cell coordinate so that multiple entities in the same spatial cell share the query result, reducing spatial query cost by up to 12x at uniform density with 50k entities.",
+    "initial_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.78,
+      "compatibility": 0.88
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-10 through t-13, t-26 (spatial optimizations vs production reality)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.08,
+        "reasoning": "The defense makes two valid points: (1) optimizations should be evaluated in combination, not isolation, and (2) a2-21's 12x claim is for downstream processing specifically. However, the prosecution's..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.7,
+      "compatibility": 0.88
+    },
+    "composite": 0.84,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-24",
+    "proposition": "Each system must have exactly one 'driving table' that it iterates; all other data access must be via point lookup (HashMap::get), because iterating two tables and joining them has multiplicative cache cost.",
+    "initial_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.88,
+      "robustness": 0.75,
+      "compatibility": 0.88
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.88,
+      "robustness": 0.75,
+      "compatibility": 0.88
+    },
+    "composite": 0.84,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-09",
+    "proposition": "The collect-then-apply pattern mandated by the architecture generates 8-10 MB of Vec buffer allocations per tick at 50k entities across 8 systems, producing 800 MB to 1 GB of allocation churn per second that fragments the allocator's free list and causes fresh mmap calls when large allocations (A* arrays) can no longer find contiguous free blocks.",
+    "initial_scores": {
+      "defensibility": 0.86,
+      "specificity": 0.87,
+      "robustness": 0.8,
+      "compatibility": 0.83
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.86,
+      "specificity": 0.87,
+      "robustness": 0.8,
+      "compatibility": 0.83
+    },
+    "composite": 0.84,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-15",
+    "proposition": "The benchmark's random swiss-cheese terrain produces nearly-straight A* paths, while the production map's connected buildings, continuous river, and winding streets force A* to expand 2-5x more nodes due to constricted passages (doorways, bridges), meaning pathfinding cost on real terrain is 2-5x higher than benchmark terrain even at the same map scale.",
+    "initial_scores": {
+      "defensibility": 0.86,
+      "specificity": 0.83,
+      "robustness": 0.8,
+      "compatibility": 0.85
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.86,
+      "specificity": 0.83,
+      "robustness": 0.8,
+      "compatibility": 0.85
+    },
+    "composite": 0.835,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-07",
+    "proposition": "A system may omit the deterministic sort ONLY if it satisfies ALL of: (a) does not use world.rng, (b) per-entity results are independent of processing order, (c) it does not push to pending_deaths (PERF-SORT-02).",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.93,
+      "robustness": 0.87,
+      "compatibility": 0.82
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-01 through t-05 (sort/determinism cluster)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.12,
+        "reasoning": "The defense is correct that a1-07's conditions are statically checkable via grep, which mitigates the 'prove a negative' concern. However, the prosecution's point about the missing test safety net (a3..."
+      },
+      {
+        "round": 3,
+        "tension": "t-01 through t-05 (sort/determinism cluster)",
+        "pass": "adjudication",
+        "axis": "compatibility",
+        "delta": -0.07,
+        "reasoning": "The defense is correct that a1-07's conditions are statically checkable via grep, which mitigates the 'prove a negative' concern. However, the prosecution's point about the missing test safety net (a3..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.93,
+      "robustness": 0.75,
+      "compatibility": 0.75
+    },
+    "composite": 0.8325,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-07",
+    "proposition": "The mandatory deterministic sort (sort_by_key on entity ID) costs O(n log n) per system per tick, and since every system independently re-sorts the same entity set from HashMap's random iteration order, the total sort cost at 50k entities across 10 systems is approximately 7.5ms (75% of the 10ms tick budget), doubling to 15ms at 20 systems.",
+    "initial_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.88,
+      "robustness": 0.78,
+      "compatibility": 0.8
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-01 through t-05 (sort/determinism cluster)",
+        "pass": "adjudication",
+        "axis": "specificity",
+        "delta": 0.02,
+        "reasoning": "The defense is correct that a1-07's conditions are statically checkable via grep, which mitigates the 'prove a negative' concern. However, the prosecution's point about the missing test safety net (a3..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.9,
+      "robustness": 0.78,
+      "compatibility": 0.8
+    },
+    "composite": 0.8325,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-16",
+    "proposition": "At 8 systems the cumulative infrastructure overhead (HashMap tax + sort tax + allocation churn + spatial queries) consumes 4-5ms of the 10ms tick budget, leaving 5-6ms for actual computation, and this overhead scales linearly with system count such that at 15 systems the infrastructure alone consumes 8-10ms, leaving zero headroom for system logic.",
+    "initial_scores": {
+      "defensibility": 0.83,
+      "specificity": 0.8,
+      "robustness": 0.78,
+      "compatibility": 0.9
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.02,
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibra..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.8,
+      "robustness": 0.78,
+      "compatibility": 0.9
+    },
+    "composite": 0.8325,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-04",
+    "proposition": "Phase 2 systems must be O(n) with no HashMap lookups beyond the primary iteration table, at most one secondary lookup per entity, no spatial queries, no pathfinding, and no allocation beyond the collect buffer, with a budget ceiling of 3,000us at 50k entities.",
+    "initial_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.92,
+      "robustness": 0.72,
+      "compatibility": 0.88
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-32 (Phase 2 ceiling vs table proliferation)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.05,
+        "reasoning": "The defense correctly notes the effect is gradual. The prosecution correctly notes the ceiling is calibrated to current conditions and will erode. Split the difference: moderate penalty reflecting the..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.92,
+      "robustness": 0.67,
+      "compatibility": 0.88
+    },
+    "composite": 0.83,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-23",
+    "proposition": "Never invalidate a cache based on tick count alone ('re-path every N ticks'); this wastes computation when the path is still valid and misses invalidation when the path becomes invalid before N ticks.",
+    "initial_scores": {
+      "defensibility": 0.9,
+      "specificity": 0.85,
+      "robustness": 0.8,
+      "compatibility": 0.9
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-06 through t-09 (path caching vs terrain invalidation)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.1,
+        "reasoning": "The defense makes a valid point: terrain mutation does not currently exist, so penalizing rules for not handling it is partially speculative. However, the adjudicator resolves this in favor of the mor..."
+      },
+      {
+        "round": 3,
+        "tension": "t-06 through t-09 (path caching vs terrain invalidation)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.05,
+        "reasoning": "The defense makes a valid point: terrain mutation does not currently exist, so penalizing rules for not handling it is partially speculative. However, the adjudicator resolves this in favor of the mor..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.85,
+      "robustness": 0.7,
+      "compatibility": 0.9
+    },
+    "composite": 0.825,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-22",
+    "proposition": "Future goal-directed movement (home-to-work commutes) will produce correlated movement patterns with rush-hour clustering at doorways and bridge congestion, creating density spikes that stress spatial queries, pathfinding, and collision systems in ways that random wandering cannot exercise, and no current test or benchmark models these patterns.",
+    "initial_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.8,
+      "robustness": 0.77,
+      "compatibility": 0.88
+    },
+    "deltas": [],
+    "final_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.8,
+      "robustness": 0.77,
+      "compatibility": 0.88
+    },
+    "composite": 0.825,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-11",
+    "proposition": "rebuild_spatial_index is called exactly twice per tick (before Phase 2 and before Phase 4) at a cost of ~0.5ms each; a third call requires explicit justification, and beyond ~50k entities incremental updates should be considered (PERF-SPATIAL-03).",
+    "initial_scores": {
+      "defensibility": 0.83,
+      "specificity": 0.88,
+      "robustness": 0.75,
+      "compatibility": 0.88
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-10 through t-13, t-26 (spatial optimizations vs production reality)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.05,
+        "reasoning": "The defense makes two valid points: (1) optimizations should be evaluated in combination, not isolation, and (2) a2-21's 12x claim is for downstream processing specifically. However, the prosecution's..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.83,
+      "specificity": 0.88,
+      "robustness": 0.7,
+      "compatibility": 0.88
+    },
+    "composite": 0.8225,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-09",
+    "proposition": "For tracking intentions (Eat/Attack), cached paths should not be invalidated every tick when the target moves; instead, re-path only when the target has moved more than K tiles (suggested K=3) from the cached goal position.",
+    "initial_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.75,
+      "compatibility": 0.85
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-06 through t-09 (path caching vs terrain invalidation)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.1,
+        "reasoning": "The defense makes a valid point: terrain mutation does not currently exist, so penalizing rules for not handling it is partially speculative. However, the adjudicator resolves this in favor of the mor..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.65,
+      "compatibility": 0.85
+    },
+    "composite": 0.82,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-19",
+    "proposition": "Every system's doc comment must state its expected per-tick complexity in big-O notation, parameterized by entity count (n), spatial density (k), and map size (w*h) as appropriate (PERF-LLM-01).",
+    "initial_scores": {
+      "defensibility": 0.82,
+      "specificity": 0.87,
+      "robustness": 0.75,
+      "compatibility": 0.85
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-23, t-25 (profiling blindness)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.05,
+        "reasoning": "The defense is correct that the right response to benchmark blindness is to fix the benchmark, not to abandon measurement-gated decisions. However, the prosecution's point stands that propositions gat..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.82,
+      "specificity": 0.87,
+      "robustness": 0.7,
+      "compatibility": 0.85
+    },
+    "composite": 0.81,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-05",
+    "proposition": "Every Vec::new() used for collecting changes must be replaced with Vec::with_capacity() sized to the candidate count, or justified with a comment explaining why the expected size is much smaller (PERF-ITER-04).",
+    "initial_scores": {
+      "defensibility": 0.78,
+      "specificity": 0.9,
+      "robustness": 0.72,
+      "compatibility": 0.92
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-17 (Vec::with_capacity vs allocation churn)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.07,
+        "reasoning": "The defense's point about demand-paging is technically correct for physical memory but misses the mmap/munmap cycle cost, which is ~1-5us per call on Linux. With 8 systems each doing a large allocatio..."
+      },
+      {
+        "round": 3,
+        "tension": "t-17 (Vec::with_capacity vs allocation churn)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.03,
+        "reasoning": "The defense's point about demand-paging is technically correct for physical memory but misses the mmap/munmap cycle cost, which is ~1-5us per call on Linux. With 8 systems each doing a large allocatio..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.75,
+      "specificity": 0.9,
+      "robustness": 0.65,
+      "compatibility": 0.92
+    },
+    "composite": 0.805,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-25",
+    "proposition": "HashMap::get costs 25-40ns per call due to hashing, cache-line straddling, and pointer chasing; a system touching 3 tables for 10k entities incurs approximately 0.9ms in hash lookups alone before any computation.",
+    "initial_scores": {
+      "defensibility": 0.8,
+      "specificity": 0.9,
+      "robustness": 0.7,
+      "compatibility": 0.88
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.08,
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibra..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.8,
+      "specificity": 0.9,
+      "robustness": 0.62,
+      "compatibility": 0.88
+    },
+    "composite": 0.8,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-25",
+    "proposition": "The total current cost at 50k entities exceeds 23,000us, and reaching the 10,000us target requires implementing ALL of: incremental spatial index (~4,000us savings), A* buffer pooling + call cap (~5,000us), pre-sorted alive list (~1,500us), decision query deduplication (~1,000us), and conditional event pushing (~500us), with the architecture's structural floor at approximately 6,000-7,000us even with perfect optimization.",
+    "initial_scores": {
+      "defensibility": 0.82,
+      "specificity": 0.92,
+      "robustness": 0.68,
+      "compatibility": 0.85
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.05,
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibra..."
+      },
+      {
+        "round": 3,
+        "tension": "t-23, t-25 (profiling blindness)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.03,
+        "reasoning": "The defense is correct that the right response to benchmark blindness is to fix the benchmark, not to abandon measurement-gated decisions. However, the prosecution's point stands that propositions gat..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.79,
+      "specificity": 0.92,
+      "robustness": 0.63,
+      "compatibility": 0.85
+    },
+    "composite": 0.7975,
+    "category": "survivor"
+  },
+  {
+    "id": "a3-12",
+    "proposition": "The utility_config.clone() in decisions.rs clones the entire BTreeMap<ActionId, ActionDef> every tick regardless of entity count, establishing a pattern ('clone shared config to avoid borrow conflicts') that will be replicated in future systems, scaling per-tick clone cost with the number of systems and the complexity of their configs.",
+    "initial_scores": {
+      "defensibility": 0.82,
+      "specificity": 0.85,
+      "robustness": 0.7,
+      "compatibility": 0.78
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-33 (utility_config.clone() severity)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": 0.02,
+        "reasoning": "The defense is right on the numbers: even replicated, the clone cost is negligible. a3-12's concern is about pattern hygiene, not performance. Tiny penalties reflecting that the risk is real but the i..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.84,
+      "specificity": 0.85,
+      "robustness": 0.7,
+      "compatibility": 0.78
+    },
+    "composite": 0.7925,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-16",
+    "proposition": "The spatial index must support incremental updates rather than full rebuild: track moved entities from the wander system, remove from old cells and insert into new cells at O(moved_entities) cost instead of O(all_entities), reducing two rebuilds from ~5,400us to ~550us at 50k entities.",
+    "initial_scores": {
+      "defensibility": 0.88,
+      "specificity": 0.9,
+      "robustness": 0.72,
+      "compatibility": 0.78
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-10 through t-13, t-26 (spatial optimizations vs production reality)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.1,
+        "reasoning": "The defense makes two valid points: (1) optimizations should be evaluated in combination, not isolation, and (2) a2-21's 12x claim is for downstream processing specifically. However, the prosecution's..."
+      },
+      {
+        "round": 3,
+        "tension": "t-29 (incremental spatial updates vs rebuild allocation)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.02,
+        "reasoning": "The defense is correct that variable-cost fast/slow paths are standard. The prosecution's concern is valid but minor. Tiny penalty. Note: the larger penalties for a2-16 were already applied in the spa..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.86,
+      "specificity": 0.9,
+      "robustness": 0.62,
+      "compatibility": 0.78
+    },
+    "composite": 0.79,
+    "category": "survivor"
+  },
+  {
+    "id": "a2-17",
+    "proposition": "At 50k entities on a 256x256 map with CELL_SIZE=16, uniform density yields ~195 entities per cell, making SENSE_RANGE=30 queries scan 16 cells x 195 entities = 3,120 comparisons per query; reducing CELL_SIZE to 8 (CELL_SHIFT=3) gives 49/cell and 25 cells scanned = 1,225 comparisons.",
+    "initial_scores": {
+      "defensibility": 0.85,
+      "specificity": 0.95,
+      "robustness": 0.7,
+      "compatibility": 0.8
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-10 through t-13, t-26 (spatial optimizations vs production reality)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.1,
+        "reasoning": "The defense makes two valid points: (1) optimizations should be evaluated in combination, not isolation, and (2) a2-21's 12x claim is for downstream processing specifically. However, the prosecution's..."
+      },
+      {
+        "round": 3,
+        "tension": "t-10 through t-13, t-26 (spatial optimizations vs production reality)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.05,
+        "reasoning": "The defense makes two valid points: (1) optimizations should be evaluated in combination, not isolation, and (2) a2-21's 12x claim is for downstream processing specifically. However, the prosecution's..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.8,
+      "specificity": 0.95,
+      "robustness": 0.6,
+      "compatibility": 0.8
+    },
+    "composite": 0.7875,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-01",
+    "proposition": "At 100 ticks/sec with 8 systems, 2 spatial index rebuilds, and a debug validation pass, each system gets roughly 1ms, yielding a per-entity budget of 100ns at 10k entities.",
+    "initial_scores": {
+      "defensibility": 0.82,
+      "specificity": 0.93,
+      "robustness": 0.68,
+      "compatibility": 0.85
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.1,
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibra..."
+      },
+      {
+        "round": 3,
+        "tension": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.05,
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibra..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.77,
+      "specificity": 0.93,
+      "robustness": 0.58,
+      "compatibility": 0.85
+    },
+    "composite": 0.7825,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-14",
+    "proposition": "If a system's per-entity computation exceeds 500ns (measured or estimated from operation counts), it must implement cooldown skip, tick staggering, or result caching, with the mechanism documented in the system's doc comment (PERF-CACHE-02).",
+    "initial_scores": {
+      "defensibility": 0.8,
+      "specificity": 0.85,
+      "robustness": 0.72,
+      "compatibility": 0.85
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.12,
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibra..."
+      },
+      {
+        "round": 3,
+        "tension": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.05,
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibra..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.75,
+      "specificity": 0.85,
+      "robustness": 0.6,
+      "compatibility": 0.85
+    },
+    "composite": 0.7625,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-24",
+    "proposition": "The clone() of UtilityConfig in run_decisions allocates every tick; the cost is small (~200 bytes for 4 actions with 2-3 considerations each) but should be restructured to extract config as a local reference before the mutable phase, or accepted with a comment.",
+    "initial_scores": {
+      "defensibility": 0.72,
+      "specificity": 0.85,
+      "robustness": 0.7,
+      "compatibility": 0.8
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-33 (utility_config.clone() severity)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.02,
+        "reasoning": "The defense is right on the numbers: even replicated, the clone cost is negligible. a3-12's concern is about pattern hygiene, not performance. Tiny penalties reflecting that the risk is real but the i..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.72,
+      "specificity": 0.85,
+      "robustness": 0.68,
+      "compatibility": 0.8
+    },
+    "composite": 0.7625,
+    "category": "survivor"
+  },
+  {
+    "id": "a1-21",
+    "proposition": "When authoring a system, the LLM should estimate per-entity cost by summing: HashMap lookups at ~30ns each, arithmetic at ~3ns each, spatial queries at ~1000-5000ns each, and pathfinding calls at ~100,000-500,000ns each; if the total exceeds 500ns, amortization is required, and if it exceeds 5000ns, aggressive amortization with >90% skip rate is required (PERF-LLM-03).",
+    "initial_scores": {
+      "defensibility": 0.78,
+      "specificity": 0.92,
+      "robustness": 0.65,
+      "compatibility": 0.82
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.1,
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibra..."
+      },
+      {
+        "round": 3,
+        "tension": "t-16 (per-system estimation vs distributed overhead)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.03,
+        "reasoning": "The defense is right that preventing per-system catastrophes is independently valuable. a1-21 does help an LLM avoid O(n^2) systems and pathfinding-every-tick mistakes. The prosecution is right that a..."
+      },
+      {
+        "round": 3,
+        "tension": "t-16 (per-system estimation vs distributed overhead)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.05,
+        "reasoning": "The defense is right that preventing per-system catastrophes is independently valuable. a1-21 does help an LLM avoid O(n^2) systems and pathfinding-every-tick mistakes. The prosecution is right that a..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.75,
+      "specificity": 0.92,
+      "robustness": 0.5,
+      "compatibility": 0.82
+    },
+    "composite": 0.7475,
+    "category": "wounded"
+  },
+  {
+    "id": "a2-20",
+    "proposition": "The decisions system should support inertia-based skip: entities whose action has been stable for 10+ consecutive ticks skip scoring for the next 5 ticks, reducing the scoring population by up to 80% in stable simulations.",
+    "initial_scores": {
+      "defensibility": 0.8,
+      "specificity": 0.88,
+      "robustness": 0.65,
+      "compatibility": 0.82
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-18 through t-20, t-34 (decision staggering vs RNG butterfly)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.12,
+        "reasoning": "The defense raises a strong point: the RNG butterfly applies to all conditional optimizations, not just decision staggering. This is correct and the prosecution was selectively applying the standard. ..."
+      },
+      {
+        "round": 3,
+        "tension": "t-18 through t-20, t-34 (decision staggering vs RNG butterfly)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.05,
+        "reasoning": "The defense raises a strong point: the RNG butterfly applies to all conditional optimizations, not just decision staggering. This is correct and the prosecution was selectively applying the standard. ..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.75,
+      "specificity": 0.88,
+      "robustness": 0.53,
+      "compatibility": 0.82
+    },
+    "composite": 0.745,
+    "category": "wounded"
+  },
+  {
+    "id": "a1-22",
+    "proposition": "The decisions system (run_decisions) should stagger re-evaluation: entities with ticks_in_action < 5 and no high-priority stimulus (damage taken, health below threshold) should skip re-evaluation and retain their current intention, reducing spatial query volume by approximately 80% at steady state.",
+    "initial_scores": {
+      "defensibility": 0.82,
+      "specificity": 0.88,
+      "robustness": 0.68,
+      "compatibility": 0.75
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-18 through t-20, t-34 (decision staggering vs RNG butterfly)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.1,
+        "reasoning": "The defense raises a strong point: the RNG butterfly applies to all conditional optimizations, not just decision staggering. This is correct and the prosecution was selectively applying the standard. ..."
+      },
+      {
+        "round": 3,
+        "tension": "t-18 through t-20, t-34 (decision staggering vs RNG butterfly)",
+        "pass": "adjudication",
+        "axis": "compatibility",
+        "delta": -0.07,
+        "reasoning": "The defense raises a strong point: the RNG butterfly applies to all conditional optimizations, not just decision staggering. This is correct and the prosecution was selectively applying the standard. ..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.82,
+      "specificity": 0.88,
+      "robustness": 0.58,
+      "compatibility": 0.68
+    },
+    "composite": 0.74,
+    "category": "wounded"
+  },
+  {
+    "id": "a1-08",
+    "proposition": "If tick profiling shows sorting consuming more than 15% of the tick budget, a per-tick cached sorted entity list (World::sorted_entities rebuilt once per tick) should be implemented, saving approximately 1.5ms per tick at 10k entities by eliminating 6 redundant sorts (PERF-SORT-03).",
+    "initial_scores": {
+      "defensibility": 0.75,
+      "specificity": 0.88,
+      "robustness": 0.65,
+      "compatibility": 0.78
+    },
+    "deltas": [
+      {
+        "round": 3,
+        "tension": "t-01 through t-05 (sort/determinism cluster)",
+        "pass": "adjudication",
+        "axis": "robustness",
+        "delta": -0.12,
+        "reasoning": "The defense is correct that a1-07's conditions are statically checkable via grep, which mitigates the 'prove a negative' concern. However, the prosecution's point about the missing test safety net (a3..."
+      },
+      {
+        "round": 3,
+        "tension": "t-01 through t-05 (sort/determinism cluster)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.08,
+        "reasoning": "The defense is correct that a1-07's conditions are statically checkable via grep, which mitigates the 'prove a negative' concern. However, the prosecution's point about the missing test safety net (a3..."
+      },
+      {
+        "round": 3,
+        "tension": "t-23, t-25 (profiling blindness)",
+        "pass": "adjudication",
+        "axis": "defensibility",
+        "delta": -0.05,
+        "reasoning": "The defense is correct that the right response to benchmark blindness is to fix the benchmark, not to abandon measurement-gated decisions. However, the prosecution's point stands that propositions gat..."
+      }
+    ],
+    "final_scores": {
+      "defensibility": 0.62,
+      "specificity": 0.88,
+      "robustness": 0.53,
+      "compatibility": 0.78
+    },
+    "composite": 0.7025,
+    "category": "wounded"
+  }
+]

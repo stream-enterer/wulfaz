@@ -1,0 +1,499 @@
+[
+  {
+    "tension_id": "t-01 through t-05 (sort/determinism cluster)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-07": {"robustness": -0.20, "compatibility": -0.10},
+          "a1-08": {"robustness": -0.15, "defensibility": -0.10},
+          "a2-13": {"compatibility": -0.10},
+          "a3-08": {"defensibility": 0.05},
+          "a3-20": {"defensibility": 0.05}
+        },
+        "reasoning": "a1-07 (sort-skip exception) is the central weak proposition in this cluster. Three tensions converge on it: (1) t-01 shows the butterfly effect (a3-08) makes condition (a) — 'does not use world.rng' — fragile to indirect dependencies. A system may not use RNG today but acquire it via a future refactor. The condition requires proving a negative across the entire call graph, which an LLM cannot reliably do. (2) t-03 reveals the safety net is missing: a3-20 proves the determinism test suite cannot catch sort-skip violations, so the exception operates without verification. (3) t-02 shows the economic incentive to misapply: a3-07's 7.5ms sort cost creates pressure to invoke a1-07 aggressively. The combination of fragile conditions + missing tests + economic incentive to misapply warrants aggressive robustness downgrade. a1-08 (cached sorted list) is undermined by its own acknowledged design flaw: systems iterate different tables, so a global sorted_entities list requires per-system filtering, reducing the actual savings well below 1.5ms. The self-admitted flaw in its reasoning section should have been reflected in lower initial scores. a2-13 (pass sorted Vecs between systems) is penalized for coupling systems through shared vectors, which tensions with CLAUDE.md's one-system-per-file independence. a3-08 and a3-20 are strengthened marginally because the cluster analysis validates their warnings as actionable."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-07": {"robustness": 0.10, "compatibility": 0.05},
+          "a1-08": {"robustness": 0.05}
+        },
+        "reasoning": "The prosecution overstates the fragility of a1-07. Condition (a) — no RNG usage — is not a speculative negative; it is verifiable by static grep for 'world.rng' or 'rng' in the system function and anything it calls. Rust's type system makes RNG consumption visible: StdRng is passed explicitly, not injected implicitly. An LLM can mechanically verify this condition with a call-graph search. The prosecution's 'future refactor introduces indirect RNG dependency' argument applies to any rule — any code change can violate any precondition. The question is whether the precondition is checkable at write time, and it is. Additionally, the prosecution ignores that a1-07 is conservative: all three conditions must hold simultaneously. This conjunction means the exception applies to very few systems (perhaps only run_temperature, which is purely deterministic). The narrow applicability limits the blast radius. For a1-08, the prosecution correctly identifies the design flaw, but the cached sorted list still saves O(n log n) per system for the sort operation itself, even if per-system filtering adds O(n). The net savings may be less than projected but are not zero."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-07": {"robustness": -0.12, "compatibility": -0.07},
+          "a1-08": {"robustness": -0.12, "defensibility": -0.08},
+          "a2-13": {"compatibility": -0.08},
+          "a3-08": {"defensibility": 0.03},
+          "a3-20": {"defensibility": 0.03},
+          "a3-07": {"specificity": 0.02}
+        },
+        "reasoning": "The defense is correct that a1-07's conditions are statically checkable via grep, which mitigates the 'prove a negative' concern. However, the prosecution's point about the missing test safety net (a3-20) is decisive: even if the conditions are checkable at write time, there is no automated enforcement. In a codebase where an LLM agent writes systems, static analysis is the developer's responsibility, and mistakes happen. The conjunction requirement narrows applicability, which the defense correctly notes — but narrow applicability means the sort savings from a1-07 are also small, undermining its practical value relative to its risk. Net: a1-07 robustness drops from 0.87 to 0.75 and compatibility from 0.82 to 0.75. It survives as a valid exception but with a clear warning about its limitations and a recommendation to add an automated lint. a1-08's flaw is real but the prosecution's penalty on defensibility was slightly aggressive — the proposition honestly acknowledged the flaw in its own reasoning. The robustness penalty stands because the projected savings are materially overstated. a2-13 gets a smaller compatibility penalty because 'shared state on World' is the documented communication mechanism, but adding sorted vectors to World adds lifecycle complexity. a3-07 gets a minor specificity boost because its cost analysis proved central to understanding this cluster."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-06 through t-09 (path caching vs terrain invalidation)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-13": {"robustness": -0.20, "defensibility": -0.10},
+          "a2-08": {"robustness": -0.15},
+          "a2-09": {"robustness": -0.15},
+          "a2-23": {"robustness": -0.15, "defensibility": -0.10},
+          "a3-03": {"defensibility": 0.05, "specificity": 0.05},
+          "a3-21": {"defensibility": 0.05}
+        },
+        "reasoning": "This cluster exposes the most dangerous blind spot in the optimization propositions. a1-13 prescribes path caching rules that are correct only under the assumption 'map is static after loading,' which its own reasoning section explicitly states. But a3-03 proves this assumption is latent, not permanent: any future terrain-mutation system (doors, flooding, building collapse — all plausible for a Paris simulation) breaks every cached path simultaneously with no invalidation mechanism. a1-13 should have scored lower on robustness from the start because it contains a documented assumption that will eventually fail. a2-08 caps fresh A* at 30-50/tick, which is sound under normal operation but creates a catastrophic behavioral queue when mass invalidation occurs (t-07). If a terrain change invalidates 1000 cached paths, entities queue for 20-33 ticks waiting for a fresh path, creating visible AI paralysis. The cap prevents the allocation catastrophe (good) but substitutes a behavioral catastrophe (bad) without acknowledging the trade-off. a2-09 adds lazy invalidation (re-path only when target moves >K tiles) that compounds the terrain gap: even the target-tracking invalidation condition ignores terrain changes. This is a second layer of cache-stability assumption stacked on a1-13's already fragile foundation. a2-23 (never use timer-based invalidation) is the most dangerous proposition in this cluster because it forecloses the only fallback mechanism. Without condition-based terrain-change detection, periodic re-validation is the only safety net. a2-23 prohibits this safety net without ensuring the prerequisite (terrain-change detection) exists. Following a2-23 before implementing terrain-change detection makes stale path corruption permanent and undetectable. a3-03 and a3-21 are strengthened because this cluster analysis validates them as the critical counter-propositions that all optimization rules must address before deployment."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-13": {"robustness": 0.10, "defensibility": 0.05},
+          "a2-08": {"robustness": 0.08},
+          "a2-09": {"robustness": 0.05},
+          "a2-23": {"robustness": 0.08, "defensibility": 0.05}
+        },
+        "reasoning": "The prosecution treats terrain mutation as an imminent reality, but the codebase has no terrain-mutation system and the CLAUDE.md architecture description does not mention one. The propositions are correct for the system as it currently exists. The prosecution cannot penalize propositions for failing to handle a system that does not yet exist — that is speculative engineering. a1-13's assumption 'map is static after loading' is currently true and verified. The correct response is not to downgrade a1-13 but to note that a3-03 identifies a future requirement: when terrain mutation is added, the cache invalidation rules must be updated. This is normal architectural evolution, not a flaw in the current rule. a2-08's 30-50 cap handles the normal case where 11% of entities need paths per tick (a2-10). The mass-invalidation scenario requires a specific future system that does not exist. The cap can be raised or adapted when terrain mutation arrives. a2-23's prohibition on timer-based invalidation is correct in the current architecture: condition-based invalidation (goal change, path exhaustion) handles all current invalidation needs. The prosecution's 'only fallback' argument applies only in the terrain-mutation future. a2-23 should state its precondition explicitly ('assuming terrain is static') rather than being penalized for not handling a nonexistent case. The defense argues the prosecution conflates 'robust to the current system' with 'robust to all possible future systems,' applying an unreasonable standard."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-13": {"robustness": -0.10},
+          "a2-08": {"robustness": -0.07},
+          "a2-09": {"robustness": -0.10},
+          "a2-23": {"robustness": -0.10, "defensibility": -0.05},
+          "a3-03": {"defensibility": 0.03, "specificity": 0.03},
+          "a3-21": {"defensibility": 0.03}
+        },
+        "reasoning": "The defense makes a valid point: terrain mutation does not currently exist, so penalizing rules for not handling it is partially speculative. However, the adjudicator resolves this in favor of the more concrete, verifiable proposition (a3-03), for three reasons: (1) This is a simulation of Paris with buildings, bridges, and streets. Doors, flooding, and building collapse are not exotic features but natural extensions of the simulation's core premise. The terrain-mutation scenario is plausible enough to warrant architectural awareness. (2) a1-13 explicitly states the static-map assumption in its reasoning but does not encode it as a precondition in the rule itself. A developer following a1-13 will implement caching without realizing it depends on static terrain. The rule should carry the assumption as an explicit caveat. (3) a2-23's 'never' is absolute. The defense correctly notes it should state its precondition ('assuming terrain is static'). An absolute prohibition that depends on an unstated assumption deserves a robustness penalty even if the assumption currently holds. Net: a1-13 robustness drops from 0.85 to 0.75 — the caching rules survive but with an explicit terrain-stability precondition. a2-23 takes a meaningful hit (robustness 0.80 to 0.70, defensibility 0.90 to 0.85) because its absolute 'never' is unjustified without the prerequisite. a2-08 takes a small hit for not specifying fallback behavior when the cap is exceeded. a2-09 drops because lazy invalidation for tracking targets adds a second unacknowledged assumption on top of a1-13's."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-14, t-15, t-24, t-28 (budget disagreement cluster)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-01": {"robustness": -0.18, "defensibility": -0.10},
+          "a1-14": {"robustness": -0.15, "defensibility": -0.08},
+          "a1-21": {"robustness": -0.15},
+          "a1-25": {"robustness": -0.10},
+          "a2-25": {"robustness": -0.10}
+        },
+        "reasoning": "The budget disagreement is the deepest structural flaw across all three agents' analyses. a1-01 assumes 10k entities, yielding 100ns/entity. a2-01 assumes 50k entities, yielding 20ns/entity. This 5x discrepancy propagates to every rule calibrated to a budget number. a1-14's 500ns amortization threshold, derived from a1-01's 100ns budget, allows a system to cost 25,000us total at 50k entities — exceeding a2-04's 3,000us Phase 2 ceiling by 8x (t-15). This is not a minor calibration error; it means a developer following a1-14 will build systems that violate a2-04's ceiling. The rules are mutually inconsistent and cannot both be followed. a1-21's cost estimation table uses the same 500ns/5000ns thresholds, inheriting a1-14's scale problem. At 50k entities, a system with 3 HashMap lookups and one spatial query costs ~3,100-5,030ns per entity, well above the 500ns threshold — meaning every system with a spatial query requires amortization, which trivializes the threshold (everything triggers it). a1-25 frames HashMap cost as 'manageable' at 0.9ms for 3 tables at 10k entities. a3-06 scales the same math to 150-200ms at 15 systems with 50k entities (t-28). The 'manageable' framing is dangerous because it makes the per-operation cost seem acceptable when the aggregate is catastrophic. a2-25 claims a structural floor of 6,000-7,000us at 50k, but a3-16 puts infrastructure overhead at 8-10ms at 15 systems (t-24). The optimistic floor estimate could lead to false confidence that 50k at 100fps is achievable when it may not be."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-01": {"robustness": 0.08, "defensibility": 0.05},
+          "a1-14": {"robustness": 0.05},
+          "a1-25": {"robustness": 0.05},
+          "a2-25": {"robustness": 0.05}
+        },
+        "reasoning": "The prosecution treats the 10k vs 50k disagreement as a fatal flaw, but a1-01 explicitly states its entity count assumption and a1-01's own robustness score (0.68) already reflects this fragility. The prosecution is penalizing a proposition for a weakness it already acknowledged. a1-01's value is not the specific 100ns number but the framework: take tick budget, divide by systems, divide by entities. A developer can substitute 50k for 10k and get 20ns. The framework is robust even if the default parameter is not. a1-14's 500ns threshold is a heuristic, not a hard limit. It is explicitly derived from a1-01's budget with a 5x safety margin for amortization. A developer targeting 50k entities would apply the same logic and derive 100ns (5x margin on 20ns), or perhaps 250ns (5x margin on the 50ns budget a2-04 implies). The threshold scales; the prosecution assumes developers will blindly use the 500ns number without adjusting for entity count. a1-25's 'manageable' framing is at 10k entities and 3 tables, which is the current system. It does not claim manageability at 50k and 15 systems. The prosecution is projecting a1-25's conclusion to a scale the proposition does not address. a2-25 hedges with 'achievable but tight' and includes 'structural floor' language that signals uncertainty. The prosecution's standard (floor estimate must be exact) is unreasonable for an estimation exercise."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-01": {"robustness": -0.10, "defensibility": -0.05},
+          "a1-14": {"robustness": -0.12, "defensibility": -0.05},
+          "a1-21": {"robustness": -0.10},
+          "a1-25": {"robustness": -0.08},
+          "a2-25": {"robustness": -0.05},
+          "a2-01": {"defensibility": 0.02},
+          "a3-06": {"defensibility": 0.03},
+          "a3-16": {"defensibility": 0.02}
+        },
+        "reasoning": "The defense is correct that a1-01 provides a framework, not just a number. However, the prosecution's core point is decisive: when a1-01's 100ns budget is used downstream by a1-14 and a1-21 as calibration, the 10k assumption propagates silently. A developer reading a1-14 ('500ns threshold') does not re-derive the budget from entity count; they use the number as given. The rules must be self-contained or explicitly parameterized by entity count. Since they are not, the downstream rules inherit the fragility. a1-14 takes the largest hit because the 500ns threshold is concretely wrong at 50k entities and creates an 8x mismatch with a2-04. The prosecution overstated the a1-25 penalty (the 'manageable' framing is scoped to its stated assumptions) but the defense understated it (readers will generalize the conclusion). Split the difference. a2-25's floor estimate is genuinely uncertain, and the defense is right that 'achievable but tight' is honest hedging. Small penalty. a2-01 and a3-06/a3-16 get minor boosts for operating at the more realistic scale that the simulation will actually reach. The adjudicator notes: the surviving ruleset should either parameterize all budgets by entity count or adopt 50k as the planning target, since that is the stated design goal."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-10 through t-13, t-26 (spatial optimizations vs production reality)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a2-16": {"robustness": -0.15},
+          "a2-17": {"robustness": -0.15, "defensibility": -0.08},
+          "a2-21": {"robustness": -0.12},
+          "a1-11": {"robustness": -0.08},
+          "a1-12": {"robustness": -0.10},
+          "a3-01": {"defensibility": 0.03},
+          "a3-14": {"defensibility": 0.03}
+        },
+        "reasoning": "This cluster shows a pattern: Agent 1 and Agent 2 propose spatial optimizations calibrated to uniform density, while Agent 3 demonstrates those optimizations fail under production clustering. a2-16 (incremental spatial updates) is undermined by t-10: it tracks only entities moved through wander's channel. Any system that moves entities outside that channel (combat knockback, spawning, teleportation) creates stale entries. The proposal requires enumerating all position-changing systems and routing their moves through the tracking channel — a coupling requirement it does not acknowledge. a2-17 (CELL_SIZE reduction from 16 to 8) is the weakest proposition in this cluster. t-11 shows it addresses the wrong bottleneck: the 2.5x improvement under uniform density vanishes under clustering because O(d^2) cost from local density dominates cell-count reduction. With 200+ entities in a building, splitting them across 1-4 cells of size 8x8 instead of 1 cell of 16x16 reduces d from 200 to 50-200, yielding at best 4x improvement in the best case (perfect split) and 1x in the worst case (all in one cell). The average improvement under clustering is far less than the 2.5x projected under uniform density. The projection is misleading. a2-21 (per-cell query caching) is partially valid: it does eliminate redundant queries. But t-26 shows the first query per dense cell still pays full O(d^2) cost. The 12x improvement claim assumes the first query is cheap, which is false when d=200+. The real improvement is (d-1)/d, which approaches 1x for the scan cost and 12x only for downstream processing. The headline number overstates the benefit by conflating scan avoidance (not achieved) with downstream-work avoidance (achieved). a1-11 (two rebuilds per tick) is a reasonable rule but a3-02 shows the social guardrail ('third requires justification') does not structurally prevent accumulation. a1-12 (result cap for Phase 3 spatial queries) is undermined by its own concession: 'the cap prevents downstream work but not the scan.' The scan is the bottleneck in clustered environments."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a2-16": {"robustness": 0.05},
+          "a2-17": {"robustness": 0.08, "defensibility": 0.05},
+          "a2-21": {"robustness": 0.05},
+          "a1-12": {"robustness": 0.05}
+        },
+        "reasoning": "The prosecution applies production-scale clustering to optimizations that are explicitly framed as first-order improvements, not complete solutions. a2-17's CELL_SIZE reduction is additive with other optimizations — it reduces the cell-count factor while other measures (a2-21 caching, a2-06 pre-filtering) reduce the density factor. The prosecution evaluates it in isolation, ignoring that it is one lever in a multi-lever optimization strategy. Under combined optimization (smaller cells + query caching + pre-filtering), the improvement compounds. a2-16's incremental update is valid for the dominant movement system (wander), which accounts for 90%+ of position changes. The prosecution's concern about combat knockback and teleportation affecting a small minority of moves is valid but overstated — occasional full rebuilds for spawns/deaths (already planned) would catch these cases. a2-21's 12x claim is for downstream processing, not scan cost. The proposition's own text says 'up to 12x at uniform density,' which is honest about conditions. The prosecution is correct that the scan cost is not reduced, but the proposition never claimed it would be. The 12x improvement in downstream work is real and significant. a1-12's result cap may not reduce scan cost, but it reduces the system's total cost by eliminating processing of excess results. If the spatial query returns 200 entities but the system only processes 3, the cap prevents 197 unnecessary per-entity computations in the processing loop."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a2-16": {"robustness": -0.10},
+          "a2-17": {"robustness": -0.10, "defensibility": -0.05},
+          "a2-21": {"robustness": -0.08},
+          "a1-11": {"robustness": -0.05},
+          "a1-12": {"robustness": -0.07},
+          "a3-01": {"defensibility": 0.02},
+          "a3-14": {"defensibility": 0.02}
+        },
+        "reasoning": "The defense makes two valid points: (1) optimizations should be evaluated in combination, not isolation, and (2) a2-21's 12x claim is for downstream processing specifically. However, the prosecution's core objection stands for a2-17: the improvement under clustering is categorically different from the improvement under uniform density, and the proposition's specificity score (0.95) implies the numbers are reliable when they are actually conditional on an unrealistic assumption. The defense's argument that a2-17 is 'one lever' is valid in principle but does not rescue its overstated improvement factor. a2-16 gets a moderate penalty: the concern about non-wander position changes is real but manageable with occasional full rebuilds. The proposal should acknowledge this hybrid strategy explicitly. a2-21 gets a smaller penalty than initially proposed: the defense is right that the proposition claims downstream improvement, not scan improvement. But the headline '12x' is what a developer will remember, and it applies only under uniform density. The robustness penalty reflects the gap between headline and production reality. a1-12's cap is genuinely useful for downstream work reduction even if it does not help the scan — the defense's point is correct here. But the proposition frames itself as addressing 'the single most expensive operation,' which is the scan, not the downstream processing. The framing overpromises. a3-01 and a3-14 receive small boosts as the cluster analysis confirms their central relevance to all spatial optimization discussions."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-18 through t-20, t-34 (decision staggering vs RNG butterfly)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-22": {"robustness": -0.15, "compatibility": -0.10},
+          "a2-20": {"robustness": -0.15, "defensibility": -0.08},
+          "a3-08": {"specificity": 0.05}
+        },
+        "reasoning": "Decision staggering (a1-22 and a2-20) is the most mechanically dangerous optimization in the analysis because it directly manipulates which entities consume RNG on which ticks. a3-08 demonstrates that the shared seeded RNG creates butterfly effects where any change to conditional consumption shifts the stream for all downstream systems. Both staggering proposals are conditional RNG consumers by definition: an entity that skips decision-making does not roll dice, changing the RNG stream position for every subsequent entity and system. This is not a theoretical concern — it is a mathematical certainty given the single-RNG architecture. The two proposals disagree on thresholds (a1-22: ticks_in_action < 5; a2-20: 10 ticks stable, 5 ticks skip), creating a t-18 tension about which to implement. But the RNG butterfly concern (t-19, t-20) applies equally to both. Any stagger threshold makes the RNG stream dependent on the joint distribution of action durations across the entire population, creating maximal butterfly sensitivity to any parameter change. t-34 identifies a compound throttle: movement cooldown (11% active) combined with decision stagger (20% active) yields ~2.2% of entities doing significant work per tick. This double-throttle creates observably unresponsive entities, undermining simulation quality for performance. a1-22's compatibility score should be lower: its own reasoning notes it 'partially conflicts with CLAUDE.md's Phase 3 description' because staggering means Phase 3 sometimes does NOT read the environment for some entities."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-22": {"robustness": 0.08, "compatibility": 0.05},
+          "a2-20": {"robustness": 0.05}
+        },
+        "reasoning": "The prosecution treats the RNG butterfly as an absolute disqualifier for any optimization that changes conditional RNG consumption. But this standard would prohibit any optimization that changes code paths based on entity state, which includes virtually every optimization proposed by any agent (cooldown skips, pre-filtering, cached path reuse). The RNG butterfly is inherent to the single-RNG architecture, not specific to decision staggering. If the RNG butterfly disqualifies decision staggering, it also disqualifies a2-19 (cooldown-based early exit), a2-06 (pre-filtering spatial queries), and a2-08 (path caching that avoids RNG-consuming pathfinding). The prosecution applies the standard selectively. The double-throttle concern (t-34) assumes both throttles apply to the same entity at the same time. In practice, the movement cooldown applies to the movement system and the decision stagger applies to the decision system. An entity can make a decision (be in the 20% that evaluates) but not move (be on movement cooldown). The two throttles are independent, not multiplicative — an entity is only fully idle when both skip it, which is less common than the product suggests because decision re-evaluation often correlates with movement (e.g., arrival at destination triggers re-evaluation). Decision staggering with interrupt conditions (damage, health threshold) mitigates the responsiveness concern. The prosecution treats the interrupt mechanism as an afterthought, but it is the core design: most entities coast, but any entity receiving stimulus re-evaluates immediately."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-22": {"robustness": -0.10, "compatibility": -0.07},
+          "a2-20": {"robustness": -0.12, "defensibility": -0.05},
+          "a3-08": {"specificity": 0.03}
+        },
+        "reasoning": "The defense raises a strong point: the RNG butterfly applies to all conditional optimizations, not just decision staggering. This is correct and the prosecution was selectively applying the standard. However, decision staggering is qualitatively different from other conditional optimizations because (1) it affects the most RNG-heavy system (decisions involve multiple random evaluations per entity), (2) the skip condition is data-dependent on the full population's action history, creating maximal butterfly sensitivity, and (3) other conditional skips (cooldowns, pre-filters) are deterministic functions of entity state, while stagger thresholds interact with the very RNG stream they affect. The defense's point about interrupt conditions is valid: damage/health interrupts do mitigate responsiveness loss. But a1-22's interrupt list (damage, health) is acknowledged as potentially incomplete — food despawning, enemy proximity changes, etc. are not covered. The interrupt mechanism is the right design but the specification is undercooked. a2-20 takes a slightly larger penalty than a1-22 because its threshold (10 ticks stable, 5 ticks skip) is more aggressive (longer blindness window) and its interrupt mechanism is less specified. The double-throttle concern (t-34) is partially mitigated by the defense's argument about independence, but the adjudicator notes that the combined effect should be explicitly modeled before implementation. a3-08 gets a specificity boost because the staggering analysis demonstrates its butterfly effect is not merely theoretical but mechanically activated by the most impactful proposed optimization."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-27 (HashMap structural ceiling)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-16": {"robustness": -0.10},
+          "a3-06": {"defensibility": 0.05},
+          "a3-23": {"defensibility": 0.05}
+        },
+        "reasoning": "a1-16 defends HashMap as the correct data structure for entity tables, citing sparse entity IDs and CLAUDE.md's prohibition on replacement without profiling data. This defense is technically correct under current constraints. But a3-06 and a3-23 demonstrate that HashMap's per-operation cost, multiplied across systems and tables, creates a structural ceiling that no per-system optimization can escape. The tension (t-27) is precisely that a1-16 is correct AND this correct choice has a ceiling. a1-16's robustness should be downgraded because it presents HashMap as simply the right choice without acknowledging the ceiling. A robust proposition would state: 'HashMap is correct for the current architecture but imposes a structural floor of approximately X ms per tick at Y entities and Z systems, beyond which architectural changes are required.' The current framing encourages complacency about an architectural constraint that a3-06 and a3-23 show will become binding. a3-06 and a3-23 should be boosted because the cluster analysis validates their multiplicative-scaling insight as the key constraint for long-term architecture planning."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-16": {"robustness": 0.05}
+        },
+        "reasoning": "a1-16's scope is the data structure choice, not long-term performance planning. It correctly answers 'should we use HashMap?' with 'yes, because IDs are sparse.' Demanding that it also estimate the HashMap ceiling is scope creep — that is a3-06 and a3-23's job, and they do it well. The prosecution's proposed downgrade penalizes a1-16 for not being a3-06, which is unfair. Furthermore, a1-16 explicitly cites CLAUDE.md's rule: 'do not replace HashMap without profiling data showing >5ms per tick for that system.' This rule already implicitly acknowledges a performance ceiling — the 5ms threshold is the trigger for reconsidering. a1-16 is not complacent; it is operating within the project's established decision framework."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-16": {"robustness": -0.05},
+          "a3-06": {"defensibility": 0.03},
+          "a3-23": {"defensibility": 0.04}
+        },
+        "reasoning": "The defense is largely correct: a1-16's scope is the data structure choice, and it answers that question soundly. Penalizing it for not also doing ceiling analysis is unfair. However, a small robustness penalty is warranted because a1-16's framing ('HashMap is correct for entity tables') without qualification could be read as 'HashMap is permanently correct,' which a3-06 and a3-23 show is conditional on scale. The proposition survives with high scores but should carry a note about the scale-dependent ceiling. a3-06 and a3-23 get moderate boosts as the cluster validates their ceiling analysis. The adjudicator notes: the surviving ruleset should include a1-16's data structure defense AND a3-06/a3-23's ceiling analysis as complementary propositions — one explains why HashMap is correct now, the others explain when it will stop being sufficient."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-23, t-25 (profiling blindness)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-08": {"defensibility": -0.08},
+          "a1-19": {"robustness": -0.10},
+          "a2-25": {"defensibility": -0.05},
+          "a3-17": {"defensibility": 0.05},
+          "a3-18": {"defensibility": 0.03}
+        },
+        "reasoning": "This cluster exposes a meta-problem: several propositions gate their optimization on profiling results, but the profiling infrastructure cannot detect the problems the optimizations are meant to solve. a1-08 conditions its sorted-entity-list optimization on 'if tick profiling shows sorting consuming more than 15% of budget.' a3-18 proves the benchmark exercises the wrong scale, density, topology, and entity mix, making it structurally incapable of triggering the 15% threshold under conditions where sorting actually costs 75% of budget (a3-07 at 50k). The optimization gate is locked by a key that does not fit the production lock. a1-19 (big-O doc comments) is undermined by a3-17's insight that the performance disease is architectural and distributed. A system annotated O(n) is correct but misleading: the constant factor is dominated by HashMap overhead, sort cost, and allocation churn that the annotation does not capture. Per-system big-O annotations give false precision about per-system cost while the actual bottleneck is the aggregate of identical overhead across all systems. a2-25's five-optimization roadmap gates priority on estimated microsecond savings, but those estimates assume the benchmark's conditions. If benchmark conditions do not match production (a3-18), the priority ordering may be wrong."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-08": {"defensibility": 0.03},
+          "a1-19": {"robustness": 0.05},
+          "a2-25": {"defensibility": 0.03}
+        },
+        "reasoning": "The prosecution conflates 'benchmark is imperfect' with 'profiling is useless.' a3-18 identifies four mismatches between benchmark and production, which is a valid concern. But the solution is to fix the benchmark, not to abandon profiling-gated optimizations. a1-08's 15% threshold can be evaluated on a production-scale benchmark once one exists. The rule itself is correct: do not optimize what you have not measured. The prosecution argues for the opposite: optimize speculatively based on theoretical analysis, which is the classic premature-optimization trap. a1-19's big-O annotations are additive information, not a replacement for profiling. The prosecution argues they are 'misleading' because they omit constant factors, but any CS graduate knows big-O omits constants. The annotations help an LLM identify O(n^2) algorithms, which is their stated purpose and a valid one. Dismissing them because they do not capture architectural overhead is like dismissing type annotations because they do not capture runtime behavior."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-08": {"defensibility": -0.05},
+          "a1-19": {"robustness": -0.05},
+          "a2-25": {"defensibility": -0.03},
+          "a3-17": {"defensibility": 0.03},
+          "a3-18": {"defensibility": 0.02}
+        },
+        "reasoning": "The defense is correct that the right response to benchmark blindness is to fix the benchmark, not to abandon measurement-gated decisions. However, the prosecution's point stands that propositions gated on profiling results cannot currently be validated because the benchmark does not exercise production conditions. This creates a temporal problem: the rules exist now, the production benchmark does not. Until the benchmark is fixed, profiling-gated rules are effectively dead letters. a1-08's penalty is reduced because the 15% threshold is sound methodology — but the proposition should note the benchmark gap. a1-19's big-O annotations remain useful for catching O(n^2) but the prosecution is right that they create a false sense of completeness. The penalty is moderate: annotations survive but with a caveat that they capture algorithmic complexity only, not architectural overhead. a3-17 gets a defensibility boost: its core insight (distributed overhead is invisible to per-function profiling) is validated by this cluster. The surviving ruleset should include a recommendation to build a production-scale benchmark scenario as a prerequisite for all profiling-gated optimizations."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-17 (Vec::with_capacity vs allocation churn)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-05": {"robustness": -0.12, "defensibility": -0.08}
+        },
+        "reasoning": "t-17 identifies a direct conflict: a1-05 mandates Vec::with_capacity(candidates.len()) to eliminate reallocation, while a3-09 warns that collect-then-apply generates 8-10 MB of allocation churn per tick at 50k entities. Pre-sizing every Vec to full candidate count means every system allocates for the maximum possible changes, even when only 1-5% of entities produce changes. At 50k entities with 8 systems, pre-sizing every collect buffer to 50k tuples amplifies allocation volume by 20-100x compared to growing dynamically. The optimization that eliminates reallocation amplifies the total allocation footprint. This is not a matter of degree — it is a qualitative inversion of the intended benefit."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-05": {"robustness": 0.05, "defensibility": 0.03}
+        },
+        "reasoning": "The prosecution overstates the harm of over-allocation. Vec::with_capacity allocates but does not initialize — the kernel uses demand-paging, so pages that are never written are never physically allocated. A Vec::with_capacity(50k) where only 500 entries are pushed consumes ~500 entries worth of physical memory plus one large virtual allocation. The OS overhead is the mmap/munmap cycle, not the full 50k allocation. Furthermore, a1-05 includes an escape hatch: 'or justified with a comment explaining why the expected size is much smaller.' This explicitly permits with_capacity(expected_changes) rather than with_capacity(candidates.len()) when the hit rate is known to be low. The prosecution reads the rule as always sizing to candidates.len(), which is one option, not the only option."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-05": {"robustness": -0.07, "defensibility": -0.03}
+        },
+        "reasoning": "The defense's point about demand-paging is technically correct for physical memory but misses the mmap/munmap cycle cost, which is ~1-5us per call on Linux. With 8 systems each doing a large allocation and deallocation per tick, that is 80-400us of syscall overhead per tick — meaningful at the 10ms budget. The prosecution's 'qualitative inversion' framing is too strong: the escape hatch genuinely permits smaller allocations. But the rule's default framing ('sized to the candidate count') pushes developers toward over-allocation unless they actively invoke the escape hatch, which requires estimating hit rate. The rule should invert its default: size to an estimated change count, with candidate count as the upper bound when the hit rate is unknown. Moderate penalty: robustness drops from 0.72 to 0.65, defensibility from 0.78 to 0.75."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-21, t-22 (pathfinding workspace design)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-23": {"robustness": -0.12, "defensibility": -0.05},
+          "a2-15": {"robustness": -0.05}
+        },
+        "reasoning": "t-21 reveals a1-23's workspace reuse has a hidden cost: clearing 693MB of flat arrays at ~100us per memset, times 50 calls per tick (a2-08's cap), equals ~5ms. This is half the tick budget spent on memset alone. The 'reuse beats allocation' argument holds only if clearing is cheaper than allocation, which is true per-call but the aggregate clearing cost at production scale is enormous. t-22 shows a2-15's generation-counter approach solves this by avoiding clearing entirely. a1-23 proposes the inferior approach (memset clearing) when a2-15's approach (generation counters) exists. a1-23 should be penalized for not considering production-scale clearing costs, and a2-15's robustness should account for the u32 wraparound risk it acknowledges."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-23": {"robustness": 0.07, "defensibility": 0.03}
+        },
+        "reasoning": "The prosecution's 5ms clearing cost assumes 50 A* calls per tick, each clearing the full 693MB workspace. But the workspace is cleared once per call, and the a2-08 cap of 30-50 calls already limits this. More importantly, A* typically touches only a small fraction of the map per search (the explored set is bounded by MAX_EXPANDED nodes). A sparse-clearing approach (only clear explored cells) would reduce clearing cost to O(explored_set) rather than O(map_size). The prosecution assumes full-map clearing, which is the naive implementation, not the only implementation. Furthermore, a1-23 is addressing the allocation problem (eliminate per-call fresh allocation), which it does correctly. The clearing strategy is an implementation detail that can be optimized separately."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-23": {"robustness": -0.07},
+          "a2-15": {"robustness": -0.03, "defensibility": 0.03}
+        },
+        "reasoning": "The defense's sparse-clearing point is strong: clearing only the explored set eliminates the full-map memset concern. However, a1-23's specific proposal uses 'pre-allocated flat arrays cleared between calls,' which reads as full clearing. The proposition should specify sparse clearing or generation counters, not flat clearing. Moderate penalty for the specification gap. a2-15 gets a small defensibility boost because the cluster analysis validates generation counters as the superior clearing strategy. Its robustness takes a small hit for the u32 wraparound risk, though at 50 calls/tick and 100 ticks/sec, the 248-day wraparound window is manageable with a u64 counter. The surviving ruleset should recommend a2-15's generation-counter approach over a1-23's memset approach for production-scale pathfinding."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-29 (incremental spatial updates vs rebuild allocation)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a2-16": {"defensibility": -0.05}
+        },
+        "reasoning": "t-29 shows incremental updates create variable-cost patterns (usually O(moved) but occasionally O(all) for full rebuilds after spawns/deaths). Variable costs are harder to budget for than consistent costs, and the mixed strategy adds complexity without eliminating the full-rebuild path entirely."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a2-16": {"defensibility": 0.03}
+        },
+        "reasoning": "Variable cost is the normal case for optimizations: the fast path is fast, the slow path is rare. Spawns/deaths are far less frequent than moves. The average cost is dominated by the fast path, and worst-case ticks (mass death events) are inherently expensive regardless of spatial index strategy."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a2-16": {"defensibility": -0.02}
+        },
+        "reasoning": "The defense is correct that variable-cost fast/slow paths are standard. The prosecution's concern is valid but minor. Tiny penalty. Note: the larger penalties for a2-16 were already applied in the spatial optimizations cluster (t-10). This tension adds only a marginal additional concern."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-30 (event push frequency)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a2-05": {"robustness": -0.05},
+          "a3-13": {"defensibility": 0.03}
+        },
+        "reasoning": "a2-05 proposes threshold-based event pushing as an optimization, but neither it nor a3-13 investigates whether any consumer depends on per-tick events. If the rendering layer displays hunger bars that update smoothly, or if a future analytics system counts per-tick hunger events, the optimization breaks a downstream contract. The optimization is treated as safe without verifying safety."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a2-05": {"robustness": 0.03}
+        },
+        "reasoning": "The event ring buffer has 10k capacity and receives 50k+ events per tick. By definition, 80% of events are already lost to buffer wrap. Any consumer depending on per-tick events is already broken. The optimization cannot break a contract that is already violated."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a2-05": {"robustness": -0.02},
+          "a3-13": {"defensibility": 0.02}
+        },
+        "reasoning": "The defense makes a devastating point: the ring buffer already drops 80% of events, so per-tick consumers are already broken. However, the prosecution's concern that no consumer audit was performed remains valid as a process issue. The optimization is likely safe (and the defense explains why) but the reasoning should explicitly note the ring-buffer overflow as justification, not leave it implicit. Minor penalties/boosts."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-31 (cache invalidation completeness)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-13": {"specificity": -0.05}
+        },
+        "reasoning": "a2-22 requires cached assumptions to include all assumptions the cache was computed under. a1-13 specifies goal change as the only invalidation condition. Under a2-22's standard, a1-13 is incomplete: it should include terrain state as a cached assumption. This gap was already penalized under t-06/t-09 for terrain invalidation, but the specificity penalty here is for the incomplete assumption set — the rule is specific about what it includes but silent about what it omits."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-13": {"specificity": 0.03}
+        },
+        "reasoning": "a1-13 lists three conditions (check, store, invalidate on goal change) and explicitly carves out an exception for moving targets. It is specific about the conditions it covers. The omission of terrain invalidation is a separate issue (addressed in t-06) and should not be double-counted as a specificity penalty here."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-13": {"specificity": -0.02}
+        },
+        "reasoning": "The defense is right that double-counting is unfair. However, a2-22's principle (assumptions must be stored in the cache) exposes that a1-13's specificity is narrowly correct but incomplete. A very small specificity penalty for the unstated assumption, acknowledging that the terrain gap is primarily an issue of robustness (already penalized in t-06 cluster)."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-32 (Phase 2 ceiling vs table proliferation)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a2-04": {"robustness": -0.08}
+        },
+        "reasoning": "a2-04's 3,000us Phase 2 ceiling assumes the per-lookup cost is constant. a3-11 shows cache pollution from additional tables increases per-lookup cost as the table count grows. The ceiling is calibrated to current table count and erodes as tables proliferate."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a2-04": {"robustness": 0.03}
+        },
+        "reasoning": "Cache pollution from additional tables affects L1/L2 hit rates, but the effect is gradual and bounded. Going from 10 tables to 20 tables might increase per-lookup cost by 20-40%, not an order of magnitude. The 3,000us ceiling has meaningful headroom before table proliferation erodes it past usefulness."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a2-04": {"robustness": -0.05}
+        },
+        "reasoning": "The defense correctly notes the effect is gradual. The prosecution correctly notes the ceiling is calibrated to current conditions and will erode. Split the difference: moderate penalty reflecting the non-constant-cost assumption."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-33 (utility_config.clone() severity)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-24": {"robustness": -0.05},
+          "a3-12": {"defensibility": 0.03}
+        },
+        "reasoning": "a1-24 dismisses the clone as 'negligible' at ~200 bytes. a3-12 warns it establishes a replicable pattern. The prosecution argues the pattern-replication risk is real because LLM agents copy existing code patterns, and a clone workaround in the most complex system (decisions) will be copied to future systems with similar borrow conflicts."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-24": {"robustness": 0.03}
+        },
+        "reasoning": "Even if the pattern replicates to 10 systems, each cloning a BTreeMap with 20 entries, the total clone cost is under 10us per tick. This is 0.1% of the budget. The pattern-replication concern has merit as architectural hygiene but zero performance impact for any realistic growth trajectory."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-24": {"robustness": -0.02},
+          "a3-12": {"defensibility": 0.02}
+        },
+        "reasoning": "The defense is right on the numbers: even replicated, the clone cost is negligible. a3-12's concern is about pattern hygiene, not performance. Tiny penalties reflecting that the risk is real but the impact is minimal. Both propositions survive with essentially unchanged scores."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-16 (per-system estimation vs distributed overhead)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-21": {"defensibility": -0.08, "robustness": -0.10},
+          "a3-17": {"specificity": 0.05}
+        },
+        "reasoning": "a1-21 provides a cost estimation table for LLM agents to sum per-entity costs and decide on amortization. a3-17 argues the actual bottleneck is cumulative cross-system overhead (cache pollution, allocator fragmentation) that is invisible to per-system accounting. a1-21 encourages per-system optimization in a world where per-system optimization cannot address the dominant cost driver. The estimation table gives the illusion of actionability when the real problem is architectural."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-21": {"defensibility": 0.05, "robustness": 0.05}
+        },
+        "reasoning": "a1-21 and a3-17 address different scopes. a1-21 helps an LLM avoid creating a catastrophically expensive system (O(n^2) due to nested loops, or pathfinding per entity per tick). a3-17 addresses cumulative architectural overhead that no single system creates. Both are valid at their respective scopes. The prosecution argues a1-21 is useless because it does not solve a3-17's problem, but a1-21 never claimed to solve that problem. Preventing per-system catastrophes is independently valuable even if architectural overhead exists."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-21": {"defensibility": -0.03, "robustness": -0.05},
+          "a3-17": {"specificity": 0.03}
+        },
+        "reasoning": "The defense is right that preventing per-system catastrophes is independently valuable. a1-21 does help an LLM avoid O(n^2) systems and pathfinding-every-tick mistakes. The prosecution is right that a1-21's framing implies comprehensive cost estimation when it only captures per-system costs. The surviving rule should carry a caveat: 'This estimation captures per-system algorithmic cost. It does not capture cumulative architectural overhead (HashMap tax, sort tax, allocation churn across all systems), which can equal or exceed per-system costs at scale.' Moderate penalties. a3-17 gets a specificity boost for providing the complementary perspective the estimation table needs."
+      }
+    ]
+  },
+  {
+    "tension_id": "t-35 (SENSE_RANGE minimization methodology gap)",
+    "passes": [
+      {
+        "pass": "prosecution",
+        "proposed_deltas": {
+          "a1-10": {"robustness": -0.03},
+          "a2-07": {"robustness": -0.05}
+        },
+        "reasoning": "Both propositions agree on minimizing spatial query range but neither provides a methodology for determining the minimum. 'Minimum required by gameplay' (a2-07) and 'minimum that satisfies the system's design' (a1-10) are circular without a gameplay analysis framework. The rules are unimplementable without domain expertise that neither proposition supplies."
+      },
+      {
+        "pass": "defense",
+        "proposed_deltas": {
+          "a1-10": {"robustness": 0.02}
+        },
+        "reasoning": "a1-10 requires a named const with real-world justification ('visual range of a human: 30 meters'). This forces the developer to reason in physical terms, which is a practical methodology for a city simulation. The rule is not circular — it anchors range decisions in real-world constraints."
+      },
+      {
+        "pass": "adjudication",
+        "final_deltas": {
+          "a1-10": {"robustness": -0.01},
+          "a2-07": {"robustness": -0.03}
+        },
+        "reasoning": "a1-10's real-world justification requirement is a genuine methodology, as the defense argues. a2-07's 'minimum required by gameplay' is vaguer and less actionable. Minimal penalty for a1-10, slightly larger for a2-07. Both survive; the tension is low-severity."
+      }
+    ]
+  }
+]
