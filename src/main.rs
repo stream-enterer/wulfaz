@@ -16,6 +16,7 @@ use wulfaz::loading_gis;
 use wulfaz::panel;
 use wulfaz::render;
 use wulfaz::settings::Settings;
+use wulfaz::sprite_renderer;
 use wulfaz::systems::combat::run_combat;
 use wulfaz::systems::death::run_death;
 use wulfaz::systems::decisions::run_decisions;
@@ -24,6 +25,7 @@ use wulfaz::systems::fatigue::run_fatigue;
 use wulfaz::systems::hunger::run_hunger;
 use wulfaz::systems::temperature::run_temperature;
 use wulfaz::systems::wander::run_wander;
+use wulfaz::ui;
 use wulfaz::world::World;
 
 /// Convert sRGB component (0-1) to linear for use as wgpu clear color.
@@ -38,12 +40,20 @@ fn srgb_to_linear(s: f64) -> f64 {
 const BG_SRGB: [f32; 3] = [40.0 / 255.0, 40.0 / 255.0, 40.0 / 255.0]; // #282828
 const FG_SRGB: [f32; 3] = [235.0 / 255.0, 219.0 / 255.0, 178.0 / 255.0]; // #ebdbb2
 
-/// Map overlay: light parchment, 15% alpha — hover highlight
-const OVERLAY_HOVER: [f32; 4] = [0.941, 0.902, 0.824, 0.15];
-/// Map overlay: gold, 35% alpha — selected entity
-const OVERLAY_SELECTION: [f32; 4] = [0.784, 0.659, 0.314, 0.35];
-/// Map overlay: muted green, 25% alpha — wander target
-const OVERLAY_PATH: [f32; 4] = [0.376, 0.627, 0.376, 0.25];
+/// Vertex counts per render layer.
+/// The render pass draws back-to-front:
+///   map text -> map overlay panels -> for each root { panels -> [sprite?] -> text }
+struct FrameLayers {
+    map_text_vertices: u32,
+    map_overlay_panel_vertices: u32,
+    /// Per-root (panel_range, text_range) in back-to-front draw order.
+    /// panel_range and text_range are each (start, count) in their vertex buffers.
+    root_layers: Vec<((u32, u32), (u32, u32))>,
+    /// If set, draw sprites after this root's panels (before its text).
+    /// Used for the minimap: sprite renders inside the minimap panel but
+    /// under later roots (tooltips).
+    sprite_after_root_panels: Option<usize>,
+}
 
 struct GpuState {
     surface: wgpu::Surface<'static>,
@@ -123,13 +133,19 @@ impl GpuState {
         self.config.format
     }
 
-    /// Render a frame: clear → map text → map overlay panels.
+    /// Render a frame with proper Z-layering:
+    /// 1. Clear background
+    /// 2. Map text (ASCII grid) — under panels
+    /// 3. UI panels (overlays + widgets)
+    /// 4. UI text (labels, buttons, etc.) — over panels
+    /// 5. Sprite overlay (minimap) — topmost
     fn render(
         &self,
         font: &font::FontRenderer,
         panel: &panel::PanelRenderer,
-        map_text_vertices: u32,
-        map_overlay_panel_vertices: u32,
+        layers: &FrameLayers,
+        sprites: Option<&sprite_renderer::SpriteRenderer>,
+        sprite_vertices: u32,
     ) {
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
@@ -177,10 +193,24 @@ impl GpuState {
                 ..Default::default()
             });
 
-            // Layer 1: map ASCII text
-            font.render_range(&mut render_pass, 0, map_text_vertices);
+            // Layer 1: map ASCII text (under all UI)
+            font.render_range(&mut render_pass, 0, layers.map_text_vertices);
             // Layer 2: map overlay panels (tile highlights)
-            panel.render_range(&mut render_pass, 0, map_overlay_panel_vertices);
+            panel.render_range(&mut render_pass, 0, layers.map_overlay_panel_vertices);
+            // Layers 3+: per-root panels then text (fixes cross-root text bleed-through).
+            // Minimap sprite is inserted after the minimap root's panels so that
+            // later roots (tooltips) properly occlude it.
+            for (i, &(panel_range, text_range)) in layers.root_layers.iter().enumerate() {
+                let (ps, pc) = panel_range;
+                panel.render_range(&mut render_pass, ps, pc);
+                if layers.sprite_after_root_panels == Some(i)
+                    && let Some(sr) = sprites
+                {
+                    sr.render(&mut render_pass, sprite_vertices);
+                }
+                let (ts, tc) = text_range;
+                font.render_range(&mut render_pass, ts, tc);
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -197,7 +227,7 @@ const MAX_TICKS_PER_FRAME: u32 = 5;
 struct Camera {
     x: i32,
     y: i32,
-    /// Smooth float target for lerp interpolation.
+    /// Smooth float target for lerp interpolation (UI-107).
     target_x: f32,
     target_y: f32,
     /// Zoom level: 1.0 = default (1 tile per character cell). >1 = zoomed in.
@@ -243,6 +273,74 @@ fn run_one_tick(world: &mut World) {
     world.tick = Tick(tick.0 + 1);
 }
 
+/// Extract structured hover data from a map tile (UI-I01b).
+/// Returns None if coords are out of bounds or no terrain.
+fn collect_hover_info(world: &World, tile_x: i32, tile_y: i32) -> Option<ui::HoverInfo> {
+    if tile_x < 0 || tile_y < 0 {
+        return None;
+    }
+    let ux = tile_x as usize;
+    let uy = tile_y as usize;
+    let terrain = world.tiles.get_terrain(ux, uy)?;
+
+    let mut info = ui::HoverInfo {
+        tile_x,
+        tile_y,
+        terrain: format!("{:?}", terrain),
+        quartier: None,
+        address: None,
+        building_name: None,
+        occupants: Vec::new(),
+        occupant_year_suffix: None,
+        entities: Vec::new(),
+    };
+
+    // Quartier
+    if let Some(qid) = world.tiles.get_quartier_id(ux, uy)
+        && qid > 0
+        && let Some(name) = world.gis.quartier_names.get((qid - 1) as usize)
+    {
+        info.quartier = Some(name.clone());
+    }
+
+    // Building
+    if let Some(bid) = world.tiles.get_building_id(ux, uy)
+        && let Some(building) = world.gis.buildings.get(bid)
+    {
+        if let Some(a) = building.addresses.first() {
+            info.address = Some(format!("{} {}", a.house_number, a.street_name));
+        }
+        info.building_name = building.nom_bati.clone();
+
+        if let Some((year, occupants)) = building.occupants_nearest(world.gis.active_year, 20) {
+            info.occupants = occupants
+                .iter()
+                .map(|o| (o.name.clone(), o.activity.clone()))
+                .collect();
+            if year != world.gis.active_year {
+                info.occupant_year_suffix = Some(format!("[{}]", year));
+            }
+        }
+    }
+
+    // Entities on this tile
+    for (&entity, pos) in &world.body.positions {
+        if pos.x == tile_x && pos.y == tile_y && world.alive.contains(&entity) {
+            let name = world
+                .body
+                .names
+                .get(&entity)
+                .map(|n| n.value.clone())
+                .unwrap_or_else(|| format!("E{}", entity.0));
+            let icon = world.body.icons.get(&entity).map(|i| i.ch).unwrap_or('?');
+            info.entities.push((icon, name));
+        }
+    }
+    info.entities.sort_by(|a, b| a.1.cmp(&b.1));
+
+    Some(info)
+}
+
 struct App {
     gpu: Option<GpuState>,
     font: Option<font::FontRenderer>,
@@ -252,6 +350,7 @@ struct App {
     camera: Camera,
     last_frame_time: Instant,
     tick_accumulator: f64,
+    // Roguelike mode input state
     cursor_pos: winit::dpi::PhysicalPosition<f64>,
     modifiers: ModifiersState,
     pending_player_action: Option<PlayerAction>,
@@ -259,9 +358,30 @@ struct App {
     map_origin: (f32, f32),
     map_cell_w: f32,
     map_cell_h: f32,
+    // UI persistent state (UI-P2: all mutable state in one struct).
+    ui: ui::UiContext,
+    // Ephemeral widget tree — rebuilt every frame.
+    ui_tree: ui::WidgetTree,
+    // Immutable theme configuration.
+    ui_theme: ui::Theme,
+    last_hover_tile: Option<(i32, i32)>,
+    last_selected_entity: Option<components::Entity>,
+    // Keyboard shortcut system (UI-I03)
+    keybindings: ui::KeyBindings,
     paused: bool,
     sim_speed: u32, // 1 = normal, 2-5 = faster
+    // Entity inspector (UI-I01d)
     selected_entity: Option<components::Entity>,
+    inspector_close_id: Option<ui::WidgetId>,
+    // Performance metrics (UI-505) — stores previous frame's metrics.
+    ui_perf: ui::UiPerfMetrics,
+    // Minimap (UI-407)
+    minimap_sprites: Option<sprite_renderer::SpriteRenderer>,
+    minimap_texture: Option<ui::MinimapTexture>,
+    minimap_panel_id: Option<ui::WidgetId>,
+    minimap_area_id: Option<ui::WidgetId>,
+    minimap_dragging: bool,
+    // Cached viewport dimensions for minimap click centering.
     viewport_cols: usize,
     viewport_rows: usize,
 }
@@ -276,6 +396,144 @@ impl App {
             self.settings.window_height = logical.height;
             self.settings.window_maximized = gpu.window.is_maximized();
             self.settings.save();
+        }
+    }
+
+    /// Handle a sidebar tab click. Manages open/close/switch transitions.
+    fn handle_tab_click(&mut self, tab_idx: usize) {
+        let now = Instant::now();
+        let is_closing = self.ui.animator.target("sidebar_slide") == Some(1.0);
+        let current_slide = self.ui.animator.get("sidebar_slide", now).unwrap_or(
+            if self.ui.sidebar.active_tab.is_some() {
+                0.0
+            } else {
+                1.0
+            },
+        );
+
+        if self.ui.sidebar.active_tab == Some(tab_idx) && !is_closing {
+            // Clicking active tab: start close animation.
+            self.ui.animator.start(
+                "sidebar_slide",
+                ui::Anim {
+                    from: current_slide,
+                    to: 1.0,
+                    duration: std::time::Duration::from_millis(self.ui_theme.anim_panel_hide_ms),
+                    easing: ui::Easing::EaseIn,
+                    ..ui::Anim::DEFAULT
+                },
+                now,
+            );
+        } else {
+            // Opening new tab or switching while open.
+            let need_slide = self.ui.sidebar.active_tab.is_none() || is_closing;
+            self.ui.sidebar.active_tab = Some(tab_idx);
+            if need_slide {
+                self.ui.animator.start(
+                    "sidebar_slide",
+                    ui::Anim {
+                        from: current_slide,
+                        to: 0.0,
+                        duration: std::time::Duration::from_millis(
+                            self.ui_theme.anim_inspector_slide_ms,
+                        ),
+                        easing: ui::Easing::EaseOut,
+                        ..ui::Anim::DEFAULT
+                    },
+                    now,
+                );
+            }
+        }
+    }
+
+    /// Convert a screen-space cursor position to world coords via the minimap
+    /// and set the camera target. Used for both click-to-jump and drag-to-pan.
+    fn update_minimap_drag(&mut self, px: f32, py: f32) {
+        if let Some(area_id) = self.minimap_area_id
+            && let Some(rect) = self.ui_tree.node_rect(area_id)
+        {
+            let (wx, wy) = ui::minimap_click_to_world(
+                px,
+                py,
+                rect.x,
+                rect.y,
+                self.world.tiles.width() as u32,
+                self.world.tiles.height() as u32,
+            );
+            // Center viewport on the world position.
+            self.camera.target_x = wx - self.viewport_cols as f32 / 2.0;
+            self.camera.target_y = wy - self.viewport_rows as f32 / 2.0;
+        }
+    }
+
+    /// Clean up focus state after popping a modal.
+    fn cleanup_after_modal_pop(&mut self) {
+        // Clear focus if the focused widget was removed with the modal.
+        if let Some(f) = self.ui.input.focused
+            && !self.ui_tree.contains(f)
+        {
+            self.ui.input.focused = None;
+        }
+        // Reset focus tier to match remaining stack.
+        self.ui.input.focus_min_tier = if self.ui.modals.is_empty() {
+            ui::ZTier::Panel
+        } else {
+            ui::ZTier::Modal
+        };
+    }
+
+    /// Pop the topmost modal, clean up focus, and dispatch its action.
+    fn pop_modal_with(&mut self, use_confirm: bool) {
+        if self.ui.modals.is_empty() {
+            return;
+        }
+        let pop = self.ui.modals.pop(&mut self.ui_tree);
+        self.cleanup_after_modal_pop();
+        if let Some(p) = pop {
+            let action = if use_confirm {
+                p.on_confirm
+            } else {
+                p.on_dismiss
+            };
+            if let Some(action) = action {
+                self.dispatch_click(action);
+            }
+        }
+    }
+
+    /// Dispatch a UI click action. Centralizes all on_click handling.
+    fn dispatch_click(&mut self, action: ui::UiAction) {
+        match action {
+            ui::UiAction::InspectorClose => {
+                self.selected_entity = None;
+            }
+            ui::UiAction::ModalDismiss | ui::UiAction::DialogCancel => {
+                self.pop_modal_with(false);
+            }
+            ui::UiAction::DialogAccept => {
+                self.pop_modal_with(true);
+            }
+            ui::UiAction::SelectTab(idx) => {
+                self.handle_tab_click(idx);
+            }
+            ui::UiAction::MenuNewGame => {}
+            ui::UiAction::MenuContinue => {}
+            ui::UiAction::MenuLoad => {}
+            ui::UiAction::MenuSettings => {}
+            ui::UiAction::MenuQuit => {}
+            ui::UiAction::OutlinerSelectCharacter(_entity) => {}
+            ui::UiAction::OutlinerSelectEvent(_cb) => {}
+            ui::UiAction::FinderSort => {}
+            ui::UiAction::FinderSelect(_entity) => {}
+            ui::UiAction::SettingsUiScale => {}
+            ui::UiAction::SettingsWindowMode => {}
+            ui::UiAction::SaveLoadSave => {}
+            ui::UiAction::SaveLoadLoad => {}
+            ui::UiAction::SaveLoadSelect(_name) => {}
+            ui::UiAction::MapModeChange => {}
+            ui::UiAction::MapModeSpeed => {}
+            ui::UiAction::EventChoice(_cb) => {}
+            ui::UiAction::ContextAction(_action) => {}
         }
     }
 }
@@ -318,9 +576,21 @@ impl ApplicationHandler for App {
 
         let panel_renderer = panel::PanelRenderer::new(&gpu.device, gpu.surface_format());
 
+        // Minimap sprite renderer (UI-407): 128×96 RGBA atlas.
+        let zeroed_pixels = vec![0u8; 128 * 96 * 4];
+        let minimap_sprites = sprite_renderer::SpriteRenderer::new(
+            &gpu.device,
+            &gpu.queue,
+            gpu.surface_format(),
+            128,
+            96,
+            &zeroed_pixels,
+        );
+
         self.gpu = Some(gpu);
         self.font = Some(font_renderer);
         self.panel = Some(panel_renderer);
+        self.minimap_sprites = Some(minimap_sprites);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -328,6 +598,16 @@ impl ApplicationHandler for App {
             // Input tracking (no GPU needed)
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_pos = position;
+                // Minimap drag-to-pan (UI-407).
+                if self.minimap_dragging {
+                    self.update_minimap_drag(position.x as f32, position.y as f32);
+                }
+                // Route to UI input system.
+                self.ui.input.handle_cursor_moved(
+                    &mut self.ui_tree,
+                    position.x as f32,
+                    position.y as f32,
+                );
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
@@ -337,27 +617,35 @@ impl ApplicationHandler for App {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => y,
                     winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 20.0,
                 };
-                // Zoom-to-cursor.
-                let zoom_factor = 1.1_f32;
-                let old_zoom = self.camera.target_zoom;
-                let new_zoom = if dy > 0.0 {
-                    (old_zoom * zoom_factor).min(4.0)
-                } else if dy < 0.0 {
-                    (old_zoom / zoom_factor).max(0.25)
-                } else {
-                    old_zoom
-                };
-                if (new_zoom - old_zoom).abs() > f32::EPSILON && self.map_cell_w > 0.0 {
-                    let cx = self.cursor_pos.x as f32 - self.map_origin.0;
-                    let cy = self.cursor_pos.y as f32 - self.map_origin.1;
-                    let base_w = self.map_cell_w / old_zoom;
-                    let base_h = self.map_cell_h / old_zoom;
-                    let dx = (cx / base_w) * (1.0 / old_zoom - 1.0 / new_zoom);
-                    let dy_adj = (cy / base_h) * (1.0 / old_zoom - 1.0 / new_zoom);
-                    self.camera.target_x += dx;
-                    self.camera.target_y += dy_adj;
+                if !self.ui.input.handle_scroll(&mut self.ui_tree, dy) {
+                    // Scroll not consumed by UI — zoom-to-cursor (UI-107).
+                    // Adjust camera so the tile under cursor stays under cursor after zoom.
+                    let zoom_factor = 1.1_f32;
+                    let old_zoom = self.camera.target_zoom;
+                    let new_zoom = if dy > 0.0 {
+                        (old_zoom * zoom_factor).min(4.0)
+                    } else if dy < 0.0 {
+                        (old_zoom / zoom_factor).max(0.25)
+                    } else {
+                        old_zoom
+                    };
+                    if (new_zoom - old_zoom).abs() > f32::EPSILON && self.map_cell_w > 0.0 {
+                        // Cursor position relative to map origin in screen pixels.
+                        let cx = self.cursor_pos.x as f32 - self.map_origin.0;
+                        let cy = self.cursor_pos.y as f32 - self.map_origin.1;
+                        // base_cell = map_cell / zoom (font char size without zoom).
+                        let base_w = self.map_cell_w / old_zoom;
+                        let base_h = self.map_cell_h / old_zoom;
+                        // Offset in tiles: how far the cursor is from camera origin.
+                        // delta = cursor_px * (1/old_zoom - 1/new_zoom) / base_cell
+                        //       = cursor_px / base * (1/old - 1/new)
+                        let dx = (cx / base_w) * (1.0 / old_zoom - 1.0 / new_zoom);
+                        let dy_adj = (cy / base_h) * (1.0 / old_zoom - 1.0 / new_zoom);
+                        self.camera.target_x += dx;
+                        self.camera.target_y += dy_adj;
+                    }
+                    self.camera.target_zoom = new_zoom;
                 }
-                self.camera.target_zoom = new_zoom;
             }
             WindowEvent::CloseRequested => {
                 self.save_window_state();
@@ -377,29 +665,121 @@ impl ApplicationHandler for App {
                             return;
                         };
 
+                        // 1. Global keybindings (UI-I03) — processed before widget focus.
+                        let combo = ui::KeyCombo {
+                            modifiers: ui::ModifierFlags {
+                                shift: self.modifiers.shift_key(),
+                                ctrl: self.modifiers.control_key(),
+                                alt: self.modifiers.alt_key(),
+                            },
+                            key: kc,
+                        };
+                        if let Some(action) = self.keybindings.lookup(combo) {
+                            match action {
+                                ui::Action::Pause => {
+                                    self.paused = !self.paused;
+                                    if !self.paused {
+                                        // Reset accumulator to avoid tick burst on unpause.
+                                        self.last_frame_time = Instant::now();
+                                        self.tick_accumulator = 0.0;
+                                    }
+                                }
+                                ui::Action::SpeedSet(speed) => {
+                                    self.sim_speed = speed;
+                                }
+                                ui::Action::ToggleSidebar => {
+                                    let tab = self.ui.sidebar.active_tab.unwrap_or(0);
+                                    self.handle_tab_click(tab);
+                                }
+                                ui::Action::ConfirmModal => {
+                                    // Enter confirms the topmost modal dialog.
+                                    if !self.ui.modals.is_empty()
+                                        && let Some(action) =
+                                            self.ui.modals.confirm_action().cloned()
+                                    {
+                                        let pop = self.ui.modals.pop(&mut self.ui_tree);
+                                        self.cleanup_after_modal_pop();
+                                        self.dispatch_click(action);
+                                        drop(pop);
+                                    }
+                                }
+                                ui::Action::CloseTopmost => {
+                                    // Priority: tooltips → modals → panels → inspector → sidebar → exit.
+                                    if self.ui.input.tooltip_count() > 0 {
+                                        self.ui.input.dismiss_all_tooltips(
+                                            &mut self.ui_tree,
+                                            Instant::now(),
+                                        );
+                                    } else if !self.ui.modals.is_empty() {
+                                        self.pop_modal_with(false);
+                                    } else if self
+                                        .ui
+                                        .panels
+                                        .close_topmost(&mut self.ui_tree)
+                                        .is_some()
+                                    {
+                                        // Closed a panel — done.
+                                    } else if self.selected_entity.is_some() {
+                                        self.selected_entity = None;
+                                    } else if self.ui.sidebar.active_tab.is_some()
+                                        && self.ui.animator.target("sidebar_slide") != Some(1.0)
+                                    {
+                                        // Close active sidebar tab.
+                                        let tab = self.ui.sidebar.active_tab.unwrap_or(0);
+                                        self.handle_tab_click(tab);
+                                    } else {
+                                        self.save_window_state();
+                                        event_loop.exit();
+                                    }
+                                }
+                                // Phase UI-4: new keybinding actions (stubs for now).
+                                ui::Action::ToggleFinder => {
+                                    // TODO: toggle character finder panel (UI-402)
+                                }
+                                ui::Action::ToggleOutliner => {
+                                    // TODO: toggle outliner panel (UI-405)
+                                }
+                                ui::Action::QuickSave => {
+                                    // TODO: quick save (UI-412)
+                                }
+                                ui::Action::QuickLoad => {
+                                    // TODO: quick load (UI-412)
+                                }
+                                ui::Action::ScaleUp => {
+                                    self.ui_theme.ui_scale =
+                                        (self.ui_theme.ui_scale + 0.1).min(2.0);
+                                }
+                                ui::Action::ScaleDown => {
+                                    self.ui_theme.ui_scale =
+                                        (self.ui_theme.ui_scale - 0.1).max(0.5);
+                                }
+                            }
+                            return;
+                        }
+
+                        // 2. Modal focus scoping — restrict Tab to active tier.
+                        self.ui.input.focus_min_tier = if self.ui.modals.is_empty() {
+                            ui::ZTier::Panel
+                        } else {
+                            ui::ZTier::Modal
+                        };
+                        // Clear focus if it belongs to a root below the active tier.
+                        if let Some(focused) = self.ui.input.focused
+                            && let Some(tier) = self.ui_tree.z_tier_of_widget(focused)
+                            && tier < self.ui.input.focus_min_tier
+                        {
+                            self.ui.input.focused = None;
+                        }
+
+                        // 3. UI widget focus dispatch (Tab, ScrollList nav).
+                        if self.ui.input.handle_key_input(&mut self.ui_tree, kc, true) {
+                            return;
+                        }
+
+                        // 4. Game keys.
                         match kc {
-                            KeyCode::Space => {
-                                self.paused = !self.paused;
-                                if !self.paused {
-                                    self.last_frame_time = Instant::now();
-                                    self.tick_accumulator = 0.0;
-                                }
-                            }
-                            KeyCode::Digit1 => self.sim_speed = 1,
-                            KeyCode::Digit2 => self.sim_speed = 2,
-                            KeyCode::Digit3 => self.sim_speed = 3,
-                            KeyCode::Digit4 => self.sim_speed = 4,
-                            KeyCode::Digit5 => self.sim_speed = 5,
-                            KeyCode::Escape => {
-                                if self.selected_entity.is_some() {
-                                    self.selected_entity = None;
-                                } else {
-                                    self.save_window_state();
-                                    event_loop.exit();
-                                }
-                            }
-                            // Camera: WASD + arrows (realtime mode only).
-                            // Pan speed scales inversely with zoom.
+                            // Camera: WASD + arrows (realtime mode only) (UI-107).
+                            // Pan speed scales inversely with zoom (faster when zoomed out).
                             KeyCode::KeyW | KeyCode::ArrowUp if self.world.player.is_none() => {
                                 let speed = (3.0 / self.camera.zoom).max(1.0);
                                 self.camera.target_y -= speed;
@@ -456,6 +836,7 @@ impl ApplicationHandler for App {
                         self.panel =
                             Some(panel::PanelRenderer::new(&gpu.device, gpu.surface_format()));
                     }
+                    // Mouse click: route to UI first, then game
                     WindowEvent::MouseInput {
                         state: btn_state,
                         button,
@@ -463,9 +844,61 @@ impl ApplicationHandler for App {
                     } => {
                         let px = self.cursor_pos.x as f32;
                         let py = self.cursor_pos.y as f32;
+                        let ui_btn = match button {
+                            MouseButton::Left => ui::MouseButton::Left,
+                            MouseButton::Right => ui::MouseButton::Right,
+                            MouseButton::Middle => ui::MouseButton::Middle,
+                            _ => ui::MouseButton::Left,
+                        };
                         let pressed = btn_state == ElementState::Pressed;
 
-                        // Shift+left-click toggles player control.
+                        // Minimap drag-to-pan (UI-407): handle before UI system.
+                        if button == MouseButton::Left {
+                            if pressed {
+                                if let Some(area_id) = self.minimap_area_id
+                                    && let Some(rect) = self.ui_tree.node_rect(area_id)
+                                    && px >= rect.x
+                                    && px < rect.x + rect.width
+                                    && py >= rect.y
+                                    && py < rect.y + rect.height
+                                {
+                                    self.minimap_dragging = true;
+                                    self.update_minimap_drag(px, py);
+                                    return;
+                                }
+                            } else if self.minimap_dragging {
+                                self.minimap_dragging = false;
+                                return;
+                            }
+                        }
+
+                        // UI consumes click — don't pass to game.
+                        if self.ui.input.handle_mouse_input(
+                            &mut self.ui_tree,
+                            ui_btn,
+                            pressed,
+                            px,
+                            py,
+                        ) {
+                            // Dispatch widget click actions (UI-305).
+                            if let Some((_widget_id, action)) = self.ui.input.poll_click() {
+                                self.dispatch_click(action);
+                            }
+                            return;
+                        }
+
+                        // Map click dispatch (UI-106): translate screen coords to tile coords.
+                        if pressed && self.map_cell_w > 0.0 {
+                            let vx = (px - self.map_origin.0) / self.map_cell_w;
+                            let vy = (py - self.map_origin.1) / self.map_cell_h;
+                            if vx >= 0.0 && vy >= 0.0 {
+                                let tile_x = self.camera.x + vx as i32;
+                                let tile_y = self.camera.y + vy as i32;
+                                self.ui.input.submit_map_click(tile_x, tile_y, ui_btn);
+                            }
+                        }
+
+                        // Game: Shift+left-click toggles player control.
                         if pressed
                             && button == MouseButton::Left
                             && self.modifiers.shift_key()
@@ -530,7 +963,7 @@ impl ApplicationHandler for App {
                             }
                         }
 
-                        // Plain left-click selects entity.
+                        // Game: plain left-click selects entity for inspector (UI-I01d).
                         if pressed
                             && button == MouseButton::Left
                             && !self.modifiers.shift_key()
@@ -562,6 +995,8 @@ impl ApplicationHandler for App {
                     }
                     WindowEvent::RedrawRequested => {
                         // === Tick processing ===
+                        let sim_start = Instant::now();
+                        let mut sim_ticks_this_frame = 0u32;
                         if self.world.player.is_some() {
                             // Roguelike: advance on player action only
                             if let Some(action) = self.pending_player_action.take() {
@@ -634,6 +1069,7 @@ impl ApplicationHandler for App {
                                             // 1 action tick + cooldown wait ticks
                                             for _ in 0..1 + cd {
                                                 run_one_tick(&mut self.world);
+                                                sim_ticks_this_frame += 1;
                                             }
                                         }
                                     }
@@ -658,40 +1094,123 @@ impl ApplicationHandler for App {
                                         );
                                         for _ in 0..base {
                                             run_one_tick(&mut self.world);
+                                            sim_ticks_this_frame += 1;
                                         }
                                     }
                                 }
                             }
                         } else if !self.paused {
-                            // Realtime: fixed-timestep simulation
+                            // Realtime: fixed-timestep simulation (UI-I03: pause + speed)
                             let now = Instant::now();
                             let dt = now.duration_since(self.last_frame_time).as_secs_f64();
                             self.last_frame_time = now;
                             self.tick_accumulator += dt * self.sim_speed as f64;
 
-                            let mut ticks_this_frame = 0u32;
                             while self.tick_accumulator >= SIM_TICK_INTERVAL
-                                && ticks_this_frame < MAX_TICKS_PER_FRAME
+                                && sim_ticks_this_frame < MAX_TICKS_PER_FRAME
                             {
                                 run_one_tick(&mut self.world);
                                 self.tick_accumulator -= SIM_TICK_INTERVAL;
-                                ticks_this_frame += 1;
+                                sim_ticks_this_frame += 1;
                             }
                         } else {
                             // Paused: keep frame time current to avoid tick burst on unpause.
                             self.last_frame_time = Instant::now();
                         }
+                        let sim_us = sim_start.elapsed().as_micros() as u64;
 
                         // === Render ===
                         if let (Some(font), Some(panel)) = (self.font.as_mut(), self.panel.as_mut())
                         {
+                            let m = font.metrics();
                             let screen_w = gpu.config.width;
                             let screen_h = gpu.config.height;
                             let padding = 4.0_f32;
 
+                            // Rebuild game UI tree every frame (DD-5: full rebuild).
+                            let build_start = Instant::now();
+                            let player_name = self
+                                .world
+                                .player
+                                .and_then(|p| self.world.body.names.get(&p))
+                                .map(|n| n.value.as_str());
+                            // Persist sidebar scroll offset before destroying the tree,
+                            // since handle_scroll may have modified it during this frame.
+                            if let Some(sv_id) = self.ui.sidebar.scroll_view_id {
+                                self.ui.sidebar.scroll_offset = self.ui_tree.scroll_offset(sv_id);
+                            }
+                            self.ui_tree = ui::WidgetTree::new();
+                            self.ui_tree
+                                .set_scroll_row_alt_alpha(self.ui_theme.scroll_row_alt_alpha);
+                            self.ui_tree
+                                .set_control_border_width(self.ui_theme.control_border());
+                            let game_date = components::GameDate::from_tick(
+                                self.world.tick,
+                                &self.world.start_date,
+                            );
+                            let status_info = ui::StatusBarInfo {
+                                tick: self.world.tick.0,
+                                date: game_date.format(),
+                                population: self.world.alive.len(),
+                                is_turn_based: self.world.player.is_some(),
+                                player_name,
+                                paused: self.paused,
+                                sim_speed: self.sim_speed,
+                                keybindings: &self.keybindings,
+                                screen_width: screen_w as f32,
+                                perf: Some(self.ui_perf),
+                            };
+                            let status_bar_id = ui::build_status_bar(
+                                &mut self.ui_tree,
+                                &self.ui_theme,
+                                &status_info,
+                            );
+
+                            // Layout UI tree to compute status bar height.
+                            let screen_size = ui::Size {
+                                width: screen_w as f32,
+                                height: screen_h as f32,
+                            };
+                            self.ui_tree.layout(screen_size, font);
+                            let status_bar_h = self
+                                .ui_tree
+                                .node_rect(status_bar_id)
+                                .map(|r| r.height)
+                                .unwrap_or(m.line_height);
+
+                            // Screen layout: status bar | gap | map | gap | event log | gap
+                            // Hover tooltip is an overlay (positioned at cursor), not a fixed row.
+                            let event_log_visible = 5_usize;
+                            let event_log_h = event_log_visible as f32
+                                * self.ui_theme.scroll_item_height
+                                + self.ui_theme.status_bar_padding_v * 2.0;
+
+                            // Build event log panel (UI-I01c).
+                            let event_entries = ui::collect_event_entries(
+                                &self.world.events,
+                                &self.world.body.names,
+                            );
+                            let event_log_id = ui::build_event_log(
+                                &mut self.ui_tree,
+                                &self.ui_theme,
+                                &event_entries,
+                                screen_w as f32,
+                                event_log_h,
+                            );
+                            let event_log_y = screen_h as f32 - event_log_h - padding;
+                            self.ui_tree.set_position(
+                                event_log_id,
+                                ui::Position::Fixed {
+                                    x: 0.0,
+                                    y: event_log_y,
+                                },
+                            );
+
                             let (mcw, mch) = font.map_cell();
-                            let map_y = padding;
-                            let map_pixel_h = screen_h as f32 - padding * 2.0;
+                            let map_y = status_bar_h + padding;
+                            let map_pixel_h =
+                                (screen_h as f32 - status_bar_h - event_log_h - padding * 3.0)
+                                    .max(0.0);
                             let map_pixel_w = screen_w as f32 - padding * 2.0;
 
                             let viewport_cols = (map_pixel_w / mcw).floor().max(1.0) as usize;
@@ -713,7 +1232,7 @@ impl ApplicationHandler for App {
                                 self.camera.target_x = self.camera.x as f32;
                                 self.camera.target_y = self.camera.y as f32;
                             } else {
-                                // Smooth lerp: camera position interpolates toward target.
+                                // Smooth lerp: camera position interpolates toward target (UI-107).
                                 let lerp_factor = 0.15_f32;
                                 self.camera.zoom +=
                                     (self.camera.target_zoom - self.camera.zoom) * lerp_factor;
@@ -731,12 +1250,295 @@ impl ApplicationHandler for App {
                             let map_h = self.world.tiles.height() as i32;
                             let max_cam_x = (map_w - viewport_cols as i32).max(0);
                             let max_cam_y = (map_h - viewport_rows as i32).max(0);
+                            // Clamp both target and actual camera position.
                             self.camera.target_x =
                                 self.camera.target_x.clamp(0.0, max_cam_x as f32);
                             self.camera.target_y =
                                 self.camera.target_y.clamp(0.0, max_cam_y as f32);
                             self.camera.x = self.camera.x.clamp(0, max_cam_x);
                             self.camera.y = self.camera.y.clamp(0, max_cam_y);
+
+                            let now = Instant::now();
+                            let mut hover_tooltip_id = None;
+
+                            // Build entity inspector if selected (UI-I01d).
+                            self.inspector_close_id = None;
+                            if let Some(entity) = self.selected_entity {
+                                if let Some(info) = ui::collect_inspector_info(entity, &self.world)
+                                {
+                                    // Start slide-in when entity first selected (UI-W05).
+                                    if self.last_selected_entity != Some(entity) {
+                                        self.last_selected_entity = Some(entity);
+                                        self.ui.animator.start(
+                                            "inspector_slide",
+                                            ui::Anim {
+                                                from: 1.0,
+                                                to: 0.0,
+                                                duration: std::time::Duration::from_millis(
+                                                    self.ui_theme.anim_inspector_slide_ms,
+                                                ),
+                                                easing: ui::Easing::EaseOut,
+                                                ..ui::Anim::DEFAULT
+                                            },
+                                            now,
+                                        );
+                                    }
+
+                                    let (inspector_id, close_id) = ui::build_entity_inspector(
+                                        &mut self.ui_tree,
+                                        &self.ui_theme,
+                                        &info,
+                                    );
+
+                                    // Apply slide-in offset (UI-W05).
+                                    let slide =
+                                        self.ui.animator.get("inspector_slide", now).unwrap_or(0.0);
+                                    let target_x = screen_w as f32 - 220.0 - padding;
+                                    let slide_offset = slide * (220.0 + padding);
+                                    self.ui_tree.set_position(
+                                        inspector_id,
+                                        ui::Position::Fixed {
+                                            x: target_x + slide_offset,
+                                            y: status_bar_h + padding,
+                                        },
+                                    );
+                                    self.ui_tree
+                                        .set_on_click(close_id, ui::UiAction::InspectorClose);
+                                    self.inspector_close_id = Some(close_id);
+                                } else {
+                                    // Entity died or lost position — auto-close.
+                                    self.selected_entity = None;
+                                    self.last_selected_entity = None;
+                                    self.ui.animator.remove("inspector_slide");
+                                }
+                            } else {
+                                self.last_selected_entity = None;
+                                self.ui.animator.remove("inspector_slide");
+                            }
+
+                            // Build sidebar tab strip (always visible).
+                            let _tab_ids = ui::build_tab_strip(
+                                &mut self.ui_tree,
+                                &self.ui_theme,
+                                screen_size,
+                                self.ui.sidebar.active_tab,
+                            );
+
+                            // Build active sidebar main-tab view.
+                            let mut sidebar_panel_id = None;
+                            if let Some(tab_idx) = self.ui.sidebar.active_tab {
+                                match tab_idx {
+                                    0 => {
+                                        // Widget showcase view.
+                                        let first_entity =
+                                            self.world.alive.iter().copied().min_by_key(|e| e.0);
+                                        let entity_info = first_entity.and_then(|e| {
+                                            ui::collect_inspector_info(e, &self.world)
+                                        });
+                                        let live = ui::SidebarInfo {
+                                            entity_info: entity_info.as_ref(),
+                                            tick: self.world.tick.0,
+                                            population: self.world.alive.len(),
+                                        };
+                                        let (view_id, view_sv) = ui::build_showcase_view(
+                                            &mut self.ui_tree,
+                                            &self.ui_theme,
+                                            &self.keybindings,
+                                            &live,
+                                            screen_size,
+                                            self.ui.sidebar.scroll_offset,
+                                        );
+                                        sidebar_panel_id = Some(view_id);
+                                        self.ui.sidebar.scroll_view_id = Some(view_sv);
+                                    }
+                                    n => {
+                                        // Placeholder views for tabs 1+.
+                                        let pid = ui::build_placeholder_view(
+                                            &mut self.ui_tree,
+                                            &self.ui_theme,
+                                            screen_size,
+                                            n,
+                                        );
+                                        sidebar_panel_id = Some(pid);
+                                        self.ui.sidebar.scroll_view_id = None;
+                                    }
+                                }
+                            }
+
+                            // Minimap (UI-407).
+                            self.minimap_panel_id = None;
+                            self.minimap_area_id = None;
+                            if self.minimap_texture.is_some() {
+                                let minimap_info = ui::MinimapInfo {
+                                    map_width: self.world.tiles.width() as u32,
+                                    map_height: self.world.tiles.height() as u32,
+                                    camera_x: self.camera.x as f32,
+                                    camera_y: self.camera.y as f32,
+                                    viewport_w: viewport_cols as f32,
+                                    viewport_h: viewport_rows as f32,
+                                    screen_width: screen_w as f32,
+                                    screen_height: screen_h as f32,
+                                };
+                                let (panel_id, area_id) = ui::build_minimap(
+                                    &mut self.ui_tree,
+                                    &self.ui_theme,
+                                    &minimap_info,
+                                );
+                                self.minimap_panel_id = Some(panel_id);
+                                self.minimap_area_id = Some(area_id);
+                            }
+
+                            // Pause overlay (UI-105): dim layer when paused.
+                            if self.paused {
+                                ui::build_pause_overlay(
+                                    &mut self.ui_tree,
+                                    screen_w as f32,
+                                    screen_h as f32,
+                                );
+                            }
+
+                            let build_us = build_start.elapsed().as_micros() as u64;
+
+                            // Re-layout tree with all widgets included.
+                            let layout_start = Instant::now();
+                            self.ui_tree.layout(screen_size, font);
+
+                            // Apply sidebar slide animation.
+                            if let Some(panel_id) = sidebar_panel_id {
+                                let slide =
+                                    self.ui.animator.get("sidebar_slide", now).unwrap_or(0.0);
+                                let base_x =
+                                    screen_w as f32 - ui::MAIN_TAB_WIDTH - ui::SIDEBAR_MARGIN;
+                                if slide > 0.0 {
+                                    // Slide offset: panel must travel full width + margin
+                                    // to clear the screen edge.
+                                    let offset = slide * (ui::MAIN_TAB_WIDTH + ui::SIDEBAR_MARGIN);
+                                    self.ui_tree.set_position(
+                                        panel_id,
+                                        ui::Position::Fixed {
+                                            x: base_x + offset,
+                                            y: 4.0,
+                                        },
+                                    );
+                                    // Need re-layout after position change.
+                                    self.ui_tree.layout(screen_size, font);
+                                }
+                                // Hide animation complete: panel fully off-screen.
+                                if self.ui.animator.target("sidebar_slide") == Some(1.0)
+                                    && !self.ui.animator.is_active("sidebar_slide", now)
+                                {
+                                    self.ui.sidebar.active_tab = None;
+                                    self.ui.animator.remove("sidebar_slide");
+                                    self.ui_tree.remove(panel_id);
+                                }
+                            }
+
+                            // Build hover tooltip after all UI is laid out, gated
+                            // on cursor not being over any UI widget (UI-I01b).
+                            let cursor_over_ui = self
+                                .ui_tree
+                                .hit_test(self.cursor_pos.x as f32, self.cursor_pos.y as f32)
+                                .is_some();
+                            if !cursor_over_ui {
+                                let px = self.cursor_pos.x as f32;
+                                let py = self.cursor_pos.y as f32;
+                                let vx = (px - self.map_origin.0) / self.map_cell_w;
+                                let vy = (py - self.map_origin.1) / self.map_cell_h;
+                                if vx >= 0.0
+                                    && vy >= 0.0
+                                    && (vx as usize) < viewport_cols
+                                    && (vy as usize) < viewport_rows
+                                {
+                                    let tile_x = self.camera.x + vx as i32;
+                                    let tile_y = self.camera.y + vy as i32;
+                                    if let Some(info) =
+                                        collect_hover_info(&self.world, tile_x, tile_y)
+                                    {
+                                        let tooltip_id = ui::build_hover_tooltip(
+                                            &mut self.ui_tree,
+                                            &self.ui_theme,
+                                            &info,
+                                            (px, py),
+                                            screen_size,
+                                            font,
+                                        );
+                                        hover_tooltip_id = Some(tooltip_id);
+
+                                        // Start fade-in only on first appearance (no previous
+                                        // tile), not when sliding between adjacent tiles.
+                                        let current_tile = (tile_x, tile_y);
+                                        let first_hover = self.last_hover_tile.is_none();
+                                        if self.last_hover_tile != Some(current_tile) {
+                                            self.last_hover_tile = Some(current_tile);
+                                            if first_hover {
+                                                self.ui.animator.start(
+                                                    "hover_tooltip",
+                                                    ui::Anim {
+                                                        from: 0.0,
+                                                        to: 1.0,
+                                                        duration: std::time::Duration::from_millis(
+                                                            self.ui_theme.anim_tooltip_fade_ms,
+                                                        ),
+                                                        easing: ui::Easing::EaseOut,
+                                                        ..ui::Anim::DEFAULT
+                                                    },
+                                                    now,
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if hover_tooltip_id.is_none() {
+                                self.last_hover_tile = None;
+                                self.ui.animator.remove("hover_tooltip");
+                            }
+                            if hover_tooltip_id.is_some() {
+                                self.ui_tree.layout(screen_size, font);
+                            }
+                            if let Some(tooltip_id) = hover_tooltip_id {
+                                let opacity =
+                                    self.ui.animator.get("hover_tooltip", now).unwrap_or(1.0);
+                                if opacity < 1.0 {
+                                    self.ui_tree.set_subtree_opacity(tooltip_id, opacity);
+                                }
+                            }
+
+                            // Apply button hover highlight on inspector close button (UI-W05).
+                            if let Some(close_id) = self.inspector_close_id {
+                                let hit = self
+                                    .ui_tree
+                                    .hit_test(self.cursor_pos.x as f32, self.cursor_pos.y as f32);
+                                let is_hovered = hit == Some(close_id);
+                                let target = if is_hovered { 1.0 } else { 0.0 };
+                                if self.ui.animator.target("btn_hover_close") != Some(target) {
+                                    let current =
+                                        self.ui.animator.get("btn_hover_close", now).unwrap_or(0.0);
+                                    self.ui.animator.start(
+                                        "btn_hover_close",
+                                        ui::Anim {
+                                            from: current,
+                                            to: target,
+                                            duration: std::time::Duration::from_millis(
+                                                self.ui_theme.anim_hover_highlight_ms,
+                                            ),
+                                            easing: ui::Easing::EaseOut,
+                                            ..ui::Anim::DEFAULT
+                                        },
+                                        now,
+                                    );
+                                }
+                                let hover_alpha =
+                                    self.ui.animator.get("btn_hover_close", now).unwrap_or(0.0);
+                                let alpha = self.ui_theme.anim_hover_highlight_alpha * hover_alpha;
+                                self.ui_tree.set_widget_bg_alpha(close_id, alpha);
+                            } else {
+                                self.ui.animator.remove("btn_hover_close");
+                            }
+
+                            // Clean up completed animations (UI-W05).
+                            self.ui.animator.gc(now);
+                            self.ui.panels.flush_closed(&mut self.ui_tree, now);
 
                             let map_text = render::render_world_to_string(
                                 &self.world,
@@ -746,17 +1548,26 @@ impl ApplicationHandler for App {
                                 viewport_rows,
                             );
 
-                            // Panels: map overlays.
+                            let layout_us = layout_start.elapsed().as_micros() as u64;
+
+                            // Emit draw commands from UI tree.
+                            let draw_start = Instant::now();
+                            let mut draw_list = ui::DrawList::new();
+                            self.ui_tree.draw(&mut draw_list, font);
+                            let draw_us = draw_start.elapsed().as_micros() as u64;
+
+                            // Panels: map overlays first, then UI panels on top.
+                            let render_start = Instant::now();
+                            panel.begin_frame(&gpu.queue, screen_w, screen_h);
+                            let no_border = [0.0_f32; 4];
                             let sw = screen_w as f32;
                             let sh = screen_h as f32;
-                            let no_border = [0.0_f32; 4];
                             let no_clip_min = [0.0_f32, 0.0];
                             let no_clip_max = [sw, sh];
 
-                            panel.begin_frame(&gpu.queue, screen_w, screen_h);
-
-                            // Map overlay: hover tile highlight.
-                            {
+                            // Map overlay: hover tile highlight (UI-I02).
+                            // Suppressed when cursor is over a UI widget.
+                            if !cursor_over_ui {
                                 let px = self.cursor_pos.x as f32;
                                 let py = self.cursor_pos.y as f32;
                                 let vx = (px - self.map_origin.0) / mcw;
@@ -773,7 +1584,7 @@ impl ApplicationHandler for App {
                                         oy,
                                         mcw,
                                         mch,
-                                        OVERLAY_HOVER,
+                                        self.ui_theme.overlay_hover,
                                         no_border,
                                         0.0,
                                         0.0,
@@ -783,7 +1594,7 @@ impl ApplicationHandler for App {
                                 }
                             }
 
-                            // Map overlay: selected entity highlight.
+                            // Map overlay: selected entity highlight (UI-I02).
                             if let Some(entity) = self.selected_entity
                                 && let Some(pos) = self.world.body.positions.get(&entity)
                             {
@@ -801,7 +1612,7 @@ impl ApplicationHandler for App {
                                         oy,
                                         mcw,
                                         mch,
-                                        OVERLAY_SELECTION,
+                                        self.ui_theme.overlay_selection,
                                         no_border,
                                         0.0,
                                         0.0,
@@ -826,7 +1637,7 @@ impl ApplicationHandler for App {
                                             oy,
                                             mcw,
                                             mch,
-                                            OVERLAY_PATH,
+                                            self.ui_theme.overlay_path,
                                             no_border,
                                             0.0,
                                             0.0,
@@ -837,18 +1648,176 @@ impl ApplicationHandler for App {
                                 }
                             }
 
+                            // Map overlay panels are already in the buffer.
                             let map_overlay_panel_vertices = panel.pending_vertex_count();
 
-                            // Text: map ASCII.
+                            // UI: add per-root panels and text in back-to-front order.
+                            // Text: map text first, then UI text per-root.
                             font.begin_frame(&gpu.queue, screen_w, screen_h, FG_SRGB, BG_SRGB);
+
+                            // Map ASCII text (renders under all UI).
                             let fg4 = [FG_SRGB[0], FG_SRGB[1], FG_SRGB[2], 1.0];
                             font.prepare_map(&map_text, padding, map_y, fg4);
                             let map_text_vertices = font.pending_vertex_count();
 
+                            let root_ids = self.ui_tree.roots();
+                            let mut sprite_after_root_panels = None;
+                            let mut root_layers = Vec::with_capacity(draw_list.root_slices.len());
+                            for (root_idx, slice) in draw_list.root_slices.iter().enumerate() {
+                                if root_ids.get(root_idx) == self.minimap_panel_id.as_ref() {
+                                    sprite_after_root_panels = Some(root_idx);
+                                }
+                                // Panels for this root
+                                let ps = panel.pending_vertex_count();
+                                for cmd in &draw_list.panels[slice.panels.clone()] {
+                                    let (cmin, cmax) = match &cmd.clip {
+                                        Some(r) => ([r.x, r.y], [r.x + r.width, r.y + r.height]),
+                                        None => (no_clip_min, no_clip_max),
+                                    };
+                                    panel.add_panel(
+                                        cmd.x,
+                                        cmd.y,
+                                        cmd.width,
+                                        cmd.height,
+                                        cmd.bg_color,
+                                        cmd.border_color,
+                                        cmd.border_width,
+                                        cmd.shadow_width,
+                                        cmin,
+                                        cmax,
+                                    );
+                                }
+                                let pe = panel.pending_vertex_count();
+
+                                // Text for this root
+                                let ts = font.pending_vertex_count();
+                                for cmd in &draw_list.texts[slice.texts.clone()] {
+                                    let (cmin, cmax) = match &cmd.clip {
+                                        Some(r) => ([r.x, r.y], [r.x + r.width, r.y + r.height]),
+                                        None => (no_clip_min, no_clip_max),
+                                    };
+                                    font.prepare_text_with_font(
+                                        &cmd.text,
+                                        [cmd.x, cmd.y],
+                                        cmd.color,
+                                        cmd.font_family.family_name(),
+                                        cmd.font_size,
+                                        [cmin, cmax],
+                                    );
+                                }
+                                for cmd in &draw_list.rich_texts[slice.rich_texts.clone()] {
+                                    let (cmin, cmax) = match &cmd.clip {
+                                        Some(r) => ([r.x, r.y], [r.x + r.width, r.y + r.height]),
+                                        None => (no_clip_min, no_clip_max),
+                                    };
+                                    let spans: Vec<(String, [f32; 4], &str)> = cmd
+                                        .spans
+                                        .iter()
+                                        .map(|s| {
+                                            (s.text.clone(), s.color, s.font_family.family_name())
+                                        })
+                                        .collect();
+                                    font.prepare_rich_text(
+                                        &spans,
+                                        [cmd.x, cmd.y],
+                                        cmd.font_size,
+                                        [cmin, cmax],
+                                    );
+                                }
+                                let te = font.pending_vertex_count();
+
+                                root_layers.push(((ps, pe - ps), (ts, te - ts)));
+                            }
                             panel.flush(&gpu.queue, &gpu.device);
                             font.flush(&gpu.queue, &gpu.device);
 
-                            gpu.render(font, panel, map_text_vertices, map_overlay_panel_vertices);
+                            // Minimap sprite pass (UI-407).
+                            let sprite_vertex_count = if let Some(sprites) =
+                                self.minimap_sprites.as_mut()
+                            {
+                                if let Some(tex) = self.minimap_texture.as_mut() {
+                                    let cam_cx = self.camera.x as f32 + viewport_cols as f32 / 2.0;
+                                    let cam_cy = self.camera.y as f32 + viewport_rows as f32 / 2.0;
+                                    tex.render_frame(
+                                        cam_cx,
+                                        cam_cy,
+                                        viewport_cols as f32,
+                                        viewport_rows as f32,
+                                        map_w as u32,
+                                        map_h as u32,
+                                    );
+                                    sprites.upload_atlas(&gpu.queue, tex.pixels());
+                                }
+                                sprites.begin_frame(&gpu.queue, screen_w, screen_h);
+                                if let Some(area_id) = self.minimap_area_id
+                                    && let Some(rect) = self.ui_tree.node_rect(area_id)
+                                {
+                                    sprites.add_sprite(
+                                        rect.x,
+                                        rect.y,
+                                        rect.width,
+                                        rect.height,
+                                        0.0,
+                                        0.0,
+                                        1.0,
+                                        1.0,
+                                        [1.0, 1.0, 1.0, 1.0],
+                                    );
+                                }
+                                sprites.flush(&gpu.queue, &gpu.device)
+                            } else {
+                                0
+                            };
+
+                            let layers = FrameLayers {
+                                map_text_vertices,
+                                map_overlay_panel_vertices,
+                                root_layers,
+                                sprite_after_root_panels,
+                            };
+                            gpu.render(
+                                font,
+                                panel,
+                                &layers,
+                                self.minimap_sprites.as_ref(),
+                                sprite_vertex_count,
+                            );
+                            let render_us = render_start.elapsed().as_micros() as u64;
+
+                            // Capture perf metrics (UI-505) — one-frame lag.
+                            self.ui_perf = ui::UiPerfMetrics {
+                                sim_us,
+                                sim_ticks: sim_ticks_this_frame,
+                                build_us,
+                                layout_us,
+                                draw_us,
+                                render_us,
+                                widget_count: self.ui_tree.widget_count(),
+                                panel_cmds: draw_list.panels.len(),
+                                text_cmds: draw_list.texts.len() + draw_list.rich_texts.len(),
+                                sprite_cmds: draw_list.sprites.len(),
+                            };
+
+                            // Warn when any phase exceeds 2ms (UI-505).
+                            if sim_us > 2000 {
+                                log::warn!(
+                                    "Sim phase slow: {}us ({} ticks)",
+                                    sim_us,
+                                    sim_ticks_this_frame,
+                                );
+                            }
+                            if build_us > 2000 {
+                                log::warn!("UI build phase slow: {}us", build_us);
+                            }
+                            if layout_us > 2000 {
+                                log::warn!("UI layout phase slow: {}us", layout_us);
+                            }
+                            if draw_us > 2000 {
+                                log::warn!("UI draw phase slow: {}us", draw_us);
+                            }
+                            if render_us > 2000 {
+                                log::warn!("UI render phase slow: {}us", render_us);
+                            }
                         }
                         gpu.window.request_redraw();
                     }
@@ -918,7 +1887,11 @@ fn main() {
 
     let settings = Settings::load();
 
+    // Minimap texture (UI-407): blank base, viewport indicator stamped per-frame.
+    let minimap_texture = ui::MinimapTexture::new();
+
     let event_loop = EventLoop::new().expect("create event loop");
+    let ui_theme = ui::Theme::default();
     let mut app = App {
         gpu: None,
         font: None,
@@ -934,9 +1907,41 @@ fn main() {
         map_origin: (0.0, 0.0),
         map_cell_w: 0.0,
         map_cell_h: 0.0,
+        ui: ui::UiContext {
+            input: ui::UiState::new(),
+            animator: ui::Animator::new(),
+            modals: ui::ModalStack::new(),
+            panels: ui::PanelManager::new(),
+            scroll: std::collections::HashMap::new(),
+            sidebar: ui::SidebarState {
+                active_tab: if std::env::args().any(|a| a == "--sidebar") {
+                    Some(0)
+                } else {
+                    None
+                },
+                scroll_offset: 0.0,
+                scroll_view_id: None,
+            },
+        },
+        ui_tree: {
+            let mut t = ui::WidgetTree::new();
+            t.set_control_border_width(ui_theme.control_border());
+            t
+        },
+        ui_theme,
+        last_hover_tile: None,
+        last_selected_entity: None,
+        keybindings: ui::KeyBindings::defaults(),
         paused: false,
         sim_speed: 1,
         selected_entity: None,
+        inspector_close_id: None,
+        ui_perf: ui::UiPerfMetrics::default(),
+        minimap_sprites: None, // created in resumed() when GPU is available
+        minimap_texture: Some(minimap_texture),
+        minimap_panel_id: None,
+        minimap_area_id: None,
+        minimap_dragging: false,
         viewport_cols: 0,
         viewport_rows: 0,
     };

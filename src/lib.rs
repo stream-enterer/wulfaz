@@ -8,6 +8,8 @@ pub mod registry;
 pub mod render;
 pub mod rng;
 pub mod settings;
+pub mod sprite_renderer;
 pub mod systems;
 pub mod tile_map;
+pub mod ui;
 pub mod world;
