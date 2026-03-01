@@ -7,7 +7,7 @@ use shapefile::dbase::FieldValue;
 
 use crate::registry::{
     Address, BlockData, BlockId, BlockRegistry, BuildingData, BuildingId, BuildingRegistry,
-    Occupant, StreetRegistry, estimate_floor_count,
+    Occupant, QuartierRegistry, StreetRegistry, estimate_floor_count,
 };
 use crate::tile_map::{Terrain, TileMap};
 use crate::world::World;
@@ -1099,6 +1099,12 @@ pub fn apply_paris_ron(world: &mut World, data: ParisMapRon) {
     world.gis.buildings = buildings;
     world.gis.blocks = blocks;
     world.gis.quartier_names = quartier_names;
+    world.gis.quartiers = QuartierRegistry::build_from_registries(
+        &world.gis.quartier_names,
+        &world.gis.buildings,
+        &world.gis.blocks,
+        world.gis.active_year,
+    );
 }
 
 // --- Address + Occupant loading (A07) ---
@@ -1788,6 +1794,26 @@ pub fn load_paris_binary(world: &mut World, tiles_path: &str, meta_path: &str) {
     log::info!(
         "  {} streets reconstructed",
         world.gis.streets.streets.len()
+    );
+
+    // Build quartier aggregates from building + block registries
+    world.gis.quartiers = QuartierRegistry::build_from_registries(
+        &world.gis.quartier_names,
+        &world.gis.buildings,
+        &world.gis.blocks,
+        world.gis.active_year,
+    );
+    let with_buildings = world
+        .gis
+        .quartiers
+        .quartiers
+        .values()
+        .filter(|q| q.building_count > 0)
+        .count();
+    log::info!(
+        "  {} quartiers indexed ({} with buildings)",
+        world.gis.quartiers.quartiers.len(),
+        with_buildings,
     );
 
     log::info!(

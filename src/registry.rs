@@ -188,6 +188,128 @@ impl BlockRegistry {
     }
 }
 
+/// Quartier identifier, 1-based index matching tile_map encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct QuartierId(pub u8);
+
+pub struct QuartierData {
+    pub id: QuartierId,
+    pub name: String,
+    /// Tile-coordinate bounding box from all BATI=1 building tiles.
+    pub min_x: i32,
+    pub min_y: i32,
+    pub max_x: i32,
+    pub max_y: i32,
+    pub building_count: u32,
+    /// Sum of superficie (m²) from BATI=1 buildings.
+    pub total_building_area_m2: f32,
+    /// Occupant count at active_year via `occupants_nearest(year, 20)`.
+    pub occupant_count: u32,
+    /// Sub-district block grouping, sorted by `BlockId.0`.
+    pub blocks: Vec<BlockId>,
+}
+
+#[derive(Default)]
+pub struct QuartierRegistry {
+    pub quartiers: HashMap<QuartierId, QuartierData>,
+    pub name_to_id: HashMap<String, QuartierId>,
+}
+
+impl QuartierRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Build quartier aggregates from existing registries.
+    /// `quartier_names` is the 0-indexed Vec where index+1 = QuartierId.
+    pub fn build_from_registries(
+        quartier_names: &[String],
+        buildings: &BuildingRegistry,
+        blocks: &BlockRegistry,
+        active_year: u16,
+    ) -> Self {
+        let mut registry = Self::new();
+
+        // Initialize one QuartierData per name with sentinel bounds
+        for (i, name) in quartier_names.iter().enumerate() {
+            let id = QuartierId((i + 1) as u8);
+            registry.name_to_id.insert(name.clone(), id);
+            registry.quartiers.insert(
+                id,
+                QuartierData {
+                    id,
+                    name: name.clone(),
+                    min_x: i32::MAX,
+                    min_y: i32::MAX,
+                    max_x: i32::MIN,
+                    max_y: i32::MIN,
+                    building_count: 0,
+                    total_building_area_m2: 0.0,
+                    occupant_count: 0,
+                    blocks: Vec::new(),
+                },
+            );
+        }
+
+        // Aggregate building data
+        for bdata in &buildings.buildings {
+            if bdata.bati != 1 {
+                continue;
+            }
+            let Some(&qid) = registry.name_to_id.get(&bdata.quartier) else {
+                continue;
+            };
+            let Some(qdata) = registry.quartiers.get_mut(&qid) else {
+                continue;
+            };
+
+            qdata.building_count += 1;
+            qdata.total_building_area_m2 += bdata.superficie;
+
+            // Count occupants at active_year
+            if let Some((_year, occupants)) = bdata.occupants_nearest(active_year, 20) {
+                qdata.occupant_count += occupants.len() as u32;
+            }
+
+            // Expand bounds from building tiles
+            for &(tx, ty) in &bdata.tiles {
+                qdata.min_x = qdata.min_x.min(tx);
+                qdata.min_y = qdata.min_y.min(ty);
+                qdata.max_x = qdata.max_x.max(tx);
+                qdata.max_y = qdata.max_y.max(ty);
+            }
+        }
+
+        // Assign blocks to quartiers
+        for block in blocks.blocks.values() {
+            if let Some(&qid) = registry.name_to_id.get(&block.quartier)
+                && let Some(qdata) = registry.quartiers.get_mut(&qid)
+            {
+                qdata.blocks.push(block.id);
+            }
+        }
+
+        // Sort block vecs by BlockId.0 for determinism
+        for qdata in registry.quartiers.values_mut() {
+            qdata.blocks.sort_by_key(|b| b.0);
+        }
+
+        registry
+    }
+
+    #[allow(dead_code)] // Used in tests; needed by C02 LOD zone framework
+    pub fn get(&self, id: QuartierId) -> Option<&QuartierData> {
+        self.quartiers.get(&id)
+    }
+
+    #[allow(dead_code)] // Used in tests; needed by C02 LOD zone framework
+    pub fn get_by_name(&self, name: &str) -> Option<&QuartierData> {
+        self.name_to_id
+            .get(name)
+            .and_then(|id| self.quartiers.get(id))
+    }
+}
+
 /// Sequential street identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StreetId(pub u16);
@@ -530,5 +652,185 @@ mod tests {
     fn test_occupants_nearest_empty_building() {
         let b = make_building_with_years(&[]);
         assert!(b.occupants_nearest(1839, 20).is_none());
+    }
+
+    fn make_test_building(
+        id: BuildingId,
+        quartier: &str,
+        bati: u8,
+        superficie: f32,
+        tiles: Vec<(i32, i32)>,
+        occupants_by_year: HashMap<u16, Vec<Occupant>>,
+    ) -> BuildingData {
+        BuildingData {
+            id,
+            identif: id.0,
+            quartier: quartier.into(),
+            superficie,
+            bati,
+            nom_bati: None,
+            num_ilot: String::new(),
+            perimetre: 0.0,
+            geox: 0.0,
+            geoy: 0.0,
+            date_coyec: None,
+            floor_count: estimate_floor_count(superficie),
+            tiles,
+            addresses: Vec::new(),
+            occupants_by_year,
+        }
+    }
+
+    #[test]
+    fn test_quartier_registry_positive() {
+        let quartier_names = vec!["Arcis".to_string(), "Marais".to_string()];
+
+        let mut buildings = BuildingRegistry::new();
+        // Arcis: 2 buildings, no occupants
+        let id1 = buildings.next_id();
+        buildings.insert(make_test_building(
+            id1,
+            "Arcis",
+            1,
+            100.0,
+            vec![(10, 20), (11, 20), (12, 21)],
+            HashMap::new(),
+        ));
+        let id2 = buildings.next_id();
+        buildings.insert(make_test_building(
+            id2,
+            "Arcis",
+            1,
+            200.0,
+            vec![(50, 60)],
+            HashMap::new(),
+        ));
+        // Marais: 1 building with 2 occupants at year 1845
+        let id3 = buildings.next_id();
+        let mut occ_map = HashMap::new();
+        occ_map.insert(
+            1845,
+            vec![
+                Occupant {
+                    name: "Jean".into(),
+                    activity: "boulanger".into(),
+                    naics: "311".into(),
+                },
+                Occupant {
+                    name: "Marie".into(),
+                    activity: "couturière".into(),
+                    naics: "315".into(),
+                },
+            ],
+        );
+        buildings.insert(make_test_building(
+            id3,
+            "Marais",
+            1,
+            150.0,
+            vec![(30, 40), (31, 40)],
+            occ_map,
+        ));
+
+        let mut blocks = BlockRegistry::new();
+        blocks.insert(BlockData {
+            id: BlockId(1),
+            id_ilots: "IL01".into(),
+            quartier: "Arcis".into(),
+            aire: 5000.0,
+            ilots_vass: "1".into(),
+            buildings: vec![id1],
+        });
+        blocks.insert(BlockData {
+            id: BlockId(2),
+            id_ilots: "IL02".into(),
+            quartier: "Marais".into(),
+            aire: 3000.0,
+            ilots_vass: "2".into(),
+            buildings: vec![id3],
+        });
+
+        let reg =
+            QuartierRegistry::build_from_registries(&quartier_names, &buildings, &blocks, 1845);
+
+        // Arcis
+        let arcis = reg.get_by_name("Arcis").unwrap();
+        assert_eq!(arcis.building_count, 2);
+        assert!((arcis.total_building_area_m2 - 300.0).abs() < 0.01);
+        assert_eq!(arcis.occupant_count, 0);
+        assert_eq!(arcis.min_x, 10);
+        assert_eq!(arcis.min_y, 20);
+        assert_eq!(arcis.max_x, 50);
+        assert_eq!(arcis.max_y, 60);
+        assert_eq!(arcis.blocks, vec![BlockId(1)]);
+
+        // Marais
+        let marais = reg.get_by_name("Marais").unwrap();
+        assert_eq!(marais.building_count, 1);
+        assert!((marais.total_building_area_m2 - 150.0).abs() < 0.01);
+        assert_eq!(marais.occupant_count, 2);
+        assert_eq!(marais.min_x, 30);
+        assert_eq!(marais.max_x, 31);
+        assert_eq!(marais.blocks, vec![BlockId(2)]);
+    }
+
+    #[test]
+    fn test_quartier_registry_negative() {
+        let quartier_names = vec!["Arcis".to_string()];
+
+        let mut buildings = BuildingRegistry::new();
+        // BATI=2 building — should be skipped
+        let id1 = buildings.next_id();
+        buildings.insert(make_test_building(
+            id1,
+            "Arcis",
+            2,
+            500.0,
+            vec![(1, 1)],
+            HashMap::new(),
+        ));
+        // Unknown quartier — should be skipped
+        let id2 = buildings.next_id();
+        buildings.insert(make_test_building(
+            id2,
+            "UnknownQuartier",
+            1,
+            80.0,
+            vec![(5, 5)],
+            HashMap::new(),
+        ));
+
+        let blocks = BlockRegistry::new();
+        let reg =
+            QuartierRegistry::build_from_registries(&quartier_names, &buildings, &blocks, 1845);
+
+        let arcis = reg.get_by_name("Arcis").unwrap();
+        assert_eq!(arcis.building_count, 0);
+        assert_eq!(arcis.total_building_area_m2, 0.0);
+        assert_eq!(arcis.occupant_count, 0);
+        // Sentinel bounds preserved (no valid buildings expanded them)
+        assert_eq!(arcis.min_x, i32::MAX);
+        assert_eq!(arcis.max_x, i32::MIN);
+    }
+
+    #[test]
+    fn test_quartier_registry_lookup() {
+        let quartier_names = vec!["Arcis".to_string()];
+        let buildings = BuildingRegistry::new();
+        let blocks = BlockRegistry::new();
+        let reg =
+            QuartierRegistry::build_from_registries(&quartier_names, &buildings, &blocks, 1845);
+
+        // Valid lookup
+        assert!(reg.get(QuartierId(1)).is_some());
+        assert_eq!(reg.get(QuartierId(1)).unwrap().name, "Arcis");
+
+        // Invalid id
+        assert!(reg.get(QuartierId(0)).is_none());
+        assert!(reg.get(QuartierId(255)).is_none());
+
+        // Name lookup
+        assert!(reg.get_by_name("Arcis").is_some());
+        assert!(reg.get_by_name("Nonexistent").is_none());
     }
 }

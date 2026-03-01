@@ -11,7 +11,7 @@ const SPATIAL_CELL_SHIFT: i32 = 4; // 2^4 = 16m cells
 pub type SpatialGrid = HashMap<(i32, i32), Vec<(Entity, i32, i32)>>;
 
 use crate::events::EventLog;
-use crate::registry::{BlockRegistry, BuildingRegistry, StreetRegistry};
+use crate::registry::{BlockRegistry, BuildingRegistry, QuartierRegistry, StreetRegistry};
 use crate::rng::create_rng;
 use crate::systems::decisions::UtilityConfig;
 use crate::tile_map::{PathWorkspace, TileMap};
@@ -99,6 +99,8 @@ pub struct GisTables {
     pub quartier_names: Vec<String>,
     /// Street registry, reconstructed from building address data.
     pub streets: StreetRegistry,
+    /// Quartier aggregate data, rebuilt from buildings/blocks at load time.
+    pub quartiers: QuartierRegistry,
     /// Active SoDUCo snapshot year for occupant display.
     pub active_year: u16,
     // Per-entity GIS links
@@ -113,6 +115,7 @@ impl GisTables {
             blocks: BlockRegistry::new(),
             quartier_names: Vec::new(),
             streets: StreetRegistry::new(),
+            quartiers: QuartierRegistry::new(),
             active_year: 1845,
             home_buildings: HashMap::new(),
             workplaces: HashMap::new(),
