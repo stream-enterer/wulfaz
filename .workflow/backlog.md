@@ -35,25 +35,13 @@ Goal: ~200 entities with full AI on the real map.
   - Small buildings (<15 floor tiles) get minimal furnishing (bed, table).
   - Requires new Terrain variants for furniture types (or a separate furniture tile layer in Chunk).
 
-- **SCALE-B03** — GIS-aware entity spawning. Needs: A07 (done), B05. **BLOCKED: design review required.**
-  - The building registry (populated by A03 + A07) already knows each building's occupants, addresses, and NAICS categories. This task spawns actual entities from that data.
-  - For known occupants (3.7% of population): spawn entity with real name, real occupation, at their building's floor tiles. Position from building's tile list in the registry.
-  - For generated occupants (96.3%): see C05 for the procedural generation rules.
-  - Single neighborhood first: filter to one QUARTIER (recommend "Arcis" — 825 buildings, dense, central, ~150m×300m).
-  - The full data pipeline reference (address → building → people) is documented in SCALE-A07 and `~/Development/paris/PROJECT.md`.
 
 ## Phase C — Simulation LOD (1M Population)
 
 Goal: Full city population. ~4K active, rest statistical.
 Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
 
-- **SCALE-C01** — District definitions from GIS. Blocks: C02, C04.
-  - 36 quartiers defined by the `QUARTIER` field on every building and block polygon. No separate quartier boundary geometry needed — derive bounds from the bounding box of all buildings with that QUARTIER value.
-  - Quartier sizes range from 265 buildings (Palais de Justice) to 2,391 buildings (Temple).
-  - Sub-district: blocks (`NUM_ILOT` field on buildings, `ID_ILOTS` on plot polygons) group ~30-100 buildings each. Use as LOD sub-units if quartier granularity is too coarse.
-  - Per-district density derivable from: building count, total building area (SUPERFICIE sum), and occupant count from building registry (baked in by A07).
-
-- **SCALE-C02** — LOD zone framework. Active/Nearby/Statistical derived from camera + district bounds. Needs: C01. Blocks: C03, C05.
+- **SCALE-C02** — LOD zone framework. Active/Nearby/Statistical derived from camera + district bounds. Needs: C01 (done). Blocks: C03, C05.
   - Must accept a `force_statistical: bool` override (from speed settings). When true, all zones become Statistical regardless of camera position. Used by speeds 3-5 in the non-linear speed model (see `SURVIVAL_MIGRATION.md` §1.1b).
   - Zone transitions triggered by both camera movement AND speed changes. Speed increase (1→3) = dehydrate all. Speed decrease (3→1) = hydrate around camera.
 
@@ -64,7 +52,7 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
   - Temperature (Phase 1) runs per-chunk with dirty flags — zone filtering is chunk-level, not entity-level.
   - Note: "Hunger" system is deleted by survival migration. This item refers to the replacement `run_survival()` system.
 
-- **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01, A07 (done). **BLOCKED: design review required.**
+- **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01 (done), A07 (done). **BLOCKED: design review required.**
   - Seed `population_by_type` from NAICS distribution per quartier. 22 industry categories. Aggregate from building registry occupant data (baked in by A07 preprocessor), not from raw GeoPackage.
   - City-wide distribution (1845): Manufacturing 18%, Food stores 13.5%, Clothing 11.7%, Furniture 8.2%, Legal 5.9%, Health 5.5%, Rentiers 4.5%, Arts 3.9%, Construction 3.6%. Use these as priors, adjust per quartier from actual registry data.
   - **Survival aggregates (required for speeds 3-5):** Each district must track aggregate survival state sufficient to model calorie burn, food consumption, and death without per-entity simulation. Minimum fields per district:
