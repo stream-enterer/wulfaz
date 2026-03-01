@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use rand::rngs::StdRng;
 
 use crate::components::*;
+use crate::lod::{self, LodTransition, LodZone};
 
 /// Spatial index cell size in tiles (meters). Power of 2 for bit-shift.
 const SPATIAL_CELL_SHIFT: i32 = 4; // 2^4 = 16m cells
@@ -11,7 +12,9 @@ const SPATIAL_CELL_SHIFT: i32 = 4; // 2^4 = 16m cells
 pub type SpatialGrid = HashMap<(i32, i32), Vec<(Entity, i32, i32)>>;
 
 use crate::events::EventLog;
-use crate::registry::{BlockRegistry, BuildingRegistry, QuartierRegistry, StreetRegistry};
+use crate::registry::{
+    BlockRegistry, BuildingRegistry, QuartierId, QuartierRegistry, StreetRegistry,
+};
 use crate::rng::create_rng;
 use crate::systems::decisions::UtilityConfig;
 use crate::tile_map::{PathWorkspace, TileMap};
@@ -103,6 +106,11 @@ pub struct GisTables {
     pub quartiers: QuartierRegistry,
     /// Active SoDUCo snapshot year for occupant display.
     pub active_year: u16,
+    // LOD zone classification (keyed by quartier, not entity)
+    /// Current LOD zone per quartier. Updated once per frame.
+    pub lod_zones: HashMap<QuartierId, LodZone>,
+    /// Zone transitions detected during the last recompute.
+    pub lod_transitions: Vec<LodTransition>,
     // Per-entity GIS links
     pub home_buildings: HashMap<Entity, HomeBuilding>,
     pub workplaces: HashMap<Entity, Workplace>,
@@ -117,6 +125,8 @@ impl GisTables {
             streets: StreetRegistry::new(),
             quartiers: QuartierRegistry::new(),
             active_year: 1845,
+            lod_zones: HashMap::new(),
+            lod_transitions: Vec::new(),
             home_buildings: HashMap::new(),
             workplaces: HashMap::new(),
         }
@@ -125,6 +135,28 @@ impl GisTables {
     fn remove(&mut self, entity: &Entity) {
         self.home_buildings.remove(entity);
         self.workplaces.remove(entity);
+    }
+
+    /// Recompute LOD zones for all quartiers based on camera position.
+    /// Detects transitions (zone changes) and writes them to `lod_transitions`.
+    pub fn recompute_lod_zones(&mut self, cam_x: i32, cam_y: i32, force_statistical: bool) {
+        self.lod_transitions.clear();
+        for (&qid, qdata) in &self.quartiers.quartiers {
+            let new_zone = if force_statistical {
+                LodZone::Statistical
+            } else {
+                lod::classify_quartier(qdata, cam_x, cam_y)
+            };
+            let old_zone = self.lod_zones.get(&qid).copied();
+            if old_zone != Some(new_zone) {
+                self.lod_transitions.push(LodTransition {
+                    quartier: qid,
+                    from: old_zone.unwrap_or(LodZone::Statistical),
+                    to: new_zone,
+                });
+            }
+            self.lod_zones.insert(qid, new_zone);
+        }
     }
 }
 

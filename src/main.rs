@@ -13,6 +13,7 @@ use wulfaz::components::Tick;
 use wulfaz::font;
 use wulfaz::loading;
 use wulfaz::loading_gis;
+use wulfaz::lod;
 use wulfaz::panel;
 use wulfaz::render;
 use wulfaz::settings::Settings;
@@ -221,8 +222,6 @@ impl GpuState {
 /// Simulation tick rate — matches Dwarf Fortress default FPS_CAP:100.
 const SIM_TICKS_PER_SEC: f64 = 100.0;
 const SIM_TICK_INTERVAL: f64 = 1.0 / SIM_TICKS_PER_SEC;
-/// Cap simulation catch-up to avoid spiral of death after long pauses.
-const MAX_TICKS_PER_FRAME: u32 = 5;
 
 struct Camera {
     x: i32,
@@ -1150,17 +1149,37 @@ impl ApplicationHandler for App {
                             }
                         } else if !self.paused {
                             // Realtime: fixed-timestep simulation (UI-I03: pause + speed)
+                            let speed_config =
+                                lod::SPEED_CONFIGS[(self.sim_speed as usize).clamp(1, 5) - 1];
+                            let max_ticks = lod::max_ticks_for_speed(&speed_config);
+
+                            // Recompute LOD zones once per frame before ticking.
+                            self.world.gis.recompute_lod_zones(
+                                self.camera.x,
+                                self.camera.y,
+                                speed_config.force_statistical,
+                            );
+
                             let now = Instant::now();
                             let dt = now.duration_since(self.last_frame_time).as_secs_f64();
                             self.last_frame_time = now;
-                            self.tick_accumulator += dt * self.sim_speed as f64;
 
-                            while self.tick_accumulator >= SIM_TICK_INTERVAL
-                                && sim_ticks_this_frame < MAX_TICKS_PER_FRAME
-                            {
-                                run_one_tick(&mut self.world);
-                                self.tick_accumulator -= SIM_TICK_INTERVAL;
-                                sim_ticks_this_frame += 1;
+                            if speed_config.time_mult == 0.0 {
+                                // Speed 5: bypass accumulator, run max ticks unconditionally.
+                                for _ in 0..max_ticks {
+                                    run_one_tick(&mut self.world);
+                                    sim_ticks_this_frame += 1;
+                                }
+                                self.tick_accumulator = 0.0;
+                            } else {
+                                self.tick_accumulator += dt * speed_config.time_mult;
+                                while self.tick_accumulator >= SIM_TICK_INTERVAL
+                                    && sim_ticks_this_frame < max_ticks
+                                {
+                                    run_one_tick(&mut self.world);
+                                    self.tick_accumulator -= SIM_TICK_INTERVAL;
+                                    sim_ticks_this_frame += 1;
+                                }
                             }
                         } else {
                             // Paused: keep frame time current to avoid tick burst on unpause.

@@ -41,11 +41,7 @@ Goal: ~200 entities with full AI on the real map.
 Goal: Full city population. ~4K active, rest statistical.
 Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
 
-- **SCALE-C02** — LOD zone framework. Active/Nearby/Statistical derived from camera + district bounds. Needs: C01 (done). Blocks: C03, C05.
-  - Must accept a `force_statistical: bool` override (from speed settings). When true, all zones become Statistical regardless of camera position. Used by speeds 3-5 in the non-linear speed model (see `SURVIVAL_MIGRATION.md` §1.1b).
-  - Zone transitions triggered by both camera movement AND speed changes. Speed increase (1→3) = dehydrate all. Speed decrease (3→1) = hydrate around camera.
-
-- **SCALE-C03** — Zone-aware system filtering. Needs: C02.
+- **SCALE-C03** — Zone-aware system filtering. Needs: C02 (done).
   - Active only: combat, wander/pathfinding, eating (Phase 4 action systems).
   - Active+Nearby: survival (digestion/thirst/vitamins/stim), fatigue, decisions.
   - Statistical: no per-entity iteration. All simulation via `run_district_stats()`.
@@ -66,7 +62,7 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
   - These aggregates are seeded during dehydration (D02) from collapsing entity state, and sampled during hydration (D01) to rebuild entity survival snapshots.
   - **Statistical death picks real entity IDs.** When the district model determines N deaths this tick, it selects N `SleepingEntity` records from the district roster (weighted by vulnerability — lowest `stored_kcal`, highest `thirst`) and marks them `dead: true`. This ensures identity consistency: a specific named person dies, not an abstract population decrement. Dead sleepers are never hydrated.
 
-- **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02, C04, A07 (done). **BLOCKED: design review required.**
+- **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02 (done), C04, A07 (done). **BLOCKED: design review required.**
   - Procedural population generation rules (for the 96% not in directories):
     - **Concierge**: every building with >4 floor tiles gets one. Ground floor.
     - **Shopkeeper household**: for each directory-listed person, generate spouse + 1-4 children + 0-1 apprentice. Place on ground floor and first upper floor.
