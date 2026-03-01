@@ -54,12 +54,29 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
   - Per-district density derivable from: building count, total building area (SUPERFICIE sum), and occupant count from building registry (baked in by A07).
 
 - **SCALE-C02** — LOD zone framework. Active/Nearby/Statistical derived from camera + district bounds. Needs: C01. Blocks: C03, C05.
+  - Must accept a `force_statistical: bool` override (from speed settings). When true, all zones become Statistical regardless of camera position. Used by speeds 3-5 in the non-linear speed model (see `SURVIVAL_MIGRATION.md` §1.1b).
+  - Zone transitions triggered by both camera movement AND speed changes. Speed increase (1→3) = dehydrate all. Speed decrease (3→1) = hydrate around camera.
 
-- **SCALE-C03** — Zone-aware system filtering. Combat: Active only. Hunger: Active+Nearby. Statistical: no entity iteration. Needs: C02.
+- **SCALE-C03** — Zone-aware system filtering. Needs: C02.
+  - Active only: combat, wander/pathfinding, eating (Phase 4 action systems).
+  - Active+Nearby: survival (digestion/thirst/vitamins/stim), fatigue, decisions.
+  - Statistical: no per-entity iteration. All simulation via `run_district_stats()`.
+  - Temperature (Phase 1) runs per-chunk with dirty flags — zone filtering is chunk-level, not entity-level.
+  - Note: "Hunger" system is deleted by survival migration. This item refers to the replacement `run_survival()` system.
 
 - **SCALE-C04** — District aggregate model + `run_district_stats`. Population, avg needs, death rates, resource flows as equations. Needs: C01, A07 (done). **BLOCKED: design review required.**
   - Seed `population_by_type` from NAICS distribution per quartier. 22 industry categories. Aggregate from building registry occupant data (baked in by A07 preprocessor), not from raw GeoPackage.
   - City-wide distribution (1845): Manufacturing 18%, Food stores 13.5%, Clothing 11.7%, Furniture 8.2%, Legal 5.9%, Health 5.5%, Rentiers 4.5%, Arts 3.9%, Construction 3.6%. Use these as priors, adjust per quartier from actual registry data.
+  - **Survival aggregates (required for speeds 3-5):** Each district must track aggregate survival state sufficient to model calorie burn, food consumption, and death without per-entity simulation. Minimum fields per district:
+    - `population: u32` — current living population
+    - `avg_stored_kcal: f32` — mean calorie reserves (tracks weight/starvation)
+    - `avg_thirst: f32` — mean thirst level
+    - `food_supply: f32` — abstract food availability (produced/consumed per tick)
+    - `water_supply: f32` — abstract water availability
+    - `death_rate: f32` — deaths per survival tick from starvation/dehydration
+  - District survival equation (per survival tick): `avg_stored_kcal += food_intake - bmr_burn`. When `avg_stored_kcal` drops below starvation thresholds, `death_rate` increases and `population` decreases. Exact equations TBD during design review — must produce results consistent with per-entity simulation over the same time period.
+  - These aggregates are seeded during dehydration (D02) from collapsing entity state, and sampled during hydration (D01) to rebuild entity survival snapshots.
+  - **Statistical death picks real entity IDs.** When the district model determines N deaths this tick, it selects N `SleepingEntity` records from the district roster (weighted by vulnerability — lowest `stored_kcal`, highest `thirst`) and marks them `dead: true`. This ensures identity consistency: a specific named person dies, not an abstract population decrement. Dead sleepers are never hydrated.
 
 - **SCALE-C05** — Statistical population seeding. Every district outside active zone gets aggregate population. Needs: C02, C04, A07 (done). **BLOCKED: design review required.**
   - Procedural population generation rules (for the 96% not in directories):
@@ -76,8 +93,30 @@ Census population 1846: 1,034,196. Directory-listed people: 38,188 (3.7%).
 
 Goal: Camera movement smoothly activates/deactivates zones.
 
-- **SCALE-D01** — Hydration. Statistical → active: spawn entities from distribution at building positions. Batch ~100/tick. Needs: C05, B03.
-- **SCALE-D02** — Dehydration. Active → statistical: collapse to district averages. Nearby zone buffers for ~200 ticks. Needs: C02.
+- **SCALE-D01** — Hydration. Sleeping → Active: reconstitute entities at building positions. Batch ~100/tick. Needs: C05, B03.
+  - Triggered by: camera entering district range OR speed decrease (3→1, 3→2).
+  - Look up `SleepingEntity` records for the district. Skip any with `dead: true`. For each living sleeper:
+    - Re-insert into `alive` set using the **same Entity ID** (identity preserved).
+    - Rebuild full component state from compact snapshot: `stored_kcal` → `BodyComposition`, `thirst` → `Thirst`, `health` → `Health`. Plus identity fields from the record: `name`, `home_building`, `occupation`.
+    - Stomach/guts start empty (mid-digestion state not preserved in snapshot).
+    - Vitamins at midpoint (insufficient per-entity data in snapshot).
+    - Position: entity's `home_building` tile from building registry.
+  - Remove reconstituted entities from the sleeping roster.
+  - Update district aggregate (C04): subtract reconstituted population from district stats.
+- **SCALE-D02** — Dehydration. Active → Sleeping: snapshot and suspend entities. Nearby zone buffers for ~200 ticks. Needs: C02.
+  - Triggered by: camera leaving district range OR speed increase (1→3, 2→3+).
+  - For each active entity in the dehydrating district:
+    - Write a `SleepingEntity` record preserving: Entity ID, name, home_building, occupation, stored_kcal, thirst, health. Dead flag = false.
+    - Remove from `alive` and all property tables (same as `despawn()` but entity is NOT dead — it's sleeping).
+    - Do NOT reuse the Entity ID. `next_entity_id` is not affected.
+  - Compute district aggregates from the snapshot data (mean stored_kcal, mean thirst, population count) and feed into C04.
+  - **Sleeping entity storage:** `SleepingEntity` records live in a new `HashMap<Entity, SleepingEntity>` on World (or on `GisTables`, grouped by district). ~100 bytes per entity × 1M population ≈ 100MB. Bounded.
+- **Sleeping entity model** (cross-cutting D01/D02/C04):
+  - Three-tier entity lifecycle: **Active** (in `alive`, full component state) ←→ **Sleeping** (compact record, no components) → **Dead** (removed entirely).
+  - Entity IDs are permanent. `Entity(47392)` is always the same person regardless of lifecycle tier.
+  - `despawn()` is for Active entity death only. Sleeping entities bypass it.
+  - Statistical death (C04): when the district model rolls deaths, it picks sleeping entity IDs from the district roster, marks them `dead: true`, and decrements district population. Dead sleepers are never hydrated. They can be pruned periodically or retained for historical records.
+  - The player entity is never dehydrated. Optionally, a small set of "important" entities (quest targets, historical figures the player has interacted with) can be exempt from dehydration.
 - **SCALE-D03** — HPA* pathfinding. Chunk-level nav graph, border nodes, precomputed intra-chunk paths. Replaces B04. Needs: A02 (done).
 - **SCALE-D04** — Profile and tune. Zone radii, hydration batch size, tick budget per zone, entity count limits.
 
@@ -91,10 +130,10 @@ All ARCH items implemented. ARCH-001 through ARCH-007 completed and deleted from
 
 Developable on test map or integrated after Phase B.
 
-- **SIM-001** — Plant growth (Phase 1). Food regeneration. Garden tiles only (24 in dataset). Needs: B05 (garden placement).
-- **SIM-002** — Thirst (Phase 2). Requires Water tiles (Seine) and fountains (3 named "Fontaine" buildings + "Pompe de la Samaritaine" in data).
+- **SIM-001** — Plant growth (Phase 1). Food regeneration. Garden tiles only (24 in dataset). Needs: B05 (garden placement). **BLOCKED: design review required — using CDDA implementation as reference.**
+- **SIM-002** — Thirst (Phase 2). Requires Water tiles (Seine) and fountains (3 named "Fontaine" buildings + "Pompe de la Samaritaine" in data). **BLOCKED: design review required — using CDDA implementation as reference.**
 - **SIM-003** — Decay (Phase 1). Corpse decomposition.
-- **SIM-004** — Tiredness/sleep (Phase 2). Rest cycles. Entities return to their home building.
+- **SIM-004** — Tiredness/sleep (Phase 2). Rest cycles. Entities return to their home building. **BLOCKED: design review required — using CDDA implementation as reference.**
 - **SIM-005** — Injury (Phase 5). Non-binary damage states.
 - **SIM-006** — Weather (Phase 1). Rain/drought/cold.
 - **SIM-007** — Emotions/mood (Phase 2). Aggregate need state.
